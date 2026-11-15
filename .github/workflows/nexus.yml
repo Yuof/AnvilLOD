@@ -59,8 +59,8 @@ jobs:
           file_id: ${{ vars.NEXUSMODS_FILE_ID_WINDOWS }}
           filename: ${{ steps.release.outputs.windows }}
           version: ${{ steps.release.outputs.version }}
-          display_name: PenguLOD for Windows
-          description: The LOD generator for Windows 10 and 11 (x64). Extract it to its own folder and run PenguLOD.Desktop.exe.
+          display_name: PenguLOD Windows x64
+          description: PenguLOD for Windows
           category: main
           archive_existing_version: 'true'
           primary_mod_manager_download: 'false'
@@ -73,8 +73,8 @@ jobs:
           file_id: ${{ vars.NEXUSMODS_FILE_ID_LINUX }}
           filename: ${{ steps.release.outputs.linux }}
           version: ${{ steps.release.outputs.version }}
-          display_name: PenguLOD for Linux
-          description: The LOD generator for x64 Linux. Extract it to its own folder and run run-pengulod.sh.
+          display_name: PenguLOD Linux x64
+          description: PenguLOD for Linux
           category: main
           archive_existing_version: 'true'
           primary_mod_manager_download: 'false'
@@ -90,7 +90,7 @@ jobs:
           filename: ${{ steps.release.outputs.skse }}
           version: ${{ steps.release.outputs.version }}
           display_name: PenguLOD SKSE Plugin
-          description: The in-game plugin for dynamic LOD and the quality controls. Install it with your mod manager and choose your Skyrim version.
+          description: PenguLOD SKSE Plugin. Install with mod manager.
           category: main
           archive_existing_version: 'true'
           primary_mod_manager_download: 'true'
