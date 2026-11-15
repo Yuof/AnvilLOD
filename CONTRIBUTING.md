@@ -1,96 +1,91 @@
 # Contributing to PenguLOD
 
-Use a branch from `main`, keep changes focused, and include the relevant validation in your pull
-request. Preserve upstream copyright notices and test both current output and supported legacy input. Report bugs with
-the PenguLOD version, distribution, workflow stage, settings needed to reproduce it, and a relevant
-log excerpt. Use synthetic fixture names and portable example paths. Do not commit game/mod
-assets, personal profiles, local benchmarks, session notes or assistant context files.
-Document supported behavior and reproducible procedures; keep debugging history in focused issues.
+- Branch from `main`, keep each change focused, and open a pull request.
+- Say in the pull request how you tested the change.
+- Keep upstream copyright notices.
+- Do not commit game or mod assets, personal profiles, logs or local settings. Tests use
+  synthetic fixtures only.
+- Update the user documentation when behaviour changes. Describe what the user does and
+  sees, not how the code works.
 
-## Linux development
+Report bugs in [GitHub issues](https://github.com/opteron-x86/PenguLOD/issues). See
+[what to include](docs/TROUBLESHOOTING.md#report-a-problem).
 
-Install the .NET 10 SDK. On Ubuntu 24.04 the native dependencies are:
+## Build on Linux
+
+Install the .NET 10 SDK. On Ubuntu 24.04 the other packages are:
 
 ```bash
 sudo apt-get install g++-14 cmake ninja-build pkg-config curl patch python3 \
   zlib1g-dev liblz4-dev libtbb-dev libspdlog-dev libfmt-dev libgtest-dev \
   libfontconfig1 libx11-6 libice6 libsm6 libicu-dev xvfb \
   libvulkan-dev mesa-vulkan-drivers glslang-tools appstream
-CC=gcc-14 CXX=g++-14 bash tools/build.sh
-bash tools/test.sh
-xvfb-run -a bash tools/native-smoke.sh
 ```
 
-`tools/build.sh` builds and tests pinned FasterNGIO sources before publishing the applications.
-For a subsequent local UI-only build, `bash tools/build.sh --reuse-backend` reuses a previously
-prepared `.tools/fasterngio-runtime`. Releases always rebuild the native backend in CI.
-Set `PENGULOD_DOTNET` to use a particular SDK executable; `PENGULOD_NUGET_SOURCE` overrides
-the package source. The previous `ANVILLOD_DOTNET` and `ANVILLOD_NUGET_SOURCE` build variables remain accepted.
+Then:
 
-Set `PENGULOD_PACKAGE_DIR="$PWD/dist/candidate/linux-x64"` for an isolated package build.
-The build and AppImage scripts accept this override; it must be a `linux-x64` folder
-under `dist/`. `bash tools/package-appimage.sh` requires `appstreamcli` and validates
-the installed metadata, desktop entry and icon before packaging.
+```bash
+bash tools/test.sh                           # all tests
+CC=gcc-14 CXX=g++-14 bash tools/build.sh     # package in dist/linux-x64
+xvfb-run -a bash tools/native-smoke.sh       # start the built desktop
+bash tools/package-appimage.sh               # AppImage, optional
+```
 
-The core tests exercise engine fixtures; desktop tests use Avalonia’s rendered headless platform.
-`tools/native-smoke.sh` additionally checks the actual Linux windowing backend. Optional tests
-that require a real game profile are skipped by default. Keep live generation separate from builds:
-start the app from a portable folder that the build will not overwrite.
+- `bash tools/build.sh --reuse-backend` skips rebuilding the grass generator after the
+  first build.
+- `PENGULOD_DOTNET` selects a specific `dotnet` executable.
+- `PENGULOD_PACKAGE_DIR` builds into another `linux-x64` folder under `dist/`. Use it when
+  a copy of the app is running from `dist/linux-x64`.
+- `bash tools/test.sh --smoke-settings /path/to/preset.json` also runs a desktop test
+  against a real game profile. It writes to the output folders named in that preset.
 
-For an optional game-backed desktop test, export a preset with dedicated output and cache
-folders, then run `bash tools/test.sh --smoke-settings /path/to/test-preset.json`.
-This test writes to those folders. Screenshots and TRX results are saved under `.artifacts/`.
+## Build on Windows
 
-Binary packages include an explicit set of user guides from `tools/build.sh`. Keep their
-relative links valid inside the extracted package. Contributor and release-maintenance
-documentation stays in the source checkout. Source bundles retain build inputs, patches,
-dependency pins and licenses, excluding local tooling and assistant instructions.
-
-## Windows development
-
-Install .NET 10 SDK, PowerShell 7.4+, Python 3.12+, Git for Windows, CMake 3.28+,
-Ninja and Visual Studio 2026 C++ build tools with the Windows SDK. Run from PowerShell:
+Install the .NET 10 SDK, PowerShell 7.4 or newer, Python 3.12 or newer, Git, CMake 3.28 or
+newer, Ninja, and the Visual Studio 2026 C++ build tools with the Windows SDK. From
+PowerShell:
 
 ```powershell
-./tools/build-native-windows.ps1
+./tools/build-native-windows.ps1     # grass generator and texture helper
 ./tools/test-windows.ps1
-./tools/build-windows.ps1 -ReuseBackend
+./tools/build-windows.ps1 -ReuseBackend   # package in dist/win-x64, and the ZIP
 ./tools/windows-smoke.ps1
 ```
 
-`build-windows.ps1` without `-ReuseBackend` also builds and tests the native components.
-The build fetches checksum-pinned FasterNGIO sources and a pinned vcpkg baseline from
-`tools/windows/vcpkg.json`. Dependencies use the static MSVC runtime. Native builds stay
-under `.tools/`; the self-contained desktop/CLI and ZIP are written under `dist/`.
-Use a separate extracted package for a running application because rebuilding replaces
-`dist/win-x64`. The smoke test opens the real Avalonia Win32 window with isolated settings.
+`build-windows.ps1` without `-ReuseBackend` builds the native parts as well.
 
-The test grass process is a small .NET executable shared by both platforms, so failure,
-Unicode/space-containing paths, process cancellation and output recovery are exercised
-on Windows as well as Linux. Optional game-profile tests remain opt-in.
+## Build the SKSE plugin
+
+On Windows:
+
+```powershell
+./skse/build.ps1 -Line all     # or -Line 1, -Line 17, -Line vr
+python tools/package-runtime.py
+```
+
+The builds go to `dist/runtime`. `bash tools/test-runtime.sh` runs the plugin's tests on
+Linux without Skyrim.
 
 ## Source layout
 
-- `src/PenguLOD.Desktop`: PenguLOD Avalonia UI and services.
-- `src/PenguLOD.Configuration`: desktop/CLI presets, validation and request construction.
-- `src/PenguLOD.Cli`: PenguLOD command-line entry point.
-- `src/PenguLOD.Core`, `Plugins`, `Meshes`, `Textures`: shared engine.
-- `tools/fasterngio`: pinned native grass backend patches and packaging.
-- `native/texture-compute`: optional headless Vulkan BC7 helper.
-- `tests`: engine and desktop regression fixtures.
-- `skse`: PenguLOD game-runtime plugin, versioned with the generator through `VERSION`.
+| Path | Contents |
+| --- | --- |
+| `src/PenguLOD.Desktop` | Desktop interface |
+| `src/PenguLOD.Cli` | Command-line program |
+| `src/PenguLOD.Configuration` | Presets, validation and request building shared by both |
+| `src/PenguLOD.Core`, `Plugins`, `Meshes`, `Textures` | Generation engine |
+| `native/texture-compute` | Optional Vulkan texture encoder |
+| `tools/fasterngio` | Patches and build scripts for the grass generator |
+| `skse` | SKSE plugin |
+| `tests` | Engine and desktop tests |
+| `packaging` | Files copied into the packages |
 
-Use `PenguLOD.slnx` for the managed solution. Product-owned names use PenguLOD;
-keep legacy identifiers only in compatibility readers, tests and upstream attribution.
-The Avalonia desktop is shared by Linux and Windows.
+Open `PenguLOD.slnx` for the .NET projects.
 
-Build a runtime DLL on Windows with `./skse/build.ps1 -Line 1`, `-Line 17` or `-Line vr`.
-`-Line all` builds all three. These commands write to `dist/runtime` and never install into a game.
-`python tools/package-runtime.py` assembles the FOMOD after all three builds: the DLLs, the
-installer and license notices. It contains no source archives, which mod sites reject. `bash tools/test-runtime.sh` checks path selection and INI migration
-on Linux without requiring Skyrim.
+The guides shipped in the packages are listed in `tools/build.sh` and
+`tools/build-windows.ps1`. Add a new user guide to both lists.
 
-## Upstream synchronization
+## Merging changes from AnvilLOD
 
 ```bash
 git remote add upstream https://github.com/CageTV/AnvilLOD.git  # once
@@ -99,7 +94,7 @@ git switch -c upstream/anvillod-next
 git merge --no-ff <upstream-tag>
 ```
 
-Keep PenguLOD’s `VERSION`, branding and cross-platform workflow when resolving conflicts; update
-`UPSTREAM_VERSION` and `docs/PROVENANCE.md` to record the integrated upstream version.
-Check desktop defaults against engine changes. Run relevant local tests and require both platform builds in CI.
-See [RELEASING.md](docs/RELEASING.md) for version/tag conventions.
+Keep PenguLOD's `VERSION`, names and cross-platform build when resolving conflicts. Update
+`UPSTREAM_VERSION` and the AnvilLOD version named in `docs/PROVENANCE.md`.
+
+Releases are described in [docs/RELEASING.md](docs/RELEASING.md).

@@ -61,11 +61,19 @@ Game plugin
   cannot run there. Every 1.5 and 1.6 version now uses the first build; the second is for
   Skyrim 1.7 and newer. The installer options name the GOG version.
 
+Packages and documentation
+
+- The Windows package no longer includes debug symbols for third-party libraries. The ZIP
+  is about 25 MB smaller and the extracted folder about 105 MB smaller.
+- The documentation is shorter and organised around what to do. The pipeline, diagnostics,
+  texture compute, materials, atlases, model support, packaging and roadmap pages are gone;
+  their instructions are in the user guide, the stage guides and troubleshooting.
+- The SKSE package's README now explains how to install the plugin.
+
 ## [0.6.0-beta.1] - 2026-11-13
 
-The first beta. A full run of grass, textures, terrain and object LOD over 85 worldspaces
-of a 2,044-plugin load order now takes about 35 minutes on a 32-thread machine with NVMe
-storage; terrain alone went from 70 minutes to under 7.
+The first beta. Terrain is now built on every worker thread and is several times faster on
+multi-core machines.
 
 Terrain
 

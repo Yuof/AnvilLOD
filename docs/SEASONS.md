@@ -1,58 +1,50 @@
-# Seasonal generation
+# Seasons
 
-Enable **Seasons** for LOD and **Generate seasonal terrain** on the Terrain page; they
-share the same preset setting. Generate tree textures first using the same profile.
-Texture generation includes winning replacement TREE records, even when those records
-are not directly placed in the default world.
+With [Seasons of Skyrim](https://github.com/powerof3/SeasonsOfSkyrim) installed, PenguLOD
+can generate winter, spring, summer and autumn versions of terrain, tree, object and grass
+LOD.
 
-PenguLOD reads `Data/Seasons/*_WIN.ini`, `_SPR.ini`, `_SUM.ini` and `_AUT.ini` in the order
-Seasons of Skyrim applies them: `MainFormSwap_<SEASON>.ini` first, then every other file in
-case-sensitive name order. Later entries override earlier ones, including identity entries
-that undo a swap, so a mod's INI overrides `MainFormSwap` even when its name sorts first.
-`[Trees]` and `[LandTextures]` accept EditorIDs and `0xLocalID~Plugin.esp` references.
+## Generate seasonal LOD
 
-A line naming a record that is not in the load order (an optional plugin that is not
-installed, say) is skipped and reported as a warning, as the game skips it. Turn on
-**Strict seasonal swaps** (CLI `--seasons-strict`) to stop generation instead. Seasonal grass
-caching always treats such lines as errors. A season whose INIs change nothing gets no
-seasonal terrain, tree or object LOD files; the game then uses the normal LOD, which is
-identical. A seasonal tree without a billboard is reported as a warning, and its trees
-keep their base LOD in that season; regenerate textures with the same profile to add it.
-With strict seasonal swaps it stops generation instead.
+1. Make sure the seasonal swap files (`Data/Seasons/*_WIN.ini`, `_SPR.ini`, `_SUM.ini`,
+   `_AUT.ini`) are in your enabled mods.
+2. Turn on **Seasonal LOD** on Object LOD. It is the same switch as **Generate seasonal
+   terrain from Seasons of Skyrim swaps** on Terrain.
+3. For seasonal grass, set **Seasons** on the Grass cache page to **Auto** or **On**.
+4. Run textures, terrain and object LOD, in that order. Tree billboards must be generated
+   with the same profile.
 
-For each configured season, terrain emits `.WIN.btr`, `.WIN.dds`, `.WIN_n.dds` (and the
-equivalent other suffixes). Tree LOD emits seasonal `.btt`, `.lst`, and tree atlas files.
-Trees in object LOD receive replacement 3D models within the configured geometry budgets,
-or replacement billboard cards. The native full-model fallback respects its setting.
-Object swaps use the replacement record’s texture variant and snow/ash material, and validate both the record type and its required LOD models. Failed seasonal
-blocks stop publication, preserving the previous LOD output. Grass uses the matching
-seasonal `.cgid` files and their GRAS billboards. Filenames follow the
-[Seasons of Skyrim loader](https://github.com/powerof3/SeasonsOfSkyrim/blob/master/include/LODSwap.h).
+A season whose swap files change nothing gets no seasonal files. The game then shows the
+normal LOD, which is identical.
 
-Terrain shape/water heights do not change with a material swap, so terrain-shadow
-heightmaps are shared. Areas without source LAND use installed seasonal terrain textures
-when available and otherwise retain default terrain, with a warning. Missing landscape
-data cannot be reconstructed as seasonal layers from a baked default texture.
+## Automatic winter swaps
 
-Runtime-generated winter swaps must first be saved by Seasons of Skyrim as INIs and
-available to the selected profile. The terrain/tree/object stages do not execute SKSE or
-recreate its automatic snow rules. The bundled FasterNGIO grass backend can derive automatic
-winter swaps; save the runtime's matching `MainFormSwap_WIN.ini` before generating the other
-stages so they can use those replacements too. Dynamic shader snow remains a runtime effect.
+Seasons of Skyrim can work out winter swaps while the game runs. PenguLOD only reads swaps
+that have been written to an INI. Let Seasons of Skyrim save `MainFormSwap_WIN.ini`, and
+make sure that file is in the selected profile, before you generate.
 
-Follow [the transition checks](DIAGNOSTICS.md#repeatable-checks) in each configured season.
-Compare loaded-cell textures and trees with the corresponding distant output.
+## Swaps that name a missing record
 
-Diagnostics lists resolved and unresolved entries by season and record category. Unknown
-entries are warnings; with strict seasonal swaps (or seasonal grass caching) those affecting
-a selected stage block it. The report also counts installed seasonal grass cells and identifies gaps:
-a missing seasonal cell retains default grass, while a seasonal cell without a default
-cache cannot enter the LOD grid. Rebuild grass caches before generating LOD when these
-counts differ unexpectedly.
+A swap line that names a record not in your load order is skipped with a warning, as the
+game does. Turn on **Strict seasonal swaps** to stop the run instead. The grass cache stage
+always treats such a line as an error.
 
-After a successful pipeline, `seasonal-output.json` in the saved job folder counts terrain
-tiles, object blocks, tree blocks and generated grass cells for Default/WIN/SPR/SUM/AUT.
-Tree blocks are zero when trees are entirely in object LOD. Grass counts refer to the
-selected grass generation stage; externally installed caches are checked in diagnostics.
-The same counts appear in the pipeline log and CLI JSON. Seasonal INI contents participate
-in checkpoint fingerprints, even if file size and timestamps are unchanged.
+## Seasonal trees without a billboard
+
+A swap to a tree that has no billboard is reported as a warning, and those trees keep
+their normal LOD in that season. Generate tree billboards with the same profile to add
+it. **Strict seasonal swaps** stops the run instead.
+
+## Check the result
+
+- `seasonal-output.json` in the run folder counts the terrain tiles, object blocks, tree
+  blocks and grass cells written for each season.
+- If the run reports missing seasonal tree billboards, run textures again.
+- In game, compare nearby and distant trees and ground in each season you use.
+
+## Limits
+
+- Terrain shape and water level do not change with the season.
+- Where plugins have no landscape and existing terrain LOD is used, that area keeps its
+  default appearance unless seasonal terrain textures are installed.
+- Snow drawn by a shader while the game runs is not part of LOD.

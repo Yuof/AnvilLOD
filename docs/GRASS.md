@@ -1,69 +1,54 @@
-# Grass caching
+# Grass cache
 
-The **Grass cache** page runs the bundled FasterNGIO CPU backend offline. Generation
-does not launch Skyrim or Wine. Loading a cache in game still requires the appropriate
-NGIO/runtime configuration; PenguLOD does not change game-side grass or shader settings.
+The grass cache stage works out where grass grows and saves it. The game does not need to
+be running. To load the result, the game needs a grass cache mod such as NGIO; PenguLOD does
+not change game or shader settings.
+
+Grass caching supports Skyrim SE and AE, not VR.
 
 ## Generate a cache
 
-1. Select the game source and profile on **Game & resources**.
-2. On **Grass cache**, choose a separate output mod folder, such as
-   `~/PenguLOD-output/Grass`. The application creates `grass/` inside it.
-3. Leave worldspaces at `all`, or enter editor IDs such as `Tamriel`. This selection
-   is independent of Overview's LOD worldspace selection.
-4. Choose placement and collision settings. **Smooth** is the backend default;
-   **Vanilla** follows the engine's placement algorithm. Automatic collision rejection
-   uses the winning NGIO configuration. The bundled backend supports CPU rejection.
-5. Generate, review warnings, then install the completed folder as a separate mod.
-   Disable the previous cache mod and replace caches instead of merging their files.
+1. Choose the game source and profile on **Game & resources**.
+2. On **Grass cache**, set **Grass cache output** to an empty folder of its own. PenguLOD
+   creates the `grass` folder inside it.
+3. Leave **Worldspaces** at `all`, or click **Choose…** to pick some. This selection is
+   separate from the terrain and object LOD worldspaces.
+4. Choose **Placement**: **Smooth** (the default) or **Vanilla**, which follows the game's
+   own placement.
+5. Click **Generate grass cache**, or tick **Grass cache** on **Overview** to run it with
+   the other stages.
+6. Install the output folder as a mod and disable the previous cache mod. Do not merge two
+   caches.
 
-The backend reads winning plugins, meshes, profile/plugin INIs, `GrassControl.ini`,
-`*_NGIO.ini` and Seasons configuration through a temporary Data view. Missing enabled
-plugins or mod folders stop preparation. Source files remain unchanged.
+A missing plugin or mod folder stops the run before it starts. Your source files are never
+changed.
 
-Windows uses hard links for staging where possible, without requiring administrator
-rights. If files are on another drive and symlinks are unavailable, affected inputs
-are copied temporarily; preparation reports this and remains cancellable. Place grass
-output on the same NTFS volume as most source mods to reduce temporary disk usage.
-Read-only source files are copied so cleanup never changes their attributes.
+## Use the cache for grass LOD
 
-**Advanced** offers a GrassControl.ini override, minimum grass size override (0 inherits
-settings), writer threads, experimental render-geometry rejection and an external native
-FasterNGIO executable. Worker limits follow Preferences. A compatible external GPU build
-can use Vulkan ray tracing; the bundled build is CPU only. Grass caching supports SE/AE;
-VR grass caching is not supported.
+Turn on **Use generated grass cache for LOD** so object LOD reads the new cache. A run that
+includes both stages does this automatically.
 
-## Preview and reuse
+Generate the cache again after changing the plugin order, grass mods, landscape or placement
+settings.
 
-For a small preview, choose one worldspace, enable **Small-area preview**, and select
-cell coordinates and a radius. Radius 0 selects one cell; radius 1 selects a 3×3 square.
-Use a separate preview output. Previews cannot replace a full cache or feed a full LOD run.
+## Preview a small area
 
-After a full successful run, **Use generated grass cache for LOD** lets generation read
-the new cache directly, suppressing older installed grass files. Changed plugin order,
-grass models, landscape, placement settings or generated files require regeneration.
+1. Pick one worldspace.
+2. Turn on **Small-area preview** and set the cell coordinates and radius. Radius 0 is one
+   cell; radius 1 is a 3 × 3 area.
+3. Use a separate output folder.
 
-Grass LOD packs billboards for types that have instances in the selected cache cells.
-When seasons are enabled, matching seasonal cells contribute their grass types too.
-Unused grass-library records do not require textures. Missing textures needed by a used
-model still stop generation; atlas preparation reports these before the occlusion pass.
-Generated HD billboards give the two crossed grass cards separate front/side atlas regions
-without adding geometry or density tiers. Normal maps use the same layout and normalized
-mipmaps. See [billboard settings](TEXTURES.md#hd-billboards-and-complex-grass) for packed
-complex-grass inputs and shader limits.
+A preview cannot replace a full cache or feed a full LOD run.
 
-## Progress and validation
+## Advanced settings
 
-Logs report preparation, cells processed, files written and elapsed time. The backend
-warns after two minutes without progress during generation or final writes; the warning
-does not abort the job. Total duration depends on worldspaces, assets, workers and storage.
+**Advanced grass settings** has a `GrassControl.ini` override, a minimum grass size, writer
+threads and an external FasterNGIO executable. The bundled generator rejects grass inside
+objects on the CPU; GPU rejection needs a compatible external build. The
+[settings reference](SETTINGS.md#grass-cache) describes each option.
 
-Generated CGID files are checked for format, finite coordinates and complete contents.
-Unrepresentable placements are omitted with a warning identifying the cell. Missing
-models and fallback block sizes are also reported. Format validation does not establish
-visual placement accuracy; inspect the cache in game.
+## Windows disk use
 
-Only validated output is published, with `PenguLOD.grass.json`, settings, hashes and the
-backend log. A previous owned cache is retained in a sibling `.previous-…` folder.
-Failed or cancelled runs preserve published output. **Cancel job** stops the backend
-and removes its staging files. See [pipeline recovery](PIPELINE.md) for interrupted jobs.
+On Windows, put the grass output on the same drive as most of your mods. PenguLOD links
+source files into a temporary folder; files on another drive are copied instead, which
+takes time and space.

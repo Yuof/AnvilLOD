@@ -1,66 +1,50 @@
 # Resource packs
 
-PenguLOD reads compatible data directly. No DynDOLOD or TexGen executable, Wine session,
-or installed application is needed. The paths and file names identify data formats;
-resources distributed under `Data/DynDOLOD` can be consumed natively.
+A resource pack supplies LOD rules, texture recipes and render models. Packs made for
+DynDOLOD, including DynDOLOD Resources, work as they are. PenguLOD does not bundle any pack.
 
-Enabled mods are searched automatically through the selected Data/MO2 view.
-For external packs, set **Primary resource folder (optional)** and **Additional resource
-folders** on **Game & resources**. Enter additional folders one per line.
-The settings are shared between texture, LOD and mod-author tools and saved in presets.
+## Add a pack
 
-## Layouts
+- **Installed as a mod:** nothing to do. Resources in enabled mods are found automatically.
+- **Kept elsewhere:** on **Game & resources**, set **Primary resource folder**, and list
+  any others under **Additional resource folders**, one per line.
 
-A selected folder can contain `Rules`, `Configs` or `Render` directly, or wrap them in
-`DynDOLOD`, `Data/DynDOLOD` or `Edit Scripts/DynDOLOD`. Only one recognized resource root
-is used per selected folder, in that search order: `Edit Scripts/DynDOLOD`, `Data/DynDOLOD`,
-`DynDOLOD`, then the selected folder itself. Use separate entries for separate roots.
-Directory and file names are matched without regard to case on Linux and Windows.
+A folder outside your mods supplies only rules, recipes and render models. Meshes and
+textures the game needs must be installed through your mod manager.
 
-| Resource | Recognized location below the resource root |
+## Folder layout
+
+Select a folder that contains `Rules`, `Configs` or `Render`, or one that wraps them in
+`DynDOLOD`, `Data/DynDOLOD` or `Edit Scripts/DynDOLOD`. Names are matched without regard to
+case.
+
+| Resource | Location inside that folder |
 | --- | --- |
-| LOD rules | `Rules/DynDOLOD_SSE_*.ini` or legacy flat `DynDOLOD_*.ini` |
-| Texture recipes and billboard rules | `Configs/DynDOLOD_*_TexGen_*.txt` or flat files |
-| Mesh lookup | `Configs/DynDOLOD_SSE_mesh_lookup.txt` or flat file |
-| World exclusions | `Configs/DynDOLOD_SSE_mod_world_ignore.txt` or flat file |
-| Child-world copies and matches | `Configs/DynDOLOD_SSE_childworld_*.ini`, `Configs/DynDOLOD_SSE_ChildworldMatches.txt`, or flat files |
-| Object render models | `Render/Objects/**/*.nif` or `Render/Skyrim/Objects/**/*.nif` |
-| Hybrid trunk render models | `Render/Billboards/**/*_trunk.nif` or `Render/Skyrim/Billboards/**/*_trunk.nif` |
+| LOD rules | `Rules/DynDOLOD_SSE_*.ini` |
+| Texture recipes and billboard rules | `Configs/DynDOLOD_*_TexGen_*.txt` |
+| Mesh lookup | `Configs/DynDOLOD_SSE_mesh_lookup.txt` |
+| World exclusions | `Configs/DynDOLOD_SSE_mod_world_ignore.txt` |
+| Child worldspace settings | `Configs/DynDOLOD_SSE_childworld_*.ini`, `Configs/DynDOLOD_SSE_ChildworldMatches.txt` |
+| Object render models | `Render/Objects/**/*.nif` |
+| Hybrid trunk render models | `Render/Billboards/**/*_trunk.nif` |
 
-Enabled mods use the same layouts under `Data/DynDOLOD`. Legacy flat data files in the
-Data root are also accepted. Rules and recipe files still need the expected plugin-based
-names and supported syntax; discovery does not enable recipes for absent plugins.
-See [textures](TEXTURES.md), [model support](MODEL-SUPPORT.md) and [trees](TREES.md) for limits.
+The older layouts are accepted too: the same files directly in the folder, and render
+models under `Render/Skyrim/`.
 
-External folders supply configuration and render templates. Their ordinary `meshes` and
-`textures` folders are not mounted into the game view. Install required game assets through
-the selected mod manager or deployed Data folder. A pack need not contain all resource
-categories, and PenguLOD does not bundle third-party packs or alter their redistribution terms.
+## Which file wins
 
-## Precedence and reporting
+When several sources supply the same file, the last one in this list is used:
 
-For the same logical resource, later entries replace earlier ones:
+1. The primary resource folder
+2. Additional resource folders, in the order listed
+3. Enabled mods
 
-1. Primary external resource folder.
-2. Additional external folders, in their listed order.
-3. Winning enabled Data-root files.
-4. Winning files under `Data/DynDOLOD`, with structured `Rules`/`Configs` paths replacing flat aliases.
+A **Custom rule file** set on Game & resources overrides all other rules.
 
-Loose/archive and enabled-mod priority are resolved by the normal asset index first.
-For render aliases, later external packs win; enabled mod templates override external
-ones. Within the same layer, `Render/Objects` and `Render/Billboards` take precedence
-over the legacy `Render/Skyrim` versions. A custom LOD rule file remains the highest
-rule priority. File discovery and rule evaluation order are separate: plugin order and
-the selected preset still determine which rules match.
+**Scan results → Resource files** shows which file won and where it came from. The object
+LOD output records the same in `PenguLOD.resources.json`.
 
-The **Scan results → Resource files** table lists winning logical files and their sources.
-Scan JSON and texture reports include `resources`/`Resources`; generated LOD also contains
-`PenguLOD.resources.json`. Replaced sources are listed in `Overridden`. These are private
-run reports and may contain local paths. Use Diagnostics for a redacted report to share.
+## If something is missing
 
-Missing stitching recipes or object render models produce actionable preflight errors
-when those categories are selected. Invalid explicit folders are rejected; an empty
-resource setting is valid when enabled mods supply the needed data. Resource folders
-must be separate from output folders. Saved jobs fingerprint recognized external data
-files, including render models, so changes rebuild affected stages. Unrelated executables
-and folders are ignored. Source files are never modified.
+**Check setup** reports missing recipes or render models for the categories you selected. A
+recipe for a plugin that is not in your load order is ignored.

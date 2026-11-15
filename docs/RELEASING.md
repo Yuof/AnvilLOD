@@ -1,57 +1,81 @@
-# Maintaining releases
+# Releasing
 
-`main` is the integration branch; use short-lived feature/fix branches and reviewed pull requests.
-PenguLOD uses SemVer with pre-release identifiers (alpha, beta, rc) until a stable version. `VERSION` controls the .NET
-application, package and SKSE runtime version. `UPSTREAM_VERSION` records AnvilLOD ancestry;
-do not bump it simply to release PenguLOD.
+`VERSION` sets the version of the generator, the packages and the SKSE plugin. Versions
+follow SemVer; alpha, beta and rc versions are published as pre-releases.
+`UPSTREAM_VERSION` records the AnvilLOD version PenguLOD was derived from and does not
+change for a PenguLOD release.
 
-## Prepare a release
+## Steps
 
-1. Set the next version, for example `python3 tools/version.py 0.3.0-alpha.1`.
-2. Add a matching `## [0.3.0-alpha.1] - YYYY-MM-DD` section to `CHANGELOG.md`. Update the
-   README version and provenance if needed. Explain limitations and any migration changes.
-3. Run `bash tools/test.sh` and `bash tools/build.sh`, then `xvfb-run -a bash tools/native-smoke.sh`.
-   Verify settings import and representative generation workflows when their code changes.
-4. Build the AppImage with `bash tools/package-appimage.sh`. Commit, push and wait for the
-   Linux and Windows build/test jobs, all three SKSE builds and all package compatibility jobs to pass on that exact commit.
-   Windows CI runs `tools/build-native-windows.ps1`, `tools/test-windows.ps1`,
-   `tools/build-windows.ps1 -ReuseBackend` and `tools/windows-smoke.ps1`.
-5. Tag that commit and push only the new tag:
+1. Set the version:
 
-```bash
-git tag -a v0.3.0-alpha.1 -m 'PenguLOD 0.3.0-alpha.1'
-git push origin v0.3.0-alpha.1
-```
+   ```bash
+   python3 tools/version.py 0.7.0-beta.1
+   ```
 
-The tag pipeline verifies `vVERSION`, runs the same build/tests, and publishes a GitHub release.
-Alpha/beta/rc tags are marked pre-release. Assets include the portable Linux x64 package,
-AppImage, Windows x64 ZIP, SKSE FOMOD ZIP, committed source archive and one combined `SHA256SUMS`;
-each binary package also includes the patched
-FasterNGIO source and dependency notices. Release notes come from the matching changelog section.
-The workflow refuses to overwrite an existing release.
+2. Add a `## [0.7.0-beta.1] - YYYY-MM-DD` section to `CHANGELOG.md`. It becomes the release
+   notes. Update the version in `README.md`.
+3. Test and build locally:
 
-## Reproduce and inspect
+   ```bash
+   bash tools/test.sh
+   bash tools/build.sh
+   xvfb-run -a bash tools/native-smoke.sh
+   ```
 
-The build uses .NET 10 on Ubuntu 24.04 and Windows Server 2025 with Visual Studio 2026,
-with checksum-verified FasterNGIO source archives. Windows dependencies use the pinned
-vcpkg manifest and static MSVC runtime. A separate Windows Server 2022 job extracts and
-tests the ZIP. Linux packages are tested in Ubuntu, Debian and Fedora containers.
-GitHub Actions are pinned to commits and Dependabot proposes their updates. This is a repeatable
-build procedure, not a promise of bit-identical archives across machines or SDK patch releases.
+4. Open a pull request, wait for every check to pass, and merge it.
+5. Tag the merge commit and push only the tag:
 
-After a successful local build on a clean committed checkout, `bash tools/package-release.sh`
-creates the source archive, release notes and checksums. Check both executable versions with
-`dist/linux-x64/PenguLOD --version` and `dist/linux-x64/PenguLOD.Desktop --version`.
-The archive should contain no personal settings, logs, source profiles or generated game output.
+   ```bash
+   git tag -a v0.7.0-beta.1 -m 'PenguLOD 0.7.0-beta.1'
+   git push origin v0.7.0-beta.1
+   ```
 
-On Windows, `tools/build-windows.ps1` creates the ZIP and `SHA256SUMS-WINDOWS`.
-The runtime jobs run `tools/build-runtime-windows.ps1` for each game line and
-`tools/package-runtime.py` assembles the separate SKSE archive: the three DLLs, the FOMOD
-installer and license notices. It holds no source archives, because mod sites reject uploads
-that contain them. Link the release tag on the mod page; the plugin source is that revision,
-and the CommonLib versions and patches it was built from are under `skse/cmake`.
-The tag workflow verifies each package's checksums and combines them before publishing.
-It publishes only after all platform checks succeed; neither platform can publish a partial release.
+The tag build checks that the tag matches `VERSION`, runs the tests on Linux and Windows,
+and publishes a GitHub release only when every job passes. It refuses to overwrite an
+existing release.
 
-If a tagged build fails, fix the source on a branch and choose a new version/tag. Do not move a
-published tag or replace released binaries silently. Keep the old release for reproducibility.
+## What is published
+
+- `PenguLOD-<version>-linux-x64.tar.gz` and `PenguLOD-<version>-x86_64.AppImage`
+- `PenguLOD-<version>-win-x64.zip`
+- `PenguLOD-<version>-SKSE.zip`: the three plugin builds and a FOMOD installer. It holds no
+  source archives, because mod sites reject uploads that contain them.
+- `PenguLOD-<version>-source.tar.gz`
+- `SHA256SUMS`
+
+## Upload a release to Nexus Mods
+
+The **Upload release to Nexus** workflow is started by hand. It downloads the Windows, Linux
+and SKSE packages of a published GitHub release, checks them against the release checksums
+and the tag's successful build, and adds each one as a new version of its file on the mod
+page. The previous versions are archived, and the mod's version and changelog are updated
+from `CHANGELOG.md`.
+
+Nexus accepts ZIP, 7z and RAR archives, so the Linux package is uploaded as a ZIP with the same
+contents and file permissions.
+
+One-time setup:
+
+1. On the Nexus mod page, upload the three files once by hand so that each has a file ID.
+2. In the repository, open **Settings → Environments** and create an environment named
+   `nexus`.
+3. Add the secret `NEXUSMODS_API_KEY` with your Nexus Mods API key. Keep the key out of
+   files, issues and chat.
+4. Add the variables `NEXUSMODS_MOD_ID`, `NEXUSMODS_FILE_ID_WINDOWS`,
+   `NEXUSMODS_FILE_ID_LINUX` and `NEXUSMODS_FILE_ID_SKSE`. The IDs are shown under
+   **Advanced** in the mod page's Files tab and in the edit menu of Manage Files.
+
+For each release, once the tag build has finished:
+
+1. Open **Actions → Upload release to Nexus → Run workflow**.
+2. Select `main` and enter the tag, such as `v0.7.0-beta.1`.
+
+If an upload fails partway, check the Files and Changelog tabs on Nexus before running it
+again, so that a file is not uploaded twice. The page description and images are edited on
+Nexus.
+
+## If a tagged build fails
+
+Fix the problem on a branch and release a new version. Do not move a published tag or
+replace released files.

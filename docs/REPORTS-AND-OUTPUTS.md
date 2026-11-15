@@ -1,141 +1,97 @@
-# Reports and output management
+# Reports and outputs
 
-Keep a generation that looks good and performs well in its own folder. Export the
-settings used for it. Generate experiments into different folders so you can
-compare them and return to the working version.
+The **Reports & outputs** page measures a generation, compares two of them, checks that a
+set of output folders is intact, and combines them into one package to install. None of
+these tools change your generation settings or your mod manager.
+
+Keep a generation you are happy with in its own folders and generate experiments into
+different ones.
 
 ## Measure a generation
 
-On **Reports & outputs**, choose an **Output folder to measure**, then click
-**Measure output**. This reads the folder without changing its contents. The
-report is saved in the run folder; **Export report** saves another copy.
+1. Set **Output folder to measure**.
+2. Click **Measure output**. The folder is only read.
+3. Click **Export report** to save a copy.
 
-The report covers every saved block, including blocks reused from earlier runs:
+The report lists triangles and mesh groups by worldspace, LOD level, season and layer, the
+largest blocks, and the size and format of the textures in the folder. A successful object
+LOD run also writes this report to its output as `PenguLOD.costs.json`.
 
-- Triangles and drawable mesh groups, grouped by world, level, season and layer.
-- The largest blocks, to help locate expensive areas.
-- Block sizes and local DDS texture sizes, formats and mip counts.
-- Files that could not be measured. Missing measurements are not counted as zero.
+These numbers help find expensive areas. They do not predict frame rate, and texture sizes
+are sizes on disk, not video memory.
 
-Mesh groups help identify batching costs. They are not measured draw calls, and
-neither triangle counts nor file sizes predict FPS. Texture bytes describe disk
-storage, not resident VRAM. Textures supplied by other mods or archives are outside
-the report's scope. Legacy `.btt` files have storage measurements but no geometry
-counts. Terrain `.btr` and object `.bto` files have geometry counts when readable.
+## Compare two generations
 
-Successful object generation also writes `PenguLOD.costs.json` automatically. It
-includes the generation's numeric, Boolean and enum choices without source paths.
-Reports made from older folders may have no saved settings; they remain useful
-for comparing geometry.
+1. Choose a **Before report** and an **After report**.
+2. Click **Compare cost reports**.
 
-## Compare runs
+Negative numbers mean fewer triangles, mesh groups or bytes. Only blocks present in both
+reports are compared; added and removed blocks are listed separately.
 
-Choose the **Before report** and **After report**, then click **Compare cost
-reports**. Negative changes mean fewer bytes, triangles or mesh groups.
+For a fair frame-rate comparison in game, change one setting at a time and use the same
+place, direction, weather and resolution.
 
-Geometry deltas use matching block paths, including world, level, coordinates and
-season. Added or removed blocks are listed separately. A Tamriel-only run is not
-treated as a whole-game improvement. Texture comparisons follow the same rule.
-Settings changes are shown when both reports contain settings.
+## Verify output folders
 
-Check in-game FPS at the same place, direction, weather and resolution. Change one
-setting at a time. Keep the reference generation until the new result is confirmed.
+1. Add the folders under **Stage output folders**. Include the texture, grass and terrain
+   folders that the object LOD used.
+2. Click **Verify output set**.
 
-## Verify a matching output set
+This reads every file and can take several minutes. It reports changed or missing files,
+missing dependencies and duplicate stages. It checks the folders you select, not what your
+mod manager has deployed.
 
-New pipeline runs write `PenguLOD.output-set.json` in each stage folder. It records
-the completed stage, owned files, generated scope and any generated inputs needed
-by object LOD. Preview or filtered output is marked incomplete.
+Output made by older versions can be measured but not verified. Generate into a new folder
+to get verifiable output.
 
-Add the stage folders under **Stage output folders**, then click **Verify output
-set**. Include matching texture, grass and terrain folders if object LOD used
-them. Verification checks file contents, missing dependencies, changed files,
-duplicate stages and conflicting paths. It reads every recorded file and can take
-several minutes for a large output.
+## Build one package to install
 
-This checks the selected folders. It does not inspect a mod manager's deployment
-or resolve the game's complete winning asset order. For installed-output checks,
-select the actual combined package or installed stage folders.
+1. Add one complete output folder for each stage you want in the package.
+2. Set **Package destination** to a new folder, or to a package made here before.
+3. Click **Preview package update** and read what will be replaced.
+4. Click **Publish reviewed package**.
+5. Install the package with your mod manager and enable the generated plugins.
 
-Output folders may sit below a symbolic link, such as `~/.steam/steam`. The stage or
-package folder itself must be a real folder, and links inside it are refused, because
-publication renames the folder and must not follow a link elsewhere.
+The stage folders are not changed. A stage you leave out of an update stays in the package.
+The update is refused if it would pair object LOD with textures it was not built against,
+or if the package contains files PenguLOD does not recognise.
 
-Older outputs without receipts remain usable in game and can be measured. They
-cannot be adopted as managed output automatically: regenerate into a new folder
-when you want to use managed updates. Keep your working generation as it is.
+`meta.ini` and `SKSE/Plugins/PenguLOD.ini` in an output or package folder are yours.
+PenguLOD never replaces them.
 
-## Prepare or update an installation package
+## Generate only some worldspaces
 
-1. Add the complete stage outputs you want to install. Select one version of each
-   stage, including dependencies required by object LOD.
-2. Choose a **Package destination** outside the source folders. Start with a new
-   folder, or use a package previously created here.
-3. Click **Preview package update** and review the replacements and any errors.
-4. Click **Publish reviewed package**. Source folders remain unchanged. The new
-   package is prepared separately, checked again and moved into place. An existing
-   destination is retained in a sibling `.previous-…` folder, up to the number set by
-   **Previous outputs to keep**.
-5. Install the resulting package with your mod manager, replacing its previous
-   version. Enable generated plugins and install the separate game plugin if needed.
+Generated plugins and some texture sheets are shared by all worldspaces, so an existing
+output folder cannot be narrowed to fewer worldspaces than it already holds.
 
-Stages omitted from an update are retained. Replacing textures while retaining
-object LOD built against different textures is blocked. Unknown files in an
-existing package are also blocked rather than deleted. If a source or destination
-changes after preview, create a new plan. Cancellation before publication leaves
-the destination intact.
+- **For a quick test:** generate into a new, empty folder and install it as a separate mod
+  with the complete one disabled.
+- **To keep using the same folder:** under **Overview → Run options**, click **Review
+  output scope**, then turn on **Keep existing worlds and levels**. The run then covers the
+  worldspaces already in the folder as well as the ones you selected.
 
-`meta.ini` (the mod manager's) and `SKSE/Plugins/PenguLOD.ini` (the game plugin's settings)
-belong to the installation. They are not part of a stage's receipt or verification, and edits
-to them never block an update. A package keeps the destination's copies; when the destination
-has none, the first selected stage that has one provides it.
+## Remove old copies
 
-This tool does not activate mods, change load order or modify a game installation
-automatically.
-
-## Clean up previous copies
-
-Publication leaves the replaced folder beside the output. Unfinished build folders can
-remain if PenguLOD is stopped. Generation removes this output's unfinished builds when it
-starts. To list everything else, run `PenguLOD clean --input <output folder>`; add `--apply`
-to remove it. `--keep-previous <n>` (default 1) keeps the newest copies. Build folders from
-versions before 0.7 cannot be matched to an output and are listed once they are a day old.
-Run `clean` while no generation is running. A desktop button for this is planned.
-
-## Partial-world generation
-
-Generated masters, dynamic data and some atlases are shared across worlds. A
-partial set cannot safely replace those files while retaining unrelated old blocks.
-
-Use **Generation Overview → Run options → Review output scope** before updating an existing generation
-folder. If more worlds or levels are needed, enable **Keep existing worlds and levels**.
-The run includes the union of the old and requested
-scope. Your saved world selection is unchanged. Expansion is off by default.
-
-Scope review only reads the selected output folders. It can inspect older AnvilLOD
-output and reports its stage, path and identifying files. Before generating into
-that location, choose an empty folder or clear the complete old generated output.
-The review does not delete files or validate the game installation.
-
-For a quick isolated test, use a new output folder. Managed package updates reject
-a replacement that omits worlds or levels from the previous stage. They do not
-merge ESM files or shared atlases. Regenerate the required scope before updating
-the complete package.
-
-## CLI equivalents
+Each time a stage is replaced, the old folder is kept beside it with a `.previous-` suffix.
+**Previous outputs to keep** sets how many are kept. To list the extra copies and any
+unfinished build folders, run this while nothing is generating:
 
 ```sh
-PenguLOD cost-report --input "Working Object LOD" --report baseline-costs.json
-PenguLOD cost-report --input "Test Object LOD" --report test-costs.json
-PenguLOD compare-costs --before baseline-costs.json --after test-costs.json --report comparison.json
+PenguLOD clean --input "/path/to/output folder"
+```
+
+Add `--apply` to delete them.
+
+## Command line
+
+```sh
+PenguLOD cost-report --input "Object LOD" --report costs.json
+PenguLOD compare-costs --before old-costs.json --after new-costs.json --report comparison.json
 PenguLOD verify-output --input "Textures" --input "Object LOD" --report verification.json
-PenguLOD plan-update --input "Textures" --input "Object LOD" --output "Install Package" --report update-plan.json
-PenguLOD publish-update --plan update-plan.json
-PenguLOD plan-generation --settings preset.json --report scope-plan.json
+PenguLOD plan-update --input "Textures" --input "Object LOD" --output "Install Package" --report plan.json
+PenguLOD publish-update --plan plan.json
+PenguLOD plan-generation --settings preset.json --report scope.json
 PenguLOD pipeline --settings preset.json --expand-output-scope
 ```
 
-Use `cost-report --settings saved-preset.json` to attach a known generation preset
-to an older folder's report. Only use the preset that produced that output. Save
-reports outside the folder being measured. Update plans and pipeline requests
-contain local paths; review them before sharing.
+Reports and plans contain paths from your computer. Read them before sharing.

@@ -17,8 +17,9 @@ public class CliArgsTests
         throw new FileNotFoundException("Repository root not found.");
     }
 
+    // --cli is not in the table: the AppImage's launcher takes it, to start this program instead of the desktop.
     private static string[] Mentioned(string text) => Regex.Matches(text, @"(?<![\w-])--([a-z][a-z0-9-]*[a-z0-9])")
-        .Select(m => m.Groups[1].Value).Where(n => n is not ("help" or "version")).Distinct().Order().ToArray();
+        .Select(m => m.Groups[1].Value).Where(n => n is not ("help" or "version" or "cli")).Distinct().Order().ToArray();
 
     [Fact]
     public void EveryOptionInUsageAndDocsIsAccepted()
