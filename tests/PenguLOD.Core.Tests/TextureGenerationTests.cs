@@ -214,6 +214,29 @@ public sealed class TextureGenerationTests
     }
 
     [Fact]
+    public void GrassBillboardsAreSizedByTheirOwnUnitsPerPixelNotTheTreeSetting()
+    {
+        // A tuft 96 units wide and 64 high. At the tree default (12 units per pixel) it would get the 16 px minimum both ways.
+        using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
+        var mod = new SkyrimMod(ModKey.FromNameAndExtension("Skyrim.esm"), SkyrimRelease.SkyrimSE);
+        var grass = mod.Grasses.AddNew(); grass.Model = new Model { File = @"grass\tuft.nif" };
+        mod.LandscapeTextures.AddNew().Grasses.Add(grass.ToLink());
+        mod.WriteToBinary(Path.Combine(f.Data, "Skyrim.esm"));
+        TextureFixture.Put(f.Data, @"meshes\grass\tuft.nif", PenguLOD.Meshes.Authoring.LodNifWriter.Write("grass",
+            [TextureFixture.Card("grass", @"textures\green.dds") with { Positions = [new(-48, 0, 0), new(48, 0, 0), new(-48, 0, 64), new(48, 0, 64)] }]));
+        var request = f.Request with { Stitched = false, Grass = true, BillboardMaxSize = 512, UnitsPerPixel = 12 };
+        Assert.Equal(2f, request.GrassUnitsPerPixel);
+
+        var item = Assert.Single(TextureGeneration.Run(request).Items, i => i.Kind == "Grass" && i.Status == "Written");
+        Assert.Equal((64, 32), (item.Width, item.Height));
+        item = Assert.Single(TextureGeneration.Run(request with { GrassUnitsPerPixel = 1 }).Items, i => i.Kind == "Grass" && i.Status == "Written");
+        Assert.Equal((128, 64), (item.Width, item.Height));
+        item = Assert.Single(TextureGeneration.Run(request with { GrassUnitsPerPixel = 12 }).Items, i => i.Kind == "Grass" && i.Status == "Written");
+        Assert.Equal((16, 16), (item.Width, item.Height));
+        Assert.Throws<ArgumentException>(() => TextureGeneration.Validate(request with { GrassUnitsPerPixel = 0 }));
+    }
+
+    [Fact]
     public void WinningLandscapeOverrideControlsGrassSelectionAndExplicitBillboardRulesStillApply()
     {
         using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);

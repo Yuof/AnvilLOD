@@ -126,8 +126,9 @@ public static partial class TextureGeneration
 
                 if (!TreeMaterials.TryApply(mesh, TreeMaterials.Read(game, model), out mesh, out var variantError))
                     throw new InvalidDataException(variantError);
+                // Grass has its own detail setting: a tuft is around 100 units wide, so at the tree setting it would get the 16 px minimum.
                 BillboardImage? Render(BillboardView view) => BillboardRenderer.Render(mesh, isGrass ? grassLoader : loader, request.BillboardMaxSize, vertexColors: !isGrass,
-                    unitsPerPixel: request.UnitsPerPixel / scale, brightness: request.Brightness, materials: request.Materials,
+                    unitsPerPixel: (isGrass ? request.GrassUnitsPerPixel : request.UnitsPerPixel) / scale, brightness: request.Brightness, materials: request.Materials,
                     view: view, originCentered: true, grassTextures: isGrass ? quality.GrassTextures : GrassTextureMode.Basic,
                     complexGrassThreshold: quality.ComplexGrassThreshold);
                 var img = Render(BillboardView.Front)

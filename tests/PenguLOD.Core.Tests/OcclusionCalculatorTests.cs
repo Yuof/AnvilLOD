@@ -95,9 +95,15 @@ public sealed class OcclusionCalculatorTests
     public void A_quad_is_visible_whenever_any_of_its_blocks_is()
     {
         var t = new OcclusionCalculator(World(0f, 30000f), Origin, Origin).Compute(-12, 3);
-        for (int level = 1; level <= TvdtData.TopLevel; level++)
+        AssertParentsFollowChildren(t);
+    }
+
+    /// <summary>The game drops everything below a node it reads as hidden, so no node may be visible under a hidden one, up to the root.</summary>
+    private static void AssertParentsFollowChildren(TvdtData t)
+    {
+        for (int level = 1; level <= t.TopLevel; level++)
         {
-            int n = TvdtData.LeavesPerSide >> level;
+            int n = t.LeavesPerSide >> level;
             for (int y = 0; y < n; y++)
                 for (int x = 0; x < n; x++)
                 {
@@ -106,7 +112,33 @@ public sealed class OcclusionCalculatorTests
                     if (any) Assert.True(t.GetNode(level, x, y));      // a quad is never hidden while one of its blocks is seen
                 }
         }
-        Assert.Equal(3, t.Lead);
+        Assert.True(t.GetBit(0));                                   // the root is the first bit: the game tests it before anything else
+    }
+
+    [Fact]
+    public void The_observers_own_nodes_are_visible_at_every_level_in_the_games_numbering()
+    {
+        // Cell (-12, 3) is in block (3, 6) of a grid that starts at cell -24. The game reaches that block through bits 0..5 (the root and
+        // the first node of every level) and then the nodes numbered below; a hidden one of 32 cells or more would drop all object LOD around the player.
+        var t = new OcclusionCalculator(World(0f, 30000f), Origin, Origin).Compute(-12, 3);
+        var own = Block(-12, 3);
+        for (int level = 0; level <= t.TopLevel; level++)
+            Assert.True(t.GetBit(TvdtData.NodeBit(level, own.X >> level, own.Y >> level, t.TopLevel)), $"own node at level {level}");
+        for (int bit = 0; bit <= 3; bit++) Assert.True(t.GetBit(bit)); // root, 128, 64 and 32 cells: all contain the observer here
+    }
+
+    [Fact]
+    public void A_smaller_lod_grid_gets_its_own_tree()
+    {
+        // 128 cells per side: 32 x 32 blocks and one level less. The same world, the same answers, numbered for the smaller tree.
+        var big = new OcclusionCalculator(World(0f, 30000f), Origin, Origin, new OcclusionSettings(Clearance: 1536f)).Compute(-12, 0);
+        var small = new OcclusionCalculator(World(0f, 30000f), Origin, Origin, new OcclusionSettings(Clearance: 1536f), stride: 128).Compute(-12, 0);
+        Assert.Equal(32, small.LeavesPerSide);
+        Assert.Equal(5, small.TopLevel);
+        for (int y = 0; y < 32; y++)
+            for (int x = 0; x < 32; x++) Assert.Equal(big.GetLeaf(x, y), small.GetLeaf(x, y));
+        AssertParentsFollowChildren(small);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new OcclusionCalculator(World(), Origin, Origin, stride: 8));
     }
 
     [Fact]

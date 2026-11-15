@@ -3,6 +3,40 @@
 PenguLOD uses its own semantic version, independent of AnvilLOD’s game plugin version.
 Pre-release versions are marked alpha or beta until the supported workflows have broader validation.
 
+## [Unreleased]
+
+Occlusion
+
+- A generated `Occlusion.esp` no longer hides distant objects and trees that are in view.
+  The game numbers the nodes of its LOD quadtree parent first; the plugin was written
+  children first, so only the 4-cell blocks were in the right place and the game read the
+  8-cell and larger nodes from the wrong bits. Whole areas of object and tree LOD, up to
+  32 by 32 cells, disappeared while their terrain stayed. The order now follows the
+  game's own (checked against the game's code, its own cell data and xLODGen output), and
+  it is worked out for each worldspace's LOD grid, so worldspaces with a 128-cell grid
+  are right too. **Generate `Occlusion.esp` again**: one from 0.6.0-beta.2 or earlier
+  should be disabled until then. No other output is affected.
+
+Textures
+
+- Grass billboards from the texture stage are no longer 16 x 16 pixels. They were sized
+  with the tree setting (12 world units per pixel), which left nearly every grass type at
+  the smallest size and made distant grass look blocky. Grass now has its own setting,
+  **Grass world units per pixel** on the Textures page, default `2`: a typical tuft gets a
+  64 x 32 image, about what TexGen makes. **World units per pixel** is now **Tree world
+  units per pixel** and works as before. Run textures and then object LOD again to get
+  the sharper grass.
+
+Seasonal LOD
+
+- Seasonal LOD can be limited to the seasons you play. Four new boxes, **Seasonal LOD:
+  winter**, **spring**, **summer** and **autumn** under **Object LOD → World & runtime** and
+  on the Terrain page, choose which seasons get seasonal terrain, object, tree and grass
+  LOD; all are on by default. A season left out gets no seasonal files, files from an
+  earlier run are removed, and the game shows the normal LOD in that season. Its swap INIs
+  are not read. On the command line: `--seasons --only-seasons winter`. The grass cache
+  stage still writes every season. Existing output is not rebuilt while all four are on.
+
 ## [0.6.0-beta.2] - 2026-11-14
 
 A run no longer stops because one model or recipe cannot be generated, and Skyrim 1.6.1179

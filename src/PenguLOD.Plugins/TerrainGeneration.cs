@@ -17,7 +17,10 @@ public sealed record TerrainGenerationRequest(GameContextOptions Game, string Ou
     int TextureSize = 512, float Brightness = 1, float VertexColorStrength = 1, float TextureRepeatsPerCell = 24,
     float SkirtDepth = 512, bool Water = true, bool UseExistingTerrain = true, bool ExportHeightmaps = true,
     int HeightmapMaximumSize = 8192, bool Seasons = false, TerrainMaterialSettings? Materials = null,
-    bool FillUncoveredLand = true, bool SubstituteMissingTextures = true, bool SeasonsStrict = false);
+    bool FillUncoveredLand = true, bool SubstituteMissingTextures = true, bool SeasonsStrict = false,
+    // With Seasons: the seasons to generate, as SeasonSwaps.SelectionText writes them ("WIN" or "WIN,SUM"); null = all four.
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? OnlySeasons = null);
 public sealed record TerrainTileResult(string Worldspace, int Level, int X, int Y, int Triangles, int WaterCells, string? Season = null);
 public sealed record TerrainWorldResult(string Worldspace, int LandscapeCells, int ExistingTilesUsed, int Tiles, string? Heightmap);
 public sealed record TerrainPerformance(int BuiltTiles, int ReusedTiles, IReadOnlyDictionary<string,double> Timings);
@@ -35,6 +38,7 @@ public static class TerrainGeneration
     {
         GenerationDestination.Validate(r.Game, r.OutputFolder);
         (r.Materials ?? new()).Validate();
+        PenguLOD.Core.Lod.SeasonSwaps.Selection(r.OnlySeasons);
         if(r.TextureSize is <64 or >2048 || (r.TextureSize&(r.TextureSize-1))!=0) throw new ArgumentException("Terrain texture size must be a power of two from 64 to 2048.");
         if(r.HeightmapMaximumSize is <128 or >16384 || (r.HeightmapMaximumSize&(r.HeightmapMaximumSize-1))!=0)throw new ArgumentException("Heightmap size limit must be a power of two from 128 to 16384.");
         if(!float.IsFinite(r.Brightness) || r.Brightness is <.1f or >4 || !float.IsFinite(r.VertexColorStrength) || r.VertexColorStrength is <0 or >1
@@ -82,7 +86,7 @@ public static class TerrainGeneration
         var records=TerrainRecords.Read(game,ct,worlds.Select(w=>w.FormKey).ToHashSet());
         void Warn(string s){warnings.Add(s);progress?.Report("WARNING: "+s);}
         foreach(var issue in inputIssues)Warn(issue.Message);
-        var seasons = request.Seasons ? SeasonalAssets.Read(game,assets,"LandTextures",request.SeasonsStrict,Warn) : new Dictionary<string,Dictionary<Mutagen.Bethesda.Plugins.FormKey,Mutagen.Bethesda.Plugins.FormKey>>();
+        var seasons = request.Seasons ? SeasonalAssets.Read(game,assets,"LandTextures",request.SeasonsStrict,Warn,PenguLOD.Core.Lod.SeasonSwaps.Selection(request.OnlySeasons)) : new Dictionary<string,Dictionary<Mutagen.Bethesda.Plugins.FormKey,Mutagen.Bethesda.Plugins.FormKey>>();
         using var stage=new StagedOutput(request.OutputFolder,false,progress,ct);
         preparation.Dispose();using var generation=WorkTiming.Measure("generation");
         foreach(var world in worlds)

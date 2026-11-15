@@ -66,6 +66,31 @@ public class SeasonalPipelineTests
     }
 
     [Fact]
+    public void OnlyTheSelectedSeasonsAreGeneratedAndTheOthersAreRemoved()
+    {
+        using var f=Fixture();string cache=Path.Combine(f.Root,"cache");var all=Request(f,false);
+        // A broken summer INI must not matter to a winter-only run, even a strict one.
+        var winterOnly=all with {Terrain=all.Terrain! with {OnlySeasons="WIN",SeasonsStrict=true},Lod=all.Lod! with {OnlySeasons="WIN",SeasonsStrict=true}};
+        var first=GenerationPipeline.Run(all,cache);Assert.True(first.Success,first.Error);
+        Assert.All(first.Seasons!,row=>Assert.Equal((1,1,1),(row.TerrainTiles,row.ObjectBlocks,row.TreeBlocks)));
+        TextureFixture.Put(f.Textures.Data,@"seasons\Z_SUM.ini",Encoding.UTF8.GetBytes("[Statics]\nFixtureObject|MissingObject\n[Trees]\nFixtureTree|MissingTree\n[LandTextures]\nFixtureLand|MissingLand\n"));
+
+        var result=GenerationPipeline.Run(winterOnly,cache);
+        Assert.True(result.Success,result.Error);
+        Assert.Equal(["WIN"],result.Diagnostics!.Seasons!.Select(s=>s.Season).Distinct());
+        Assert.DoesNotContain(result.Diagnostics.Issues,i=>i.Code=="unresolved-seasonal-swap");
+        foreach(var row in result.Seasons!)
+            Assert.Equal(row.Season is "Default" or "WIN"?(1,1,1):(0,0,0),(row.TerrainTiles,row.ObjectBlocks,row.TreeBlocks));
+        // The winter block still carries the winter swap and the winter grass cache.
+        var normalGrass=Assert.Single(Read("",all.Lod!.OutputFolder!).Parts,p=>p.Material.Textures[0].Equals(GrassLodSource.AtlasDiffuse,StringComparison.OrdinalIgnoreCase));
+        var winter=Read(".WIN",all.Lod.OutputFolder!);
+        Assert.Contains(winter.Parts,p=>p.Material.Textures[0].EndsWith("seasonobject.dds",StringComparison.OrdinalIgnoreCase));
+        Assert.NotEqual(normalGrass.UVs[0],Assert.Single(winter.Parts,p=>p.Material.Textures[0].Equals(GrassLodSource.AtlasDiffuse,StringComparison.OrdinalIgnoreCase)).UVs[0]);
+        Assert.True(OutputManagement.Verify([all.Lod.OutputFolder!,all.Textures!.OutputFolder,all.Terrain!.OutputFolder]).Valid);
+        Assert.Throws<ArgumentException>(()=>TerrainGeneration.Validate(all.Terrain with {OnlySeasons="monsoon"}));
+    }
+
+    [Fact]
     public void DifferentPlansCanTakeTurnsOnOneLodFolderWithSeasonalBlocks()
     {
         // The desktop's buttons are separate plans with their own checkpoints but share the LOD output folder.

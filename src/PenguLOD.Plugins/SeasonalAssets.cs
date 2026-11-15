@@ -15,15 +15,18 @@ internal static class SeasonalAssets
 
     /// <param name="strict">Throw on a line naming a form that is not in the load order. Off, the line is skipped and reported,
     /// as Seasons of Skyrim skips it in game.</param>
+    /// <param name="only">The seasons to read (<see cref="SeasonSwaps.Selection"/>); null reads all. INIs of other seasons
+    /// are not opened, so their unresolved lines are neither reported nor stop a strict run.</param>
     /// <returns>Swaps per season. A season appears only when it changes at least one form, so stages do not rebuild an
     /// identical seasonal set; the game falls back to the normal LOD for it.</returns>
     public static IReadOnlyDictionary<string, Dictionary<FormKey, FormKey>> Read(GameContext game, AssetIndex assets, string section,
-        bool strict = false, Action<string>? warn = null)
+        bool strict = false, Action<string>? warn = null, IReadOnlySet<string>? only = null)
     {
         var result = new Dictionary<string, Dictionary<FormKey, FormKey>>();
         foreach (var path in SeasonFiles(assets))
         {
-            if (SeasonSwaps.SeasonOf(GamePath.GetFileName(path)) is not { } season || !assets.TryOpen(path, out var stream)) continue;
+            if (SeasonSwaps.SeasonOf(GamePath.GetFileName(path)) is not { } season || only?.Contains(season) == false
+                || !assets.TryOpen(path, out var stream)) continue;
             using var reader = new StreamReader(stream);
             foreach (var swap in SeasonSwaps.Parse(reader.ReadToEnd()).Where(s => s.Section.Equals(section, StringComparison.OrdinalIgnoreCase)))
             {

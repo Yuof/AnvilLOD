@@ -88,7 +88,7 @@ internal static class TerrainInputs
     {
         var materials = request.Materials ?? new();
         string defaultDiffuse = TerrainDefaultTexture.Resolve(request.Game, game.DataFolder);
-        var seasons = request.Seasons ? SeasonalAssets.Read(game, assets, "LandTextures") : new Dictionary<string, Dictionary<FormKey, FormKey>>();
+        var seasons = request.Seasons ? SeasonalAssets.Read(game, assets, "LandTextures", only: PenguLOD.Core.Lod.SeasonSwaps.Selection(request.OnlySeasons)) : new Dictionary<string, Dictionary<FormKey, FormKey>>();
         var wanted = request.Worldspaces is { Count: > 0 } ? new HashSet<string>(request.Worldspaces, StringComparer.OrdinalIgnoreCase) : null;
         var worlds = new Dictionary<FormKey, World>();
         foreach (var world in game.LoadOrder.PriorityOrder.Worldspace().WinningOverrides())

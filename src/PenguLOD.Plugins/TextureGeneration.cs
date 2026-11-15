@@ -13,7 +13,7 @@ public sealed record TextureGenerationRequest(GameContextOptions Game, string Ou
     bool Stitched = true, bool Trees = true, bool Grass = false, bool RenderedObjects = false,
     int BaseSize = 256, int BillboardMaxSize = 512, float UnitsPerPixel = 12, float Brightness = 1,
     float MinTreeHeight = 256, float MinGrassHeight = 16, string ModelFilter = "", bool TreeTrunks = false, Authoring.MaterialBakeSettings? Materials = null,
-    Authoring.BillboardSettings? Billboards = null, IReadOnlyList<string>? ResourcePacks = null);
+    Authoring.BillboardSettings? Billboards = null, IReadOnlyList<string>? ResourcePacks = null, float GrassUnitsPerPixel = 2);
 public sealed record TextureGenerationItem(string Kind, string Source, string Output, string Status, string Detail = "", int Width = 0, int Height = 0);
 public sealed record TextureGenerationResult(string OutputFolder, bool Published, int Files, string Fingerprint,
     IReadOnlyList<TextureGenerationItem> Items, IReadOnlyList<string> Warnings, TimeSpan Elapsed, ResourceDiscoveryReport? Resources = null)
@@ -46,6 +46,7 @@ public static partial class TextureGeneration
             || request.BillboardMaxSize is < 32 or > 2048 || (request.BillboardMaxSize & (request.BillboardMaxSize - 1)) != 0)
             throw new ArgumentException("Texture sizes must be powers of two: base 64–1024, billboards 32–2048.");
         if (!float.IsFinite(request.UnitsPerPixel) || request.UnitsPerPixel is < .25f or > 128
+            || !float.IsFinite(request.GrassUnitsPerPixel) || request.GrassUnitsPerPixel is < .25f or > 128
             || !float.IsFinite(request.Brightness) || request.Brightness is < .1f or > 4
             || !float.IsFinite(request.MinTreeHeight) || request.MinTreeHeight < 0
             || !float.IsFinite(request.MinGrassHeight) || request.MinGrassHeight < 0)

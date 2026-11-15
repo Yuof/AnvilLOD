@@ -45,6 +45,47 @@ public class SeasonOrderTests
         Assert.Throws<InvalidDataException>(() => SeasonalAssets.Read(game, assets, "LandTextures", strict: true));
     }
 
+    [Theory]
+    [InlineData(null, "AUT,SPR,SUM,WIN", null)]
+    [InlineData("  ", "AUT,SPR,SUM,WIN", null)]
+    [InlineData("winter", "WIN", "WIN")]
+    [InlineData("SUM; win", "SUM,WIN", "WIN,SUM")]
+    [InlineData("Fall Spring", "AUT,SPR", "SPR,AUT")]
+    [InlineData("aut,spr,sum,win", "AUT,SPR,SUM,WIN", null)]
+    public void ASeasonSelectionAcceptsNamesAndSuffixesAndAllFourIsNoSelection(string? only, string selected, string? stored)
+    {
+        Assert.Equal(selected, string.Join(',', SeasonSwaps.Selection(only).Order(StringComparer.Ordinal)));
+        Assert.Equal(stored, SeasonSwaps.SelectionText(only));
+    }
+
+    [Theory]
+    [InlineData("monsoon")] [InlineData("WIN,xyz")] [InlineData(",;")]
+    public void AnUnknownOrEmptySeasonSelectionIsRejected(string only) =>
+        Assert.Throws<ArgumentException>(() => SeasonSwaps.Selection(only));
+
+    [Fact]
+    public void ASeasonLeftOutIsNotReadSoItsBrokenInisNeitherWarnNorStopAStrictRun()
+    {
+        using var f = new TerrainFixture(seasons: true);
+        TextureFixture.Put(f.Textures.Data, @"seasons\\Broken_SUM.ini", System.Text.Encoding.UTF8.GetBytes("[LandTextures]\nFixtureLand|0x800~NotInstalled.esp\n"));
+        using var game = GameContext.Open(f.Game);
+        var assets = game.BuildAssets();
+        var warnings = new List<string>();
+        var winter = SeasonalAssets.Read(game, assets, "LandTextures", strict: true, warn: warnings.Add, only: SeasonSwaps.Selection("winter"));
+        Assert.Equal(["WIN"], winter.Keys);
+        Assert.Empty(warnings);
+        Assert.Empty(SeasonalAssets.Read(game, assets, "LandTextures", only: SeasonSwaps.Selection("spring")));
+        Assert.Throws<InvalidDataException>(() => SeasonalAssets.Read(game, assets, "LandTextures", strict: true, only: SeasonSwaps.Selection("summer")));
+    }
+
+    [Fact]
+    public void OnlySeasonsNeedsSeasonsAndKnownNamesOnTheCommandLine()
+    {
+        Assert.Equal(2, PenguLOD.Cli.Program.Main(["scan", "--only-seasons", "winter"]));
+        Assert.Equal(2, PenguLOD.Cli.Program.Main(["scan", "--seasons", "--only-seasons", "monsoon"]));
+        Assert.Equal("winter", PenguLOD.Cli.CliArgs.Parse(["--seasons", "--only-seasons", "winter"]).Get("only-seasons"));
+    }
+
     [Fact]
     public void StrictSeasonsNeedSeasonsOnTheCommandLine()
     {

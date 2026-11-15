@@ -148,7 +148,8 @@ Keep defaults for the first comparison, then adjust one control at a time.
 | Complex grass detection threshold | Sensitivity used by Auto layout detection. Default `0.1`; normally leave it alone and use the layout override for a known mismatch. |
 | Stitch base size | Base texture resolution for recipes and rendered objects. Default `256`; recipes can combine it into a larger sheet. Higher values use more texture memory. |
 | Maximum billboard size | Caps the width and height of rendered billboards. Default `512`. Higher values help large trees but use more texture memory. |
-| World units per pixel | Detail per pixel before the size cap. Default `12`; lower values produce sharper, larger textures. |
+| Tree world units per pixel | Detail per pixel of tree billboards and hybrid trunk frames before the size cap. Default `12`; lower values produce sharper, larger textures. |
+| Grass world units per pixel | The same for grass billboards. Default `2`, which gives a typical tuft a 64 x 32 image; grass is around 100 units wide, so it needs a much lower value than trees. |
 | Brightness multiplier | Overall generated-texture brightness. Default `1`; below `1` darkens, above `1` brightens. |
 | Minimum tree height | Skips billboard rendering for trees shorter than this height in game units. Default `256`. |
 | Minimum grass height | Skips billboard rendering for grass shorter than this height in game units. Default `16`. |
@@ -176,6 +177,7 @@ them; also regenerate object LOD when its terrain input changes.
 | Fill uncovered land at the default height | Where a tile has neither landscape records nor existing terrain LOD, makes the land flat at the worldspace's default height with the default texture. On by default. Off: the run stops before the first tile and lists those tiles. |
 | Use the default texture for missing landscape textures | Paints layers whose texture is not installed, or whose record cannot be resolved, with the default landscape texture and reports them. On by default. Off: the run stops before the first tile and lists every missing texture. |
 | Generate seasonal terrain from Seasons of Skyrim swaps | Builds seasonal variants from installed swaps. Off by default. This is the same switch as **Seasonal LOD** in Object LOD. |
+| Winter / Spring / Summer / Autumn | The seasons to generate, all on by default. The same choice as the **Seasonal LOD** season boxes in Object LOD. |
 | Generate water LOD | Builds distant water surfaces. On by default. |
 | Use generated terrain for object LOD | Makes object LOD use this terrain output, including for hidden-geometry removal. A pipeline that generates both stages passes it on automatically. |
 
@@ -368,6 +370,7 @@ the grass included in this LOD output.
 | Glow effect rules | Loads additional supplied fire and light-glow rules. Off by default; needs the corresponding resources. |
 | Water stand-ins | Includes lit replacement surfaces for supported streams and ponds. Off by default. Separate from Terrain's water LOD. |
 | Seasonal LOD | Builds variants using installed Seasons of Skyrim swaps. Off by default. Shared with Terrain's seasonal switch; grass-cache seasons are selected separately. |
+| Seasonal LOD: winter / spring / summer / autumn | With Seasonal LOD on, the seasons to generate. All on by default. A season left out gets no seasonal terrain, object, tree or grass LOD and shows the normal LOD in game. Shared with the Terrain page; the grass cache stage is not affected. See [seasons](SEASONS.md#generate-only-some-seasons). |
 | Strict seasonal swaps | Stops generation when a seasonal INI names a record that is not in the load order. Off by default: such lines are skipped and reported, as the game does. |
 | Include initially disabled objects | Includes objects initially disabled by plugins. Off by default. Enabling it can bake unwanted removed objects into LOD. |
 | Include enable-parented objects | Includes objects whose visibility is controlled by another reference. On by default. |
@@ -408,7 +411,8 @@ before lowering several quality controls together.
 
 Occlusion tells the game which distant blocks terrain hides from a location. This
 feature is experimental. Install its plugin last and check hills and valleys for
-scenery disappearing too early.
+scenery disappearing too early. A plugin from 0.6.0-beta.2 or earlier hides scenery
+that is in view; [generate it again](TROUBLESHOOTING.md#objects-and-trees-are-missing-from-nearby-hills-but-the-terrain-is-there).
 
 | Setting | What it does |
 | --- | --- |

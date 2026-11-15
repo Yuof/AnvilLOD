@@ -111,6 +111,10 @@ public static class GenerationOptions
         new("water", "World & runtime", "Water stand-ins", "Lit fake water for stream and pond planes.", false),
         new("seasonsStrict", "World & runtime", "Strict seasonal swaps", "Stop when a Seasons of Skyrim INI names a form that is not in the load order. Off: such lines are skipped and reported, as the game does.", false),
         new("seasons", "World & runtime", "Seasonal LOD", "Generate seasonal variants for Seasons of Skyrim.", false),
+        new("seasonWinter", "World & runtime", "Seasonal LOD: winter", SeasonHelp, true),
+        new("seasonSpring", "World & runtime", "Seasonal LOD: spring", SeasonHelp, true),
+        new("seasonSummer", "World & runtime", "Seasonal LOD: summer", SeasonHelp, true),
+        new("seasonAutumn", "World & runtime", "Seasonal LOD: autumn", SeasonHelp, true),
         new("disabled", "World & runtime", "Include initially disabled objects", "Include static references initially disabled by the game.", false),
         new("parented", "World & runtime", "Include enable-parented objects", "Include references controlled by another reference.", true),
         new("skse", "World & runtime", "SKSE DLL installation", "None: install the matching Windows DLL separately in your mod manager.", "None", Choices: ["None", "Auto", "1.5.97–1.6.1170", "1.7.x", "VR"]),
@@ -137,6 +141,24 @@ public static class GenerationOptions
         new("occBlockTargets", "Occlusion", "Block target points", "0 tries every sample point.", 32m, 0, 64),
         new("occEyes", "Occlusion", "Observer sample points", "0 tries every observer sample.", 0m, 0, 16)
     ];
+
+    private const string SeasonHelp = "With Seasonal LOD on, generate this season's terrain, object, tree and grass LOD. Off: nothing is written for it and the game shows the normal LOD in that season. The grass cache stage is not affected.";
+
+    /// <summary>The option that selects each season, by season suffix.</summary>
+    public static readonly IReadOnlyList<(string Suffix, string Key)> SeasonOptions =
+        [("WIN", "seasonWinter"), ("SPR", "seasonSpring"), ("SUM", "seasonSummer"), ("AUT", "seasonAutumn")];
+
+    /// <summary>
+    /// The seasons to generate, as a request stores them: null when seasonal LOD is off or every season is ticked.
+    /// Seasonal LOD with no season ticked is an error, not a silent run without seasonal output.
+    /// </summary>
+    public static string? OnlySeasons(DesktopSettings settings)
+    {
+        if (!Get<bool>(settings, "seasons")) return null;
+        var selected = SeasonOptions.Where(o => Get<bool>(settings, o.Key)).Select(o => o.Suffix).ToArray();
+        if (selected.Length == 0) throw new ArgumentException("Seasonal LOD is on but no season is selected. Tick at least one season or turn Seasonal LOD off.");
+        return PenguLOD.Core.Lod.SeasonSwaps.SelectionText(string.Join(',', selected));
+    }
 
     public static readonly IReadOnlySet<string> WholeNumbers = new HashSet<string>(StringComparer.Ordinal)
     {

@@ -126,6 +126,8 @@ public static partial class Program
           --seasons              Seasonal object and grass LOD for Seasons of Skyrim (Data\Seasons\*_WIN.ini ...)
           --seasons-strict       With --seasons: stop on a swap naming a form that is not in the load order
                                  (default: skip and report it, as the game does)
+          --only-seasons <list>  With --seasons: generate only these seasons, e.g. winter or winter,summer
+                                 (default: all four). The others show the normal LOD in game
           --skse-dll <which>     SKSE plugin put in the output: auto (default, reads SkyrimSE.exe),
                                  1170 (SE 1.5.97 - AE 1.6.1170, GOG 1.6.1179), 17 (Skyrim 1.7 and newer),
                                  vr, none (installed separately)
@@ -236,6 +238,14 @@ public static partial class Program
         if (a.Has("large-refs-no-esl") && !a.Has("large-refs"))
             throw new CliArgException("--large-refs-no-esl only applies together with --large-refs.");
         return a;
+    }
+
+    private static string? OnlySeasons(CliArgs a)
+    {
+        if (a.Get("only-seasons") is not { } v) return null;
+        if (!a.Has("seasons")) throw new CliArgException("--only-seasons only applies together with --seasons.");
+        try { return PenguLOD.Core.Lod.SeasonSwaps.SelectionText(v); }
+        catch (ArgumentException e) { throw new CliArgException("--only-seasons: " + e.Message); }
     }
 
     private static int PbrLodSizeFromArgs(CliArgs a)
@@ -498,6 +508,7 @@ public static partial class Program
             ChildWorlds: !a.Has("no-child-worlds"),
             Seasons: a.Has("seasons"),
             SeasonsStrict: a.Has("seasons-strict") && (a.Has("seasons") ? true : throw new CliArgException("--seasons-strict only applies together with --seasons.")),
+            OnlySeasons: OnlySeasons(a),
             Underside: a.Has("underside"),
             NativeGridObjects: a.Has("native-grid-objects"),
             NativeEffects: a.Has("native-effects"),
