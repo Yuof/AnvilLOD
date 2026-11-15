@@ -70,6 +70,8 @@ public sealed class ReferenceComparisonTests : IDisposable
         Assert.Empty(result.WorldsOnlyInReference);
         var layer = Assert.Single(result.Layers);
         Assert.Equal(("World", 4, "objects", "objects", 6L, 3L), (layer.World, layer.Level, layer.Kind, layer.Layer, layer.Triangles, layer.Shapes));
+        var named = Assert.Single(result.ReferenceShapes);
+        Assert.Equal(("World", 4, "objects", "obj:0", 2L, 1L), (named.World, named.Level, named.Kind, named.Layer, named.Triangles, named.Shapes));
         Assert.Equal(3, result.Shaders.Where(s => s.Side == "output").Sum(s => s.Shapes));
         Assert.Equal(1, result.Shaders.Where(s => s.Side == "reference").Sum(s => s.Shapes));
         Assert.All(result.Shaders, s => { Assert.Equal(8, s.Flags1.Length); Assert.Equal(8, s.Flags2.Length); });

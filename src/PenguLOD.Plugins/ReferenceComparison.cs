@@ -43,6 +43,11 @@ public sealed class ReferenceComparison
     public List<string> References { get; set; } = [];
     public List<BlockParity> Blocks { get; set; } = [];
     public List<LayerParity> Layers { get; set; } = [];
+    /// <summary>
+    /// What the reference's common blocks are made of, by shape name. Other tools have no layer nodes; the name tells what a shape is
+    /// (DynDOLOD: obj, objSnow, obj-LargeRef, objpassthru for 3D trees and other full-shader shapes, grasspassthru).
+    /// </summary>
+    public List<LayerParity> ReferenceShapes { get; set; } = [];
     public List<ShaderParity> Shaders { get; set; } = [];
     public List<TextureParity> Textures { get; set; } = [];
     public List<PluginRecords> Plugins { get; set; } = [];
@@ -159,6 +164,8 @@ public sealed class ReferenceComparison
                 PerBlock(pairs.Select(p => p.Output!), Textures), PerBlock(pairs.Select(p => p.Reference!), Textures)));
             foreach (var layer in pairs.SelectMany(p => p.Output!.Shapes).GroupBy(s => s.Layer).OrderBy(g => g.Key, StringComparer.Ordinal))
                 result.Layers.Add(new(group.World, group.Level, group.Kind, layer.Key, layer.Sum(s => (long)s.Triangles), layer.LongCount()));
+            foreach (var name in pairs.SelectMany(p => p.Reference!.Shapes).GroupBy(s => s.Name.Length == 0 ? "(unnamed)" : s.Name).OrderBy(g => g.Key, StringComparer.Ordinal))
+                result.ReferenceShapes.Add(new(group.World, group.Level, group.Kind, name.Key, name.Sum(s => (long)s.Triangles), name.LongCount()));
         }
 
         foreach (var (side, shapes) in new[]
@@ -328,6 +335,16 @@ public sealed class ReferenceComparison
             {
                 long all = Math.Max(1, level.Sum(l => l.Triangles));
                 text.AppendLine($"  {level.Key.World} LOD{level.Key.Level}: " + string.Join(", ", level.OrderByDescending(l => l.Triangles)
+                    .Select(l => $"{l.Layer} {100.0 * l.Triangles / all:0}% ({l.Shapes:N0} shapes)")));
+            }
+        }
+        if (ReferenceShapes.Any(l => l.Kind == "objects"))
+        {
+            text.AppendLine("Reference shape names in those object blocks (share of triangles, shapes):");
+            foreach (var level in ReferenceShapes.Where(l => l.Kind == "objects" && largest.Contains(l.World)).GroupBy(l => (l.World, l.Level)))
+            {
+                long all = Math.Max(1, level.Sum(l => l.Triangles));
+                text.AppendLine($"  {level.Key.World} LOD{level.Key.Level}: " + string.Join(", ", level.OrderByDescending(l => l.Triangles).Take(6)
                     .Select(l => $"{l.Layer} {100.0 * l.Triangles / all:0}% ({l.Shapes:N0} shapes)")));
             }
         }
