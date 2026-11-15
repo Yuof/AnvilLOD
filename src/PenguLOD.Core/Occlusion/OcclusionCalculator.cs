@@ -19,14 +19,15 @@ namespace PenguLOD.Core.Occlusion;
 public sealed record OcclusionSettings(int RadiusCells = 100, float Clearance = 3072f, int SamplesPerCellSide = 2, float EyeAdd = 0f,
     float ParentClearance = 3072f, int ParentTargetPoints = 32, int BlockTargetPoints = 32, int EyePoints = 0)
 {
-    public string Fingerprint => $"occ:r{RadiusCells}:c{Clearance:0}:s{SamplesPerCellSide}:e{EyeAdd:0}:p{ParentClearance:0}:{ParentTargetPoints}:{BlockTargetPoints}:{EyePoints}";
+    /// <summary>Starts with the revision of the written data, so output from an earlier layout is not reused ("occ2": nodes in the game's order).</summary>
+    public string Fingerprint => $"occ2:r{RadiusCells}:c{Clearance:0}:s{SamplesPerCellSide}:e{EyeAdd:0}:p{ParentClearance:0}:{ParentTargetPoints}:{BlockTargetPoints}:{EyePoints}";
 }
 
 /// <summary>
 /// Works out which LOD blocks can be seen from each cell, from a height grid, and packs it as TVDT data (see <see cref="TvdtData"/>).
 /// A block is visible when some sample point of the observer cell has a clear straight line to some sample point of some cell of the
-/// block. Eye and target use the highest thing in their sample (terrain or object), the hills in between are the bare terrain. Fitted to,
-/// and compared against, xLODGen's own output: see <see cref="OcclusionSettings"/>.
+/// block. Eye and target use the highest thing in their sample (terrain or object), the hills in between are the bare terrain. The
+/// blocks were fitted to, and compared against, xLODGen's own output: see <see cref="OcclusionSettings"/>.
 /// </summary>
 public sealed class OcclusionCalculator
 {
@@ -34,26 +35,35 @@ public sealed class OcclusionCalculator
     private readonly int _originX, _originY;       // south-west cell of the worldspace's .lod file
     private readonly OcclusionSettings _settings;
     private readonly int _sub;                       // samples per sub-area side
-    private readonly Block?[] _blocks = new Block?[TvdtData.LeavesPerSide * TvdtData.LeavesPerSide];
+    private readonly int _stride;                    // cells per side of the worldspace's LOD grid: the root of the game's quadtree
+    private readonly int _side, _top;                // 4-cell blocks per side, and the level of the root
+    private readonly Block?[] _blocks;
     private readonly Block?[][] _groups = new Block?[ParentTestLevels + 1][];   // [level] the 8-cell (1) and 16-cell (2) quads, by index y * side + x
     private const int ParentTestLevels = 2;       // levels above this are simply 'any child visible'
 
     private sealed record Block(float[] X, float[] Y, float[] H, bool Complete, bool AnyData);
 
-    public OcclusionCalculator(OcclusionGrid grid, int lodOriginCellX, int lodOriginCellY, OcclusionSettings? settings = null)
+    /// <param name="stride">Cells per side of the worldspace's LOD grid (the .lod file's stride). It sets the size of the quadtree the
+    /// game numbers its nodes in, so it must be the worldspace's own.</param>
+    public OcclusionCalculator(OcclusionGrid grid, int lodOriginCellX, int lodOriginCellY, OcclusionSettings? settings = null, int stride = TvdtData.DefaultStride)
     {
         _grid = grid;
+        _stride = stride;
+        _top = TvdtData.TopLevelOf(stride);
+        if (_top < ParentTestLevels) throw new ArgumentOutOfRangeException(nameof(stride), $"Occlusion needs a LOD grid of at least {4 << ParentTestLevels} cells, got {stride}.");
+        _side = 1 << _top;
+        _blocks = new Block?[_side * _side];
         _originX = lodOriginCellX;
         _originY = lodOriginCellY;
         _settings = settings ?? new OcclusionSettings();
         int n = Math.Clamp(_settings.SamplesPerCellSide, 1, 4);
         _sub = OcclusionGrid.SamplesPerCell / n;
-        for (int by = 0; by < TvdtData.LeavesPerSide; by++)
-            for (int bx = 0; bx < TvdtData.LeavesPerSide; bx++)
-                _blocks[by * TvdtData.LeavesPerSide + bx] = BuildBlock(bx, by);
+        for (int by = 0; by < _side; by++)
+            for (int bx = 0; bx < _side; bx++)
+                _blocks[by * _side + bx] = BuildBlock(bx, by);
         for (int level = 1; level <= ParentTestLevels; level++)
         {
-            int quads = TvdtData.LeavesPerSide >> level;
+            int quads = _side >> level;
             _groups[level] = new Block?[quads * quads];
             for (int y = 0; y < quads; y++)
                 for (int x = 0; x < quads; x++) _groups[level][y * quads + x] = BuildGroup(level, x, y);
@@ -103,14 +113,14 @@ public sealed class OcclusionCalculator
     {
         var extra = new List<(float x, float y, float h)>?[ParentTestLevels + 1][];
         for (int level = 0; level <= ParentTestLevels; level++)
-            extra[level] = new List<(float, float, float)>?[(TvdtData.LeavesPerSide >> level) * (TvdtData.LeavesPerSide >> level)];
+            extra[level] = new List<(float, float, float)>?[(_side >> level) * (_side >> level)];
         foreach (var (wx, wy, radius, top) in objects)
         {
             int cellX = (int)MathF.Floor(wx / 4096f) - _originX, cellY = (int)MathF.Floor(wy / 4096f) - _originY;
             if (cellX < 0 || cellY < 0) continue;
             for (int level = 0; level <= ParentTestLevels; level++)
             {
-                int span = 4 << level, quads = TvdtData.LeavesPerSide >> level;
+                int span = 4 << level, quads = _side >> level;
                 int qx = cellX / span, qy = cellY / span;
                 if (qx >= quads || qy >= quads) continue;
                 float minX = (_originX + qx * span) * 4096f, minY = (_originY + qy * span) * 4096f, maxX = minX + span * 4096f, maxY = minY + span * 4096f;
@@ -161,8 +171,8 @@ public sealed class OcclusionCalculator
     {
         var eyeList = SamplePoints(cellX, cellY).Select(p => (p.x, p.y, h: p.h + _settings.EyeAdd));
         var eyes = (_settings.EyePoints > 0 ? eyeList.OrderByDescending(e => e.h).Take(_settings.EyePoints) : eyeList).ToArray();
-        var tvdt = new TvdtData { Lead = 3 };
-        int side = TvdtData.LeavesPerSide;
+        var tvdt = new TvdtData(_stride);
+        int side = _side;
         double cx = cellX + 0.5, cy = cellY + 0.5;
         int ownX = (cellX - _originX) / 4, ownY = (cellY - _originY) / 4;
         var leaf = new bool[side, side];
@@ -178,15 +188,15 @@ public sealed class OcclusionCalculator
                 else visible = Sees(eyes, block, _settings.Clearance);
                 leaf[bx, by] = visible;
             }
-        if (ownX is >= 0 and < TvdtData.LeavesPerSide && ownY is >= 0 and < TvdtData.LeavesPerSide) leaf[ownX, ownY] = true;
+        if ((uint)ownX < (uint)_side && (uint)ownY < (uint)_side) leaf[ownX, ownY] = true;
 
-        // Quads. xLODGen works each level out apart from the blocks, and its LOD8 quads turn out to be more generous than "any block below is
-        // visible" (checked on Tamriel: even the 3 x 3 quads around it miss 9% of the quads it shows). So a quad here is visible when any block
-        // in it or in the quads touching it is visible, or, for the two lowest levels, when a line of sight to the whole quad is clear;
-        // and the higher levels simply follow what is below them. Never less than the blocks below, so nothing visible is ever hidden by a quad.
-        var seen = new bool[TvdtData.TopLevel + 1][,];
+        // Quads. The game drops the object LOD of everything below a node it reads as hidden (see TvdtData), so a quad must be visible
+        // whenever anything below it is, up to the root. On top of that a quad here is visible when any block in the quads touching it is
+        // visible or, for the two lowest levels, when a line of sight to the whole quad is clear: a quad's own LOD mesh is drawn from farther
+        // away than its blocks are, and this keeps it from being hidden too eagerly. The higher levels simply follow what is below them.
+        var seen = new bool[_top + 1][,];
         seen[0] = leaf;
-        for (int level = 1; level <= TvdtData.TopLevel; level++)
+        for (int level = 1; level <= _top; level++)
         {
             int n = side >> level;
             seen[level] = new bool[n, n];
@@ -197,7 +207,7 @@ public sealed class OcclusionCalculator
         for (int by = 0; by < side; by++)
             for (int bx = 0; bx < side; bx++)
                 if (leaf[bx, by]) tvdt.SetLeaf(bx, by, true);
-        for (int level = 1; level <= TvdtData.TopLevel; level++)
+        for (int level = 1; level <= _top; level++)
         {
             int n = side >> level;
             for (int y = 0; y < n; y++)

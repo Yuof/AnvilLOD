@@ -14,6 +14,7 @@ namespace PenguLOD.Plugins;
 /// Makes <c>Occlusion.esp</c> itself: for every big worldspace, a height grid (landscape, water, and the tops of the objects and trees that
 /// are in LOD) goes to <see cref="OcclusionCalculator"/>, and the result is written as the TVDT and MHDT of the worldspace's exterior cells
 /// (CELL overrides only, ESL-flagged, load it last). It does what xLODGen's and DynDOLOD's occlusion run does, from data PenguLOD already has.
+/// The bits are numbered for each worldspace's own LOD grid (see <see cref="TvdtData"/>): the game drops object LOD under any node it reads as hidden.
 /// </summary>
 public static class OcclusionStage
 {
@@ -90,7 +91,7 @@ public static class OcclusionStage
             var todo = landCells.Where(c => !bounded || (c.X >= (int)MathF.Floor(bmin.X) && c.X <= (int)MathF.Ceiling(bmax.X) && c.Y >= (int)MathF.Floor(bmin.Y) && c.Y <= (int)MathF.Ceiling(bmax.Y)))
                 .Where(c => terrain.TryGetCell(ws, c.X, c.Y, out var v) && v.Any(h => h != v[0])).Select(c => (c.X, c.Y)).ToList();
             progress?.Report($"Occlusion {ws}: {todo.Count:N0} cells, {objects:N0} objects and {treeCount:N0} trees in the height grid ({heights.Width}x{heights.Height} samples)");
-            var calc = new OcclusionCalculator(heights, grid.Settings.SwCellX, grid.Settings.SwCellY, settings);
+            var calc = new OcclusionCalculator(heights, grid.Settings.SwCellX, grid.Settings.SwCellY, settings, grid.Settings.Stride);
             calc.AddOwnedTargets(owned);
             int last = 0;
             var data = calc.ComputeMany(todo, new Progress<int>(n => { if (n - last >= 2000) { last = n; progress?.Report($"Occlusion {ws}: {n:N0} of {todo.Count:N0} cells"); } }), ct);

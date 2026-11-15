@@ -3,6 +3,20 @@
 PenguLOD uses its own semantic version, independent of AnvilLOD’s game plugin version.
 Pre-release versions are marked alpha or beta until the supported workflows have broader validation.
 
+## [Unreleased]
+
+Occlusion
+
+- A generated `Occlusion.esp` no longer hides distant objects and trees that are in view.
+  The game numbers the nodes of its LOD quadtree parent first; the plugin was written
+  children first, so only the 4-cell blocks were in the right place and the game read the
+  8-cell and larger nodes from the wrong bits. Whole areas of object and tree LOD, up to
+  32 by 32 cells, disappeared while their terrain stayed. The order now follows the
+  game's own (checked against the game's code, its own cell data and xLODGen output), and
+  it is worked out for each worldspace's LOD grid, so worldspaces with a 128-cell grid
+  are right too. **Generate `Occlusion.esp` again**: one from 0.6.0-beta.2 or earlier
+  should be disabled until then. No other output is affected.
+
 ## [0.6.0-beta.2] - 2026-11-14
 
 A run no longer stops because one model or recipe cannot be generated, and Skyrim 1.6.1179

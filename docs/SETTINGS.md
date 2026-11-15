@@ -408,7 +408,8 @@ before lowering several quality controls together.
 
 Occlusion tells the game which distant blocks terrain hides from a location. This
 feature is experimental. Install its plugin last and check hills and valleys for
-scenery disappearing too early.
+scenery disappearing too early. A plugin from 0.6.0-beta.2 or earlier hides scenery
+that is in view; [generate it again](TROUBLESHOOTING.md#objects-and-trees-are-missing-from-nearby-hills-but-the-terrain-is-there).
 
 | Setting | What it does |
 | --- | --- |
