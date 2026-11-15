@@ -17,6 +17,16 @@ Occlusion
   are right too. **Generate `Occlusion.esp` again**: one from 0.6.0-beta.2 or earlier
   should be disabled until then. No other output is affected.
 
+Textures
+
+- Grass billboards from the texture stage are no longer 16 x 16 pixels. They were sized
+  with the tree setting (12 world units per pixel), which left nearly every grass type at
+  the smallest size and made distant grass look blocky. Grass now has its own setting,
+  **Grass world units per pixel** on the Textures page, default `2`: a typical tuft gets a
+  64 x 32 image, about what TexGen makes. **World units per pixel** is now **Tree world
+  units per pixel** and works as before. Run textures and then object LOD again to get
+  the sharper grass.
+
 ## [0.6.0-beta.2] - 2026-11-14
 
 A run no longer stops because one model or recipe cannot be generated, and Skyrim 1.6.1179

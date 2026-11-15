@@ -148,7 +148,8 @@ Keep defaults for the first comparison, then adjust one control at a time.
 | Complex grass detection threshold | Sensitivity used by Auto layout detection. Default `0.1`; normally leave it alone and use the layout override for a known mismatch. |
 | Stitch base size | Base texture resolution for recipes and rendered objects. Default `256`; recipes can combine it into a larger sheet. Higher values use more texture memory. |
 | Maximum billboard size | Caps the width and height of rendered billboards. Default `512`. Higher values help large trees but use more texture memory. |
-| World units per pixel | Detail per pixel before the size cap. Default `12`; lower values produce sharper, larger textures. |
+| Tree world units per pixel | Detail per pixel of tree billboards and hybrid trunk frames before the size cap. Default `12`; lower values produce sharper, larger textures. |
+| Grass world units per pixel | The same for grass billboards. Default `2`, which gives a typical tuft a 64 x 32 image; grass is around 100 units wide, so it needs a much lower value than trees. |
 | Brightness multiplier | Overall generated-texture brightness. Default `1`; below `1` darkens, above `1` brightens. |
 | Minimum tree height | Skips billboard rendering for trees shorter than this height in game units. Default `256`. |
 | Minimum grass height | Skips billboard rendering for grass shorter than this height in game units. Default `16`. |

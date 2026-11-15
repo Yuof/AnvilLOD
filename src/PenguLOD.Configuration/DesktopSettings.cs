@@ -158,6 +158,8 @@ public sealed class DesktopSettings : ObservableObject
     public decimal TextureGenMaxSize { get => _textureGenMaxSize; set => Set(ref _textureGenMaxSize, value); }
     private decimal _textureGenUnitsPerPixel = 12m;
     public decimal TextureGenUnitsPerPixel { get => _textureGenUnitsPerPixel; set => Set(ref _textureGenUnitsPerPixel, value); }
+    private decimal _textureGenGrassUnitsPerPixel = 2m;
+    public decimal TextureGenGrassUnitsPerPixel { get => _textureGenGrassUnitsPerPixel; set => Set(ref _textureGenGrassUnitsPerPixel, value); }
     private bool _textureGenHdViews = true, _textureGenReferenceScale = true;
     private decimal _textureGenUnplacedTreeScale = 1, _textureGenComplexThreshold = .1m;
     private string _textureGenGrassTextures = "Auto";

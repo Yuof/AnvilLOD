@@ -98,7 +98,8 @@ public static class RequestFactory
                 (float)s.BakePbrScale, (float)s.BakePbrGamma, (float)s.BakeAo, (float)s.BakeAmbient, (float)s.BakeDirectional),
             Billboards: new(s.TextureGenHdViews, s.TextureGenReferenceScale, (float)s.TextureGenUnplacedTreeScale,
                 Enum.TryParse<PenguLOD.Plugins.Authoring.GrassTextureMode>(s.TextureGenGrassTextures, out var grassTextures) ? grassTextures
-                    : throw new ArgumentException("Grass texture layout must be Auto, Basic or Packed."), (float)s.TextureGenComplexThreshold), ResourcePacks: ResourcePaths(s));
+                    : throw new ArgumentException("Grass texture layout must be Auto, Basic or Packed."), (float)s.TextureGenComplexThreshold), ResourcePacks: ResourcePaths(s),
+            GrassUnitsPerPixel: (float)s.TextureGenGrassUnitsPerPixel);
         TextureGeneration.Validate(request);
         if (Optional(s.GrassOutput) is { } grassOutput)
         {
