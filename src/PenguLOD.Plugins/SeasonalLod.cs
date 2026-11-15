@@ -87,11 +87,11 @@ public static class SeasonalLod
                     {
                         var replacement = SeasonalAssets.SwapTree(game,(AssetIndex)assets,tree,treeSwaps,settings,missingBillboard);
                         if (replacement == tree) {seasonal.Add(r);continue;}
-                        var card = TreeCardSource.Prefix + replacement.Billboard.TexturePath;
+                        string near = TreeCardSource.CardPath(replacement.Billboard.TexturePath, far: false), card = TreeCardSource.CardPath(replacement.Billboard.TexturePath, far: true);
                         LodMeshSet meshes;
                         if (tree3d is not null && replacement.Model3D is not null)
                             meshes = tree3d.ToReferences([replacement],settings).Single().Meshes;
-                        else meshes = new(r.Meshes.Lod4 is null ? null : card,r.Meshes.Lod8 is null ? null : card,
+                        else meshes = new(r.Meshes.Lod4 is null ? null : near,r.Meshes.Lod8 is null ? null : card,
                             r.Meshes.Lod16 is null ? null : card,r.Meshes.Lod32 is null ? null : card);
                         seasonal.Add(r with {Meshes=meshes});any=true;
                     }

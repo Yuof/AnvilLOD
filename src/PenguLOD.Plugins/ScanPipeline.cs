@@ -492,7 +492,17 @@ public static class ScanPipeline
             }
 
             var light = allTrees.Where(t => TreeCardSource.NeedsCards(t) && !in3d.Contains(t)).ToList();
-            if (light.Count > 0 || in3d.Count > 0) cards = new TreeCardSource(assets, req.TreeBrightness);
+            if (light.Count > 0 || in3d.Count > 0)
+            {
+                cards = new TreeCardSource(assets, req.TreeBrightness);
+                if (req.Generate && req.OutputFolder is { } cardOutput)
+                {
+                    progress?.Report("Tree cards: packing the tree billboards into one atlas...");
+                    cards.PrepareAtlas(cardOutput, light.Concat(in3d).Select(t => t.Billboard.TexturePath));
+                    if (cards.Atlas is { } packed)
+                        progress?.Report($"Tree cards: {packed.Tiles:N0} billboards in one {packed.Size}x{packed.Size} atlas (tiles up to {Math.Min(TreeCardSource.AtlasTile, packed.SizeCap)} px, {packed.Reduced:N0} scaled down), so each block from LOD8 on needs one tree card material.");
+                }
+            }
             if (in3d.Count > 0)
             {
                 allRefs = [.. allRefs, .. tree3d!.ToReferences(in3d, t3)];
