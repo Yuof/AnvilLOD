@@ -99,9 +99,38 @@ public class GrassPatchTests(ITestOutputHelper output)
         var oldCover = Coverage(cell, old);
 
         output.WriteLine($"covered share of grass ground: bins {newCover.Covered:P1} (tufts {tufts.Count}, avg overdraw {newCover.Overdraw:F2}), random {oldCover.Covered:P1} (avg overdraw {oldCover.Overdraw:F2})");
-        Assert.True(newCover.Covered >= oldCover.Covered, "binned coverage should be at least the random coverage");
+        // Tufts are aimed off the middle of their bins so they do not line up in rows; that costs a little cover against a perfect
+        // grid and still needs far less overlap than random sampling does for its cover.
         Assert.True(newCover.Covered > 0.85, $"binned coverage {newCover.Covered:P1}");
-        Assert.True(newCover.Overdraw <= oldCover.Overdraw, "binned tufts should overlap less");
+        Assert.True(newCover.Overdraw < oldCover.Overdraw / 2, "binned tufts should overlap far less");
+    }
+
+    [Fact]
+    public void Types_that_grow_on_the_same_ground_share_the_bins_instead_of_piling_up()
+    {
+        // Five grass types mixed over one cell, 400 instances each. Binned one type at a time, every type put a tuft near the middle
+        // of the same large bins: five tufts on one spot and bare ground to the next.
+        var rng = new Random(11);
+        var types = Enumerable.Range(0, 5).Select(_ => (IReadOnlyList<GrassInstance>)Enumerable.Range(0, 400)
+            .Select(_ => new GrassInstance(Origin + new Vector3((float)rng.NextDouble() * 4096, (float)rng.NextDouble() * 4096, 0), 1, (float)rng.NextDouble() * 6.28f)).ToList()).ToList();
+        var places = types.SelectMany(t => t).Select(g => g.Position).ToHashSet();
+
+        var tufts = GrassPatchBuilder.StratifyTypes(types, Origin, 0.6f);
+
+        Assert.InRange(tufts.Count, 600, 1200);                                           // 60% of 2,000, as near as the bin sizes allow
+        Assert.All(tufts, t => Assert.Contains(t.Tuft.Position, places));                 // every tuft stands where grass stands
+        float spacing = tufts[0].Tuft.Spacing;
+        Assert.All(tufts, t => Assert.Equal(spacing, t.Tuft.Spacing));                    // one grid for all types
+        var bins = tufts.Select(t => ((int)MathF.Floor((t.Tuft.Position.X - Origin.X) / spacing), (int)MathF.Floor((t.Tuft.Position.Y - Origin.Y) / spacing))).ToList();
+        Assert.Equal(bins.Count, bins.Distinct().Count());                                // one tuft per bin, whatever its type
+        Assert.Equal(2000, tufts.Sum(t => t.Tuft.Count));                                 // each tuft stands for all the grass of its bin
+        foreach (var share in tufts.GroupBy(t => t.Type).Select(g => g.Count() / (double)tufts.Count))
+            Assert.InRange(share, 0.14, 0.26);                                            // each type about a fifth
+
+        // Not in rows: the tufts' offsets inside their bins are spread out, not all at the middle.
+        var offsets = tufts.Select(t => (t.Tuft.Position.X - Origin.X) / spacing % 1).ToList();
+        Assert.True(offsets.Count(o => o < 0.35f) > tufts.Count / 10 && offsets.Count(o => o > 0.65f) > tufts.Count / 10);
+        Assert.Equal(tufts.Select(t => t.Tuft.Position), GrassPatchBuilder.StratifyTypes(types, Origin, 0.6f).Select(t => t.Tuft.Position));
     }
 
     /// <summary>Share of 32-unit probe points near grass that a tuft footprint covers, and the average number of footprints on a covered point.</summary>

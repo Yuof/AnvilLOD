@@ -46,6 +46,17 @@ Textures
 - Trunk textures that object LOD makes itself for native hybrid trees and tree billboards
   it makes for trees without one use the same light.
 
+Grass LOD
+
+- Grass LOD no longer stands in rows of dots on bare ground. Each grass type was thinned
+  on its own over the same grid, and its tuft was put at the middle of the grass in its
+  square, so the tufts of every type in a square landed on nearly the same spot: in a
+  dense cell near Whiterun 46% of the tufts stood within 12 units of another, 96 units
+  from the next pile. All grass types of a cell now share one grid, which makes the
+  squares about a third the size at the same tuft count, and each tuft is one of the real
+  grass instances near a random point in its square, at its own size. Tufts are no longer
+  enlarged to fill large squares. Generate object LOD again; every grass block is rebuilt.
+
 Seasonal LOD
 
 - Seasonal LOD can be limited to the seasons you play. Four new boxes, **Seasonal LOD:

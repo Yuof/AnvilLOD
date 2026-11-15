@@ -23,7 +23,7 @@ namespace PenguLOD.Plugins;
 public sealed class GrassLodSource : ISyntheticMeshSource
 {
     public const string Prefix = "~pengulod-grass|";
-    private const int Version = 9; // billboard normal maps follow the NIF tangent frame
+    private const int Version = 10; // all grass types share the bins; a tuft is one of the bin's own instances
 
     private readonly AssetIndex _assets;
     private readonly float _density;
