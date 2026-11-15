@@ -16,8 +16,9 @@ installed, say) is skipped and reported as a warning, as the game skips it. Turn
 **Strict seasonal swaps** (CLI `--seasons-strict`) to stop generation instead. Seasonal grass
 caching always treats such lines as errors. A season whose INIs change nothing gets no
 seasonal terrain, tree or object LOD files; the game then uses the normal LOD, which is
-identical. Missing seasonal tree billboards tell you to regenerate textures instead of
-silently substituting the default tree.
+identical. A seasonal tree without a billboard is reported as a warning, and its trees
+keep their base LOD in that season; regenerate textures with the same profile to add it.
+With strict seasonal swaps it stops generation instead.
 
 For each configured season, terrain emits `.WIN.btr`, `.WIN.dds`, `.WIN_n.dds` (and the
 equivalent other suffixes). Tree LOD emits seasonal `.btt`, `.lst`, and tree atlas files.

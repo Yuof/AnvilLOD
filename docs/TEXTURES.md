@@ -24,7 +24,8 @@ Existing TexGen output can supply textures for unsupported features underneath t
   source normal maps, lighting, brightness and supported PBR/AO baking.
   Automatic discovery excludes whole trees whose animated, blended or view-dependent
   effects cannot be rendered as static billboards. The texture report explains each
-  exclusion. Explicit billboard rules and model filters still require a supported render.
+  exclusion. A tree that cannot be rendered for another reason is reported as failed and
+  left out; see [failed items](#failed-items).
 - **Hybrid tree trunk textures** renders front/side diffuse and normal pairs from
   `_trunk.nif` resources under `DynDOLOD/Render/Billboards/` or
   `DynDOLOD/Render/Skyrim/Billboards/`. Matching installed hybrid meshes supply camera
@@ -82,11 +83,28 @@ Each successful run replaces the previously owned texture set. Keep every catego
 whose output should remain selected during regeneration. The report identifies generated,
 skipped, retained and failed assets. If an optional object template cannot render, a valid
 installed diffuse/normal pair can be retained unchanged; brightness controls do not alter
-retained textures. Missing fallback pairs and failed required renders stop publication.
+retained textures.
+
+### Failed items
+
+A complete run publishes everything it could generate. A model that cannot be read or
+rendered, a missing source texture and a recipe that cannot be built are each logged as
+an `ERROR`, counted as failures in the summary and listed as `Failed` in the report, and
+the run ends with one warning giving their number. The failed item is left out of the
+output, with no partial files:
+
+- A tree without a billboard has no tree LOD, unless the load order already supplies a
+  billboard for it. The LOD stage names the tree types that have none.
+- Grass without a billboard is drawn in grass LOD with its own model texture.
+- A stitched texture that was not built is read from the load order where a mod supplies it.
+
+Fix the named mesh or install the missing texture, then run textures again to add it.
+A filtered preview is stricter: it publishes only when every selected model renders. An
+output folder that cannot be written stops the run, whichever kind of run it is.
 
 `PenguLOD.textures-report.json` records results. Successful output also includes
-`PenguLOD.textures.json` with ownership and hashes. Failed rendering and cancellation
-preserve published textures; LOD verifies the manifest before using them. If publication
+`PenguLOD.textures.json` with ownership and hashes. A run that publishes nothing and
+cancellation preserve published textures; LOD verifies the manifest before using them. If publication
 is interrupted and the next run reports changed files, keep that output disabled and
 generate into a fresh folder. See [persistent generation](PIPELINE.md).
 
@@ -175,6 +193,6 @@ their authors and installed with their required mods.
 Triangle strips, dynamic vertex buffers and suitable self-contained static skin poses
 are supported. Static effect materials can be rendered from compatible resources; see
 [model support](MODEL-SUPPORT.md) for formats and limits. An unreadable visible shape,
-missing required texture or unsupported required render resource stops publication and
-preserves existing output. Missing assets must be supplied by the source mod; generation
-does not repair or rewrite that mod.
+missing required texture or unsupported required render resource is reported and that item
+left out; see [failed items](#failed-items). Missing assets must be supplied by the source
+mod; generation does not repair or rewrite that mod.

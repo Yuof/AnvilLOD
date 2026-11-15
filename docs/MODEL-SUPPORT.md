@@ -30,7 +30,12 @@ remains an error.
 
 Static skinning requires all bones in the same NIF. Legacy skins require per-bone weights
 in `NiSkinData`; SSE skins use their vertex-buffer weights. Missing bones, invalid weights
-or inconsistent buffers retain a reported fallback. The pose uses serialized bone transforms;
+or inconsistent buffers retain a reported fallback. Three things the game never reads do
+not reject a model: the leftover `NiSkinData` weight list of an SSE skin, a bind transform
+for a bone the skin instance does not list, and the weights of a vertex no triangle uses.
+A drawn vertex weighted to a bone without a bind transform, or whose weights do not add up
+to one, is still an error. Geometry, skin and animation data blocks listed in the scene
+without an owning shape are ignored. The pose uses serialized bone transforms;
 PenguLOD does not evaluate animation timelines, wind, physics or an external skeleton.
 Written LOD meshes are static and do not retain skin or tree-animation shader flags.
 
@@ -54,11 +59,15 @@ effects remain unsupported. Automatic tree billboard discovery excludes the enti
 tree when these effects are its only unsupported feature, reports the exclusion and
 marks its billboard-list entry `False`. No partial tree billboard is written. An explicit
 billboard rule or model filter still reports a failure, as do required grass, trunk and
-object renders. This is not full game-shader emulation.
+object renders. A failure in a complete run is reported and that item left out; only a
+filtered preview stops. See [failed items](TEXTURES.md#failed-items). This is not full
+game-shader emulation.
 
 The Bethesda `\bNOR` marker in a NIF's normal-map slot is treated as an absent normal map;
-billboard rendering then uses the model's geometry normals. Other invalid texture paths
-remain errors, including that marker in a diffuse slot.
+billboard rendering then uses the model's geometry normals. Mesh tools that normalize
+texture paths store it behind a folder, such as `textures\<backspace>NOR`; that form is
+accepted too. Other invalid texture paths remain errors, including that marker in a
+diffuse slot.
 
 Object render templates still need a valid TexGen viewport plane. Hybrid trunk rendering
 still needs the installed model's matching cards and crops. Geometry support does not
