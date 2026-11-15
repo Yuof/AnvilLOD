@@ -63,6 +63,31 @@ public class SeasonalGenerationTests
     }
 
     [Fact]
+    public void ASeasonalTreeWithoutABillboardKeepsItsBaseLodUnlessSeasonsAreStrict()
+    {
+        using var f=new TerrainFixture(seasons:true);
+        Assert.True(TextureGeneration.Run(f.Textures.Request with {Stitched=false,Trees=true}).Published);
+        using var game=GameContext.Open(f.Game);
+        // The generated textures are not attached, so the winter tree has no billboard in this load order.
+        var assets=game.BuildAssets(_=>true);
+        var tree=game.LoadOrder.PriorityOrder.Tree().WinningOverrides().Single(t=>t.EditorID=="FixtureTree");
+        var replacement=game.LoadOrder.PriorityOrder.Tree().WinningOverrides().Single(t=>t.EditorID=="WinterTree");
+        string file=$@"textures\terrain\lodgen\skyrim.esm\testtree_{tree.FormKey.ID:x8}";
+        using var info=new StreamReader(File.OpenRead(GamePath.ToFileSystemPath(f.Textures.Output,file+".txt")));
+        var bb=TreeBillboard.Parse(file+".dds",info.ReadToEnd())!;
+        var original=new TreeReference("test","FixtureWorld",new(-10000,-10000,0),0,1,100,bb,BaseFormKey:tree.FormKey.ToString());
+        var swaps=SeasonalAssets.Read(game,assets,"Trees")["WIN"];
+        var strict=Assert.Throws<InvalidDataException>(()=>SeasonalAssets.SwapTree(game,assets,original,swaps,Tree3DSettings.Off));
+        Assert.Contains("has no billboard",strict.Message);
+        var warnings=new List<string>();
+        Assert.Null(SeasonalAssets.MissingBillboardWarning(strict:true,"WIN",warnings.Add));
+        var report=SeasonalAssets.MissingBillboardWarning(strict:false,"WIN",warnings.Add);
+        for(int i=0;i<3;i++) Assert.Same(original,SeasonalAssets.SwapTree(game,assets,original,swaps,Tree3DSettings.Off,report));
+        string warning=Assert.Single(warnings);
+        Assert.Contains("WIN",warning); Assert.Contains(replacement.FormKey.ToString(),warning); Assert.Contains("base LOD",warning);
+    }
+
+    [Fact]
     public void SeasonalTreeAtlasBttAndListCoexistWithDefaultAndCanBeRemoved()
     {
         using var f=new TerrainFixture(seasons:true);

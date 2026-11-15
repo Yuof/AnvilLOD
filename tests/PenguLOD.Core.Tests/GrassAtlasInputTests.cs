@@ -36,8 +36,14 @@ public sealed class GrassAtlasInputTests
         var cell = Assert.Single(source.Discover(Grids));
         if (missingUsedTexture)
         {
-            Assert.Throws<FileNotFoundException>(() => source.PrepareAtlas());
+            // The grass type is left out and reported. Nothing is drawn from a texture that is not there.
+            source.PrepareAtlas();
             Assert.False(File.Exists(GamePath.ToFileSystemPath(f.Output, GrassLodSource.AtlasDiffuse)));
+            var failure = Assert.Single(source.RenderFailures);
+            Assert.Equal(@"grass\used.nif", failure.Key); Assert.Contains("Diffuse texture missing", failure.Value);
+            Assert.Equal(0, source.BillboardsRendered);
+            Assert.Empty(source.Build(cell.Meshes.Lod4!)!.Parts);
+            Assert.Single(source.MissingBillboards);
         }
         else
         {

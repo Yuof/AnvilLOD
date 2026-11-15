@@ -44,9 +44,28 @@ internal static class SeasonalAssets
         return result;
     }
 
+    /// <summary>
+    /// What to do about a seasonal tree without a billboard: null when seasons are strict (generation stops), otherwise
+    /// a callback that reports each such tree once.
+    /// </summary>
+    internal static Action<FormKey>? MissingBillboardWarning(bool strict, string season, Action<string>? warn)
+    {
+        if (strict) return null;
+        var reported = new HashSet<FormKey>();
+        return target =>
+        {
+            lock (reported) if (!reported.Add(target)) return;
+            warn?.Invoke($"{season}: seasonal tree {target} has no billboard, so its trees keep their base LOD in this season. "
+                + "Generate tree textures with the same profile to add it.");
+        };
+    }
+
     internal static string Label(SeasonFormRef form) => form.EditorId ?? $"0x{form.LocalId:X}~{form.Plugin}";
 
-    public static TreeReference SwapTree(GameContext game, AssetIndex assets, TreeReference tree, IReadOnlyDictionary<FormKey,FormKey> swaps, Tree3DSettings settings)
+    /// <param name="missingBillboard">Called with a swap target that has no billboard; the tree then keeps its base LOD for
+    /// the season, as an unresolved swap does. Null (strict seasons): a missing billboard stops generation.</param>
+    public static TreeReference SwapTree(GameContext game, AssetIndex assets, TreeReference tree, IReadOnlyDictionary<FormKey,FormKey> swaps, Tree3DSettings settings,
+        Action<FormKey>? missingBillboard = null)
     {
         if (tree.BaseFormKey is null || !swaps.TryGetValue(FormKey.Factory(tree.BaseFormKey),out var target)
             || target.ToString().Equals(tree.BaseFormKey,StringComparison.OrdinalIgnoreCase)) return tree;
@@ -68,7 +87,11 @@ internal static class SeasonalAssets
             }
             if (billboard is not null) break;
         }
-        if (billboard is null) throw new InvalidDataException($"Seasonal tree {target} has no billboard. Generate tree textures with the same profile first.");
+        if (billboard is null)
+        {
+            if (missingBillboard is null) throw new InvalidDataException($"Seasonal tree {target} has no billboard. Generate tree textures with the same profile first.");
+            missingBillboard(target); return tree;
+        }
         string? lod = null; bool native = false;
         if (settings.Enabled && tree.Model3D is not null)
         {
