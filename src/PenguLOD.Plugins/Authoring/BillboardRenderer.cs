@@ -24,8 +24,11 @@ public static class BillboardRenderer
     /// <param name="minCoverage">Thicken the cut-out until at least this share of the image is opaque (sparse grass blades
     /// otherwise vanish at a distance; 0 = leave as rendered).</param>
     public static BillboardImage? Render(LodMesh model, TextureLoader loadTexture, int maxPixels = 512, bool vertexColors = true, float minCoverage = 0f, float unitsPerPixel = 0, (Vector3 Min, Vector3 Max)? viewport = null, float brightness = 1, bool shaded = true, (int W, int H)? pixelSize = null, MaterialBakeSettings? materials = null,
-        BillboardView view = BillboardView.Front, bool originCentered = false, GrassTextureMode grassTextures = GrassTextureMode.Basic, float complexGrassThreshold = .1f)
+        BillboardView view = BillboardView.Front, bool originCentered = false, GrassTextureMode grassTextures = GrassTextureMode.Basic, float complexGrassThreshold = .1f,
+        BillboardLight? light = null)
     {
+        light ??= BillboardLight.Tree;
+        light.Validate();
         if (model.HasIncompleteGeometry) throw new NotSupportedException("Cannot render incomplete geometry: " + string.Join("; ", model.Warnings));
         if (view == BillboardView.Side)
         {
@@ -68,7 +71,6 @@ public static class BillboardRenderer
         var normalMap = new byte[w * h * 4];
         var depth = new float[w * h];
         Array.Fill(depth, float.MaxValue);
-        var light = Vector3.Normalize(new Vector3(0.3f, -1f, 0.8f));
 
         foreach (var part in model.Parts)
         {
@@ -156,7 +158,7 @@ public static class BillboardRenderer
                             if (mapped.LengthSquared() > 1e-8f) n = Vector3.Normalize(mapped);
                         }
                     }
-                    float shade = brightness * (shaded ? materials.Ambient + materials.Directional * MathF.Abs(Vector3.Dot(n, light)) : 1);
+                    float shade = brightness * (shaded ? light.Shade(n) : 1);
                     if (effect is not null) shade = brightness + (shade - brightness) * effect.LightingInfluence;
                     depth[idx] = z;
                     int o = idx * 4;

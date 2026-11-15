@@ -34,9 +34,12 @@ includes both stages does this automatically.
 
 - **HD front and side billboards** gives each tree and grass card separate front and side
   images. Turn it off to render one view.
-- **Maximum billboard size**, **Tree world units per pixel** and **Grass world units per
-  pixel** set the resolution. A lower units-per-pixel value is sharper and larger. Grass
-  has its own value because a tuft is far smaller than a tree.
+- **Maximum billboard size** and the **Tree**, **Trunk** and **Grass world units per
+  pixel** settings set the resolution. A lower units-per-pixel value is sharper and larger.
+  Grass and trunks have their own values because they are far smaller than a tree.
+- Tree billboards and trunk textures are lit from above, the way TexGen lights them; grass
+  is lit softly from the front. The **ambient** and **direct light** settings for trees,
+  trunks and grass under **Material calibration** change how bright they come out.
 - **Size tree textures for the largest placed reference** gives trees placed at a large
   scale more detail, up to the maximum size.
 - **Grass texture layout** is **Auto** by default and detects the packed layout used by

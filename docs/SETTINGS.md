@@ -134,8 +134,9 @@ Keep defaults for the first comparison, then adjust one control at a time.
 | PBR scale | Brightness scale for calibrated PBR colour. Default `0.65`; lower is darker. |
 | PBR gamma | Adjusts PBR midtones. Default `1.15`; higher darkens midtones, lower brightens them. |
 | PBR occlusion strength | Amount of shading taken from the PBR ambient-occlusion map. Default `0.5`; `0` ignores it, `1` uses its full effect. |
-| Ambient light | Overall light used when rendering models. Default `0.7`; increasing it brightens shaded areas. |
-| Directional light | Light from a direction, which brings out shape and shading differences. Default `0.3`; increasing it adds stronger directional shading. |
+| Tree ambient light / Tree direct light | Light for tree billboards. Billboards are lit from straight above: ambient reaches every surface, direct light adds to the surfaces that face up. Defaults `0.6` and `1.35`, as in TexGen. More ambient brightens the whole tree; more direct light brightens the tops of crowns and branches. |
+| Trunk ambient light / Trunk direct light | The same for hybrid tree trunk textures. Defaults `1.5` and `0.5`, as in TexGen; bark faces sideways and gets almost no direct light, so its ambient part is high. |
+| Grass ambient light / Grass direct light | Light for grass billboards. Grass is lit softly from the front and above, on both sides of a blade. Defaults `0.7` and `0.3`. |
 
 ### Quality
 
@@ -148,7 +149,8 @@ Keep defaults for the first comparison, then adjust one control at a time.
 | Complex grass detection threshold | Sensitivity used by Auto layout detection. Default `0.1`; normally leave it alone and use the layout override for a known mismatch. |
 | Stitch base size | Base texture resolution for recipes and rendered objects. Default `256`; recipes can combine it into a larger sheet. Higher values use more texture memory. |
 | Maximum billboard size | Caps the width and height of rendered billboards. Default `512`. Higher values help large trees but use more texture memory. |
-| Tree world units per pixel | Detail per pixel of tree billboards and hybrid trunk frames before the size cap. Default `12`; lower values produce sharper, larger textures. |
+| Tree world units per pixel | Detail per pixel of tree billboards before the size cap. Default `12`; lower values produce sharper, larger textures. |
+| Trunk world units per pixel | The same for hybrid tree trunk textures. Default `4`, which gives the image sizes TexGen makes. |
 | Grass world units per pixel | The same for grass billboards. Default `2`, which gives a typical tuft a 64 x 32 image; grass is around 100 units wide, so it needs a much lower value than trees. |
 | Brightness multiplier | Overall generated-texture brightness. Default `1`; below `1` darkens, above `1` brightens. |
 | Minimum tree height | Skips billboard rendering for trees shorter than this height in game units. Default `256`. |

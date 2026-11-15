@@ -18,7 +18,23 @@ public sealed class TrunkTextureTests
     private const string Hybrid = @"meshes\dyndolod\lod\trees\testtree_12345678passthru_lod.nif";
     private const string RenderPath = @"dyndolod\render\billboards\" + Stem + ".nif";
     private const string Target = @"textures\" + Stem;
-    private static TextureGenerationRequest Request(TextureFixture f) => f.Request with { Stitched = false, TreeTrunks = true, UnitsPerPixel = 4 };
+    private static TextureGenerationRequest Request(TextureFixture f) => f.Request with { Stitched = false, TreeTrunks = true };
+
+    [Fact]
+    public void Trunk_images_are_sized_by_their_own_units_per_pixel_not_the_tree_setting()
+    {
+        // Cards of 200 x 400 (front) and 300 x 500 (side) units. At the tree default (12) the front view would be 32 x 64.
+        using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
+        Setup(f);
+        (int, int)[] Sizes(TextureGenerationRequest request) => TextureGeneration.Run(request).Items
+            .Where(i => i.Kind == "Tree trunk" && i.Status == "Written").OrderBy(i => i.Output, StringComparer.Ordinal).Select(i => (i.Width, i.Height)).ToArray();
+        var request = Request(f) with { BillboardMaxSize = 512 };
+        Assert.Equal(4f, request.TrunkUnitsPerPixel);
+        Assert.Equal([(64, 128), (128, 128)], Sizes(request));
+        Assert.Equal([(64, 128), (128, 128)], Sizes(request with { UnitsPerPixel = 64 }));
+        Assert.Equal([(32, 64), (64, 64)], Sizes(request with { TrunkUnitsPerPixel = 8 }));
+        Assert.Throws<ArgumentException>(() => TextureGeneration.Validate(request with { TrunkUnitsPerPixel = 0 }));
+    }
 
     [Fact]
     public void Native_trunks_keep_independent_crops_orientation_normals_and_unlock_the_hybrid()
