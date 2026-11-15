@@ -37,6 +37,16 @@ public static partial class Program
         var report = OutputManagement.Verify(a.GetAll("input") ?? throw new CliArgException("--input is required."), Cancellation);
         Console.WriteLine(report.Summary()); WriteReport(a, report); return report.Valid ? 0 : 1;
     }
+    private static int CompareReference(CliArgs a)
+    {
+        var outputs = (a.GetAll("input") ?? throw new CliArgException("--input is required: the PenguLOD output folder(s).")).ToList();
+        var references = (a.GetAll("reference") ?? throw new CliArgException("--reference is required: the DynDOLOD, TexGen or xLODGen output folder(s).")).ToList();
+        if (a.Get("report") is { } file && outputs.Concat(references).Any(folder => PenguLOD.Core.Paths.HostPath.IsWithin(file, folder)))
+            throw new CliArgException("Save the report outside the folders being compared.");
+        var comparison = ReferenceComparison.Compare(outputs, references, a.GetAll("worldspace"),
+            a.Integer("texture-samples", 60, 0, 10000), new SyncProgress(Console.WriteLine), Cancellation);
+        Console.WriteLine(comparison.Summary()); WriteReport(a, comparison); return 0;
+    }
     private static int PlanUpdate(CliArgs a)
     {
         var plan = OutputManagement.Plan(a.GetAll("input") ?? throw new CliArgException("--input is required."), Required(a, "output"), Cancellation);

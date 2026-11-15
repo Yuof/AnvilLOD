@@ -31,6 +31,31 @@ reports are compared; added and removed blocks are listed separately.
 For a fair frame-rate comparison in game, change one setting at a time and use the same
 place, direction, weather and resolution.
 
+## Compare with another tool's output
+
+`compare-reference` measures a PenguLOD output against output of DynDOLOD, TexGen or
+xLODGen for the same game. It reads the files only, so no load order is needed:
+
+```sh
+PenguLOD compare-reference --input "Object LOD" --input "Textures" \
+  --reference "DynDOLOD Output" --reference "TexGen Output" --report parity.json
+```
+
+It reports:
+
+- **Blocks both sides have** (same file name), per worldspace and level: triangles,
+  shapes and distinct textures per block, the layers the PenguLOD blocks are made of, and
+  the most used shape names and shader flags on each side. A shape is a draw call.
+- **Textures under the same path**, by kind (billboards, trunks, object LOD, terrain):
+  how many each side has, the pixel ratio, and brightness and contrast on a sample.
+  `--texture-samples` sets the sample size per kind; `0` skips it.
+- **Plugins** of each side with their record counts by type.
+- **Names in the output that differ only in case.**
+
+`--worldspace Tamriel` limits the blocks to one worldspace; repeat it for more. The two
+sides can come from different load orders; anything installed on one side only shows up
+as a difference.
+
 ## Verify output folders
 
 1. Add the folders under **Stage output folders**. Include the texture, grass and terrain
@@ -88,6 +113,7 @@ Add `--apply` to delete them.
 PenguLOD cost-report --input "Object LOD" --report costs.json
 PenguLOD compare-costs --before old-costs.json --after new-costs.json --report comparison.json
 PenguLOD verify-output --input "Textures" --input "Object LOD" --report verification.json
+PenguLOD compare-reference --input "Object LOD" --input "Textures" --reference "DynDOLOD Output" --reference "TexGen Output" --report parity.json
 PenguLOD plan-update --input "Textures" --input "Object LOD" --output "Install Package" --report plan.json
 PenguLOD publish-update --plan plan.json
 PenguLOD plan-generation --settings preset.json --report scope.json

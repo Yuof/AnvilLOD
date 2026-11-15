@@ -67,6 +67,15 @@ Output
   such folders before it records its output, which repairs an existing output on the next
   run, and **Verify output set** reports them. Windows output was not affected.
 
+Reports
+
+- New command `compare-reference` measures a PenguLOD output against output of DynDOLOD,
+  TexGen or xLODGen for the same game: triangles, shapes, textures and shader flags of the
+  blocks both sides have, size, brightness and contrast of textures under the same path,
+  plugin record counts, and output names that differ only in case. It reads files only
+  and takes about 20 seconds for a large load order. See
+  [Reports and outputs](docs/REPORTS-AND-OUTPUTS.md#compare-with-another-tools-output).
+
 ## [0.6.0-beta.2] - 2026-11-14
 
 A run no longer stops because one model or recipe cannot be generated, and Skyrim 1.6.1179

@@ -76,6 +76,11 @@ public static partial class Program
           PenguLOD cost-report --input <output folder> --report <costs.json>
           PenguLOD compare-costs --before <costs.json> --after <costs.json> [--report <comparison.json>]
           PenguLOD verify-output --input <stage folder> [--input <other stage folder>] [--report <verification.json>]
+          PenguLOD compare-reference --input <PenguLOD output folder> [--input ...] --reference <DynDOLOD, TexGen or xLODGen output>
+                                         [--reference ...] [--worldspace <id>] [--texture-samples <n>] [--report <parity.json>]
+                                         Measure an output against another tool's: blocks under the same name (triangles,
+                                         shapes, textures, shader flags), textures under the same path (size, brightness,
+                                         contrast), plugin records, and names that differ only in case. Reads files only.
           PenguLOD plan-update --input <stage folder> [--input ...] --output <package folder> --report <plan.json>
           PenguLOD publish-update --plan <reviewed plan.json>
           PenguLOD plan-generation --settings <preset.json> --report <scope-plan.json>
@@ -310,6 +315,7 @@ public static partial class Program
                 "cost-report" => RunCostReport(options),
                 "compare-costs" => CompareCosts(options),
                 "verify-output" => VerifyOutput(options),
+                "compare-reference" => CompareReference(options),
                 "plan-update" => PlanUpdate(options),
                 "publish-update" => PublishUpdate(options),
                 "plan-generation" => PlanGeneration(options),

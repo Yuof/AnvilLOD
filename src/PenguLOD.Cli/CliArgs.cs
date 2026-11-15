@@ -27,7 +27,7 @@ public sealed class CliArgs
         F("verify-source-contents", true), F("expand-output-scope", true), F("deep-scan", true), F("verify-outputs", true),
         V("inspect-asset", true), P("wine-prefix", true), V("keep-previous", true), F("allow-software"),
         // Output management.
-        P("input"), P("before"), P("after"), P("plan"), P("output"),
+        P("input"), P("before"), P("after"), P("plan"), P("output"), P("reference"), V("texture-samples"),
         // Game source.
         P("data"), P("plugins"), P("mo2"), V("profile"), P("game-ini"), P("mo2-game"), P("mo2-mods"), P("mo2-profiles"), P("mo2-overwrite"),
         // Scan and generate.
