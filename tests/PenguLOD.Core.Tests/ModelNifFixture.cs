@@ -13,7 +13,8 @@ public static class ModelNifFixture
     internal static byte[] Create(Geometry geometry, bool skinned = false, bool missingBone = false,
         float weight = .25f, bool badIndex = false, bool truncate = false, bool le = false, bool effect = false,
         bool unsupportedEffect = false, bool modelNormals = false, ushort? alphaFlags = null, byte alphaThreshold = 128,
-        bool rotatedBones = false, string normalTexture = @"textures\green_n.dds", string diffuseTexture = @"textures\green.dds")
+        bool rotatedBones = false, string normalTexture = @"textures\green_n.dds", string diffuseTexture = @"textures\green.dds",
+        int skinDataBones = 2, bool staleLegacyWeights = false, bool orphanVertex = false)
     {
         bool legacy = geometry is Geometry.Triangles or Geometry.Strips;
         bool partitioned = geometry is Geometry.Partition or Geometry.DynamicPartition;
@@ -38,6 +39,8 @@ public static class ModelNifFixture
         Node(root, 100, bone0, bone1, shape); Node(bone0, 10); Node(bone1, 30);
         const int vertices = 4;
         ushort[] triangles = [0, 1, 2, 2, 1, 3];
+        // The last vertex is in the buffer without weights, and no triangle uses it.
+        if (orphanVertex) triangles = [0, 1, 2, 2, 1, 0];
         if (badIndex) triangles[2] = 300;
         int stride = (dynamic ? 12 : 28) + (skinned ? 12 : 0);
         ulong descriptor = (ulong)(uint)(stride / 4) | ((ulong)((dynamic ? 0x1A : 0x1B) | (skinned ? 0x40 : 0)) << 44);
@@ -50,7 +53,8 @@ public static class ModelNifFixture
                 b.Write(new byte[] { 128, 0, 128, 128, 255, 128, 128, 255 });
                 if (skinned)
                 {
-                    b.Write((Half)weight); b.Write((Half).75f); b.Write((Half)0); b.Write((Half)0);
+                    bool orphan = orphanVertex && p == Positions[^1];
+                    b.Write((Half)(orphan ? 0 : weight)); b.Write((Half)(orphan ? 0 : .75f)); b.Write((Half)0); b.Write((Half)0);
                     b.Write(new byte[] { 0, 1, 0, 0 });
                 }
             }
@@ -101,11 +105,13 @@ public static class ModelNifFixture
             w.Set(skin, b => { b.Write(skinData); b.Write(partition); b.Write(root); b.Write(2u); b.Write(bone0); b.Write(missingBone ? 9000 : bone1); b.Write(0u); });
             w.Set(skinData, b =>
             {
-                Transform(b, 0); b.Write(2u); b.Write(legacy);
-                for (int bone = 0; bone < 2; bone++)
+                Transform(b, 0); b.Write((uint)skinDataBones); b.Write(legacy || staleLegacyWeights);
+                for (int bone = 0; bone < skinDataBones; bone++)
                 {
                     Transform(b, bone == 0 ? -2 : -4);
                     for (int i = 0; i < 4; i++) b.Write(0f);
+                    // A per-bone list left over from the legacy format: it names a vertex the shape no longer has.
+                    if (staleLegacyWeights && !legacy) { b.Write((ushort)1); b.Write((ushort)9000); b.Write(-1f); continue; }
                     b.Write(legacy ? (ushort)vertices : (ushort)0);
                     if (legacy) for (ushort v = 0; v < vertices; v++) { b.Write(v); b.Write(bone == 0 ? weight : .75f); }
                 }

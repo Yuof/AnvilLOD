@@ -15,12 +15,16 @@ namespace PenguLOD.Core.Tests;
 public sealed class TextureInputCompatibilityTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void BethesdaNormalMarkerUsesGeometryNormalsAndWritesSafeSlots(bool legacy)
+    [InlineData(false, "\bNOR")]
+    [InlineData(true, "\bNOR")]
+    // Mesh tools that normalize texture paths put a folder in front of the marker.
+    [InlineData(false, "textures\\\bNOR")]
+    [InlineData(true, "textures\\\bNOR")]
+    [InlineData(false, "Data/Textures/\bNOR")]
+    public void BethesdaNormalMarkerUsesGeometryNormalsAndWritesSafeSlots(bool legacy, string marker)
     {
         var geometry = legacy ? ModelNifFixture.Geometry.Triangles : ModelNifFixture.Geometry.Packed;
-        var mesh = NifGeometryReader.Read("grass", ModelNifFixture.Create(geometry, le: legacy, normalTexture: "\bNOR"), passthru: true);
+        var mesh = NifGeometryReader.Read("grass", ModelNifFixture.Create(geometry, le: legacy, normalTexture: marker), passthru: true);
         Assert.Empty(mesh.Warnings);
         Assert.Equal("", Assert.Single(mesh.Parts).Material.Textures[1]);
         var withoutNormal = NifGeometryReader.Read("grass", ModelNifFixture.Create(geometry, le: legacy, normalTexture: ""), passthru: true);
@@ -42,9 +46,10 @@ public sealed class TextureInputCompatibilityTests
 
     [Theory]
     [InlineData("\bOTHER", false)]
-    [InlineData("textures\\\bNOR", false)]
+    [InlineData("textures\\\bNORMAL", false)]
     [InlineData("textures\\..\\outside.dds", false)]
     [InlineData("\bNOR", true)]
+    [InlineData("textures\\\bNOR", true)]
     public void InvalidTextureReferencesStillRejectTheModel(string texture, bool diffuse)
     {
         var bytes = ModelNifFixture.Create(ModelNifFixture.Geometry.Packed,

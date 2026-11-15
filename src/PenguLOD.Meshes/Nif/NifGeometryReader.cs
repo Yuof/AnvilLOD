@@ -141,6 +141,16 @@ public static partial class NifGeometryReader
         return o;
     }
 
+    /// <summary>
+    /// Bethesda's "no normal map" marker: a backspace followed by NOR. Mesh tools that normalize texture paths
+    /// put a folder in front of it (<c>textures\&lt;backspace&gt;NOR</c>), so only the file name is compared.
+    /// </summary>
+    private static bool IsNormalMarker(string texture)
+    {
+        var name = texture.Trim().Replace('/', '\\');
+        return name[(name.LastIndexOf('\\') + 1)..] == "\bNOR";
+    }
+
     private static void Walk(NifFile nif, int index, Matrix4x4 parent, List<LodMeshPart> parts, List<string> warnings,
         HashSet<int> visited, bool passthru, bool waterAsLit, bool includeTexGenPlane, bool includeUnshaded,
         Lazy<Dictionary<int, Matrix4x4>> scene, bool renderEffects, bool staticObjectLod, int depth = 0)
@@ -187,6 +197,9 @@ public static partial class NifGeometryReader
                 // Some shipped resources also list collision/properties as children. They do not draw.
                 if (block.Type.StartsWith("bhk", StringComparison.Ordinal) || block.Type.EndsWith("Property", StringComparison.Ordinal)
                     || block.Type.EndsWith("ExtraData", StringComparison.Ordinal) || block.Type is "BSXFlags" or "NiCollisionObject" or "BSShaderTextureSet") return;
+                // Geometry, skin and animation data draw only through the shape or controller that owns them. Files saved
+                // with orphaned blocks list them as extra roots; they are not scene objects and have no flags to read.
+                if (block.Type.EndsWith("Data", StringComparison.Ordinal)) return;
                 // Scene children are NiAVObjects. An unsupported hidden particle/effect is not visible geometry.
                 var r = nif.ReaderFor(block);
                 if ((ReadAvObject(nif, ref r).Flags & 1) == 0)
@@ -568,8 +581,8 @@ public static partial class NifGeometryReader
                 string texture = tr.SizedString();
                 // Vanilla grass meshes also contain Bethesda's backspace + NOR marker.
                 // It means no usable normal-map file; use geometry normals, as for an empty slot.
-                // Recognize only this exact marker in the normal slot. All other paths stay validated.
-                textures.Add(i == 1 && texture == "\bNOR" ? "" : PenguLOD.Core.World.GamePath.NormalizeTexture(texture));
+                // Recognize only this marker in the normal slot. All other paths stay validated.
+                textures.Add(i == 1 && IsNormalMarker(texture) ? "" : PenguLOD.Core.World.GamePath.NormalizeTexture(texture));
             }
         }
         if (textures.Count == 0 || string.IsNullOrWhiteSpace(textures[0])) return null;
