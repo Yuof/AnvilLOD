@@ -92,21 +92,26 @@ public static partial class TextureGeneration
                 if (source.Warnings.Count > 0 || source.Parts.Count == 0)
                     throw new NotSupportedException("Incomplete trunk geometry: " + string.Join("; ", source.Warnings.DefaultIfEmpty("no supported shapes")));
                 var metadata = new StringBuilder("[LOD]\r\nScale=1.000000\r\n");
+                // Render both views before writing either, so a trunk that fails leaves no half-written pair behind.
+                var outputs = new List<(string Path, byte[] Bytes)>();
+                var written = new List<TextureGenerationItem>();
                 foreach (var (view, frame) in card.Views.OrderBy(p => p.Key))
                 {
                     ct.ThrowIfCancellationRequested();
                     var image = frame.Render(source, loader, request.BillboardMaxSize, request.UnitsPerPixel, request.Brightness, request.Materials);
                     string output = stem + $"_{view}.dds";
-                    write(output, TextureImages.Encode(new(image.Rgba, image.Width, image.Height), alpha: true));
-                    write(stem + $"_{view}_n.dds", TextureImages.Encode(new(image.NormalRgba!, image.Width, image.Height), normal: true));
+                    outputs.Add((output, TextureImages.Encode(new(image.Rgba, image.Width, image.Height), alpha: true)));
+                    outputs.Add((stem + $"_{view}_n.dds", TextureImages.Encode(new(image.NormalRgba!, image.Width, image.Height), normal: true)));
                     metadata.Append(FormattableString.Invariant($"Width_{view}={frame.Width:F6}\r\nHeight_{view}={frame.Height:F6}\r\nLeft_{view}={frame.Left:F6}\r\nBottom_{view}={frame.Bottom:F6}\r\nRightX_{view}={frame.Right.X:F6}\r\nRightY_{view}={frame.Right.Y:F6}\r\n"));
-                    items.Add(new("Tree trunk", resource.Source, output, "Written",
+                    written.Add(new("Tree trunk", resource.Source, output, "Written",
                         (view == 1 ? "Front" : "Side") + " view aligned to installed hybrid cards; geometry normals", image.Width, image.Height));
                 }
                 metadata.Append("Generator=PenguLOD native trunk renderer\r\nModel=" + resource.Source + "\r\n");
-                write(stem + ".txt", Encoding.UTF8.GetBytes(metadata.ToString()));
+                outputs.Add((stem + ".txt", Encoding.UTF8.GetBytes(metadata.ToString())));
+                foreach (var (file, bytes) in outputs) write(file, bytes);
+                items.AddRange(written);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException and not TextureOutputException)
             { items.Add(new("Tree trunk", resource.Source, destination, "Failed", ex.Message)); progress?.Report("ERROR: " + ex.Message); }
         }
         if (cards.Count == 0)

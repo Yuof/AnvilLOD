@@ -61,12 +61,12 @@ public sealed class TextureInputCompatibilityTests
     }
 
     [Theory]
-    [InlineData("automatic", true)]
-    [InlineData("preview", false)]
-    [InlineData("rule", false)]
-    [InlineData("grass", false)]
-    [InlineData("mixed-error", false)]
-    public void EffectTreeExclusionNeverHidesExplicitRequestsGrassOrMalformedGeometry(string mode, bool published)
+    [InlineData("automatic", true, "Skipped")]
+    [InlineData("preview", false, "Failed")]
+    [InlineData("rule", true, "Failed")]
+    [InlineData("grass", true, "Failed")]
+    [InlineData("mixed-error", true, "Failed")]
+    public void EffectTreeExclusionNeverHidesExplicitRequestsGrassOrMalformedGeometry(string mode, bool published, string status)
     {
         using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
         var bytes = ModelNifFixture.Create(ModelNifFixture.Geometry.Packed, effect: true, unsupportedEffect: true);
@@ -94,9 +94,18 @@ public sealed class TextureInputCompatibilityTests
         var result = TextureGeneration.Run(f.Request with { Trees = mode != "grass", Grass = mode == "grass", ModelFilter = mode == "preview" ? "testtree" : "" });
         Assert.Equal(published, result.Published);
         var item = Assert.Single(result.Items, i => i.Kind == (mode == "grass" ? "Grass" : "Tree"));
-        Assert.Equal(published ? "Skipped" : "Failed", item.Status);
+        Assert.Equal(status, item.Status);
         Assert.False(File.Exists(GamePath.ToFileSystemPath(f.Output, item.Output)));
-        if (published)
+        if (published && status == "Failed")
+        {
+            // A complete run publishes the rest. The failure stays visible and leaves no file or list entry behind.
+            Assert.Equal(1, result.Errors);
+            Assert.Contains(result.Warnings, w => w.Contains("could not be generated"));
+            Assert.False(File.Exists(GamePath.ToFileSystemPath(f.Output, $@"textures\terrain\lodgen\texgen_sse_{item.Kind.ToLowerInvariant()}_billboards.txt")));
+            Assert.True(File.Exists(GamePath.ToFileSystemPath(f.Output, @"textures\lod\atlas.dds")));
+            TextureGenerationManifest.Read(f.Output, true)!.Verify(f.Output);
+        }
+        if (status == "Skipped")
         {
             Assert.Contains("Excluded whole tree", item.Detail);
             Assert.Contains(result.Warnings, w => w.Contains("Excluded whole tree"));

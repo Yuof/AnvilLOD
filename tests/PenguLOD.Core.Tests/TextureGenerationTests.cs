@@ -193,10 +193,10 @@ public sealed class TextureGenerationTests
     }
 
     [Theory]
-    [InlineData(false, false, true)]
-    [InlineData(true, false, false)]
-    [InlineData(false, true, false)]
-    public void UnusedGrassDoesNotBlockTexturesButRequiredOrPreviewedGrassStillFails(bool used, bool preview, bool published)
+    [InlineData(false, false, true, "Skipped")]
+    [InlineData(true, false, true, "Failed")]
+    [InlineData(false, true, false, "Failed")]
+    public void UnusedGrassIsSkippedUsedGrassIsReportedAndPreviewedGrassStillFails(bool used, bool preview, bool published, string status)
     {
         using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
         var mod = new SkyrimMod(ModKey.FromNameAndExtension("Skyrim.esm"), SkyrimRelease.SkyrimSE);
@@ -208,8 +208,9 @@ public sealed class TextureGenerationTests
             [TextureFixture.Card("grass", @"textures\missing-grass.dds")]));
         var result = TextureGeneration.Run(f.Request with { Grass = true, ModelFilter = preview ? "unused" : "" });
         Assert.Equal(published, result.Published);
-        Assert.Contains(result.Items, i => i.Kind == "Grass" && i.Status == (published ? "Skipped" : "Failed"));
-        if (published) Assert.Contains(result.Items, i => i.Kind == "Grass" && i.Detail.Contains("landscape"));
+        Assert.Contains(result.Items, i => i.Kind == "Grass" && i.Status == status);
+        if (status == "Skipped") Assert.Contains(result.Items, i => i.Kind == "Grass" && i.Detail.Contains("landscape"));
+        else Assert.Contains(result.Items, i => i.Kind == "Grass" && i.Detail.Contains("Diffuse texture missing"));
     }
 
     [Fact]
@@ -228,7 +229,10 @@ public sealed class TextureGenerationTests
             [TextureFixture.Card("grass", @"textures\missing-grass.dds")]));
         Assert.True(TextureGeneration.Run(f.Request with { Grass = true }).Published);
         File.WriteAllText(Path.Combine(f.Resources, "Configs", "DynDOLOD_SSE_TexGen_Billboards_skyrimesm.txt"), $"Skyrim.esm;{grass.FormKey.ID:X8};True");
-        Assert.False(TextureGeneration.Run(f.Request with { Grass = true }).Published);
+        // The rule asks for the grass again. Its texture is missing, which is reported without holding back the rest.
+        var ruled = TextureGeneration.Run(f.Request with { Grass = true });
+        Assert.True(ruled.Published);
+        Assert.Contains(ruled.Items, i => i.Kind == "Grass" && i.Status == "Failed" && i.Detail.Contains("Diffuse texture missing"));
     }
 
     [Fact]
@@ -273,7 +277,7 @@ public sealed class TextureGenerationTests
     [InlineData("mod-resource")]
     [InlineData("missing-normal")]
     [InlineData("corrupt-diffuse")]
-    public void RequiredOrIncompleteObjectFallbacksStillFailAndPreservePreviousOutput(string mode)
+    public void RequiredOrIncompleteObjectFallbacksAreReportedAndOnlyAPreviewKeepsThePreviousOutput(string mode)
     {
         using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
         var request = f.Request with { RenderedObjects = true, ModelFilter = mode == "preview" ? "object" : "" };
@@ -286,8 +290,47 @@ public sealed class TextureGenerationTests
         if (mode == "missing-normal") File.Delete(GamePath.ToFileSystemPath(f.Data, @"textures\lod\object_n.dds"));
         if (mode == "corrupt-diffuse") TextureFixture.Put(f.Data, @"textures\lod\object.dds", [1, 2, 3]);
         var result = TextureGeneration.Run(request);
-        Assert.False(result.Published); Assert.True(result.Errors > 0);
+        Assert.True(result.Errors > 0);
         Assert.Contains(result.Items, i => i.Status == "Failed" && i.Detail.Contains("Diffuse texture missing"));
+        if (mode == "preview")
+        {
+            Assert.False(result.Published);
+            Assert.Equal(before, File.ReadAllText(Path.Combine(f.Output, TextureGenerationManifest.FileName)));
+            return;
+        }
+        // A complete run publishes the rest and leaves the failed object out, so LOD falls back to the installed texture.
+        Assert.True(result.Published);
+        Assert.Contains(result.Warnings, w => w.Contains("could not be generated"));
+        Assert.False(File.Exists(GamePath.ToFileSystemPath(f.Output, @"textures\lod\object.dds")));
+        Assert.True(File.Exists(GamePath.ToFileSystemPath(f.Output, @"textures\lod\atlas.dds")));
+        TextureGenerationManifest.Read(f.Output, true)!.Verify(f.Output);
+    }
+
+    [Fact]
+    public void AMissingRecipeSourceIsReportedWithoutHoldingBackOtherTextures()
+    {
+        using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
+        File.AppendAllText(f.RuleFile, "\n" + TextureFixture.Tile(@"textures\missing.dds", @"textures\lod\absent.dds", 0));
+        var result = TextureGeneration.Run(f.Request);
+        Assert.True(result.Published); Assert.Equal(1, result.Errors);
+        var failed = Assert.Single(result.Items, i => i.Status == "Failed");
+        Assert.Equal("Recipe", failed.Kind); Assert.Contains("Source texture missing", failed.Detail);
+        Assert.Contains(result.Warnings, w => w.Contains("1 texture items could not be generated"));
+        Assert.True(File.Exists(GamePath.ToFileSystemPath(f.Output, @"textures\lod\atlas.dds")));
+        Assert.False(File.Exists(GamePath.ToFileSystemPath(f.Output, @"textures\lod\absent.dds")));
+        TextureGenerationManifest.Read(f.Output, true)!.Verify(f.Output);
+    }
+
+    [Fact]
+    public void AnOutputThatCannotBeWrittenStopsTheRunInsteadOfCountingAsAFailedItem()
+    {
+        using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
+        Assert.True(TextureGeneration.Run(f.Request).Published);
+        string before = File.ReadAllText(Path.Combine(f.Output, TextureGenerationManifest.FileName));
+        // The second recipe needs a folder where the first one has just written a file.
+        File.AppendAllText(f.RuleFile, "\n" + TextureFixture.Tile(@"textures\red.dds", @"textures\lod\atlas.dds\inside.dds", 0));
+        var error = Assert.ThrowsAny<Exception>(() => TextureGeneration.Run(f.Request));
+        Assert.True(TextureOutputException.Caused(error), error.ToString());
         Assert.Equal(before, File.ReadAllText(Path.Combine(f.Output, TextureGenerationManifest.FileName)));
     }
 

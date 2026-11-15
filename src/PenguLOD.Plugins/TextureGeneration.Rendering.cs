@@ -134,22 +134,27 @@ public static partial class TextureGeneration
                     ?? throw new InvalidDataException("The model rendered no visible pixels.");
                 var side = quality.HdViews ? Render(BillboardView.Side) : null;
                 if (quality.HdViews && side is null) warn($"{path}: the side view has no visible surface; crossed cards will reuse the front view.");
+                // Encode every file before writing the first, so a billboard that fails leaves no partial set behind.
                 var diffuseBytes = TextureImages.Encode(new(img.Rgba, img.Width, img.Height), alpha: true);
-                write(target + ".dds", diffuseBytes); write(target + "_1.dds", diffuseBytes);
-                write(target + "_1_n.dds", TextureImages.Encode(new(img.NormalRgba!, img.Width, img.Height), normal: true));
+                var outputs = new List<(string Path, byte[] Bytes)>
+                {
+                    (target + ".dds", diffuseBytes), (target + "_1.dds", diffuseBytes),
+                    (target + "_1_n.dds", TextureImages.Encode(new(img.NormalRgba!, img.Width, img.Height), normal: true)),
+                };
                 if (side is not null)
                 {
-                    write(target + "_2.dds", TextureImages.Encode(new(side.Rgba, side.Width, side.Height), alpha: true));
-                    write(target + "_2_n.dds", TextureImages.Encode(new(side.NormalRgba!, side.Width, side.Height), normal: true));
+                    outputs.Add((target + "_2.dds", TextureImages.Encode(new(side.Rgba, side.Width, side.Height), alpha: true)));
+                    outputs.Add((target + "_2_n.dds", TextureImages.Encode(new(side.NormalRgba!, side.Width, side.Height), normal: true)));
                 }
                 string metadata = FormattableString.Invariant($"[LOD]\r\nWidth={img.WorldWidth:F6}\r\nHeight={img.WorldHeight:F6}\r\nShiftX=0\r\nShiftY=0\r\nShiftZ={img.ShiftZ:F6}\r\nScale=1.000000\r\nWidth_1={img.WorldWidth:F6}\r\nHeight_1={img.WorldHeight:F6}\r\nModel={path}\r\nGenerator=PenguLOD native textures\r\n");
                 metadata += FormattableString.Invariant($"ResolutionScale={scale:R}\r\n");
                 if (side is not null) metadata += FormattableString.Invariant($"Width_2={side.WorldWidth:F6}\r\nHeight_2={side.WorldHeight:F6}\r\n");
-                write(target + ".txt", Encoding.UTF8.GetBytes(metadata));
+                outputs.Add((target + ".txt", Encoding.UTF8.GetBytes(metadata)));
+                foreach (var (file, bytesOut) in outputs) write(file, bytesOut);
                 list.Add(entry + ",True");
                 items.Add(new(candidate.Kind, path, target + ".dds", "Written", FormattableString.Invariant($"{record.FormKey}; resolution scale {scale:R}; {(side is null ? "front view" : "front and side views")}"), img.Width, img.Height));
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException and not TextureOutputException)
             { items.Add(new(candidate.Kind, path, target + ".dds", "Failed", ex.Message)); progress?.Report("ERROR: " + ex.Message); }
         }
         foreach (var (kind, entries) in lists.Where(l => l.Value.Count > 0))
@@ -247,7 +252,7 @@ public static partial class TextureGeneration
                 write(destination[..^4] + "_n.dds", TextureImages.Encode(new(image.NormalRgba!, image.Width, image.Height), normal: true));
                 items.Add(new("Rendered object", path, destination, "Written", "Source normals and calibrated albedo; view-dependent PBR lighting is not baked", image.Width, image.Height));
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException and not TextureOutputException)
             {
                 string detail = ex.Message;
                 if (optional && existingDiffuse is not null && ex is FileNotFoundException or NotSupportedException)
@@ -266,7 +271,7 @@ public static partial class TextureGeneration
                         warn(destination + ": " + detail);
                         continue;
                     }
-                    catch (Exception fallback) when (fallback is not OperationCanceledException)
+                    catch (Exception fallback) when (fallback is not OperationCanceledException and not TextureOutputException)
                     { detail += " Existing texture pair could not be retained: " + fallback.Message; }
                 }
                 items.Add(new("Rendered object", path, destination, "Failed", detail)); progress?.Report("ERROR: " + detail);
