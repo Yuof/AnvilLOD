@@ -82,6 +82,13 @@ Output
   such folders before it records its output, which repairs an existing output on the next
   run, and **Verify output set** reports them. Windows output was not affected.
 
+- Generating object LOD again into the same output folder no longer stops with "This
+  folder is not an empty or recognized PenguLOD output: it has files in it that PenguLOD
+  didn't write". It happened with **Clear previous PenguLOD output before generation** on
+  when the output had the game plugin's settings file, `SKSE/Plugins/PenguLOD.ini`, which
+  every object LOD run with dynamic LOD writes: the file was carried into the new run's
+  work folder, which then failed the check for an empty folder.
+
 Reports
 
 - New command `compare-reference` measures a PenguLOD output against output of DynDOLOD,
