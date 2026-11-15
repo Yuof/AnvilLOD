@@ -67,18 +67,20 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	// structs), and CommonLib's Init already opens Address Library, so the wrong DLL has to stop before Init.
 	// SKSE logs the refusal in skse64.log.
 	const auto game = a_skse->RuntimeVersion();
-	// Line 1: SE 1.5.97 up to AE 1.6.1170. Line 17: everything newer (1.7.99, 1.7.104, ...).
-	constexpr REL::Version kLastOld{ 1, 6, 1170, 0 };
+	// Line 1: every 1.5 and 1.6 runtime, SE 1.5.97 up to AE 1.6.1170 on Steam and 1.6.1179 on GOG.
+	// Line 17: Skyrim 1.7 and newer (1.7.99, 1.7.104, ...). The split is the 1.7 format change, not a build number:
+	// GOG's last 1.6 build is numbered above Steam's.
+	constexpr REL::Version kFirstNew{ 1, 7, 0, 0 };
 	constexpr REL::Version kFirstSE{ 1, 5, 0, 0 };   // Skyrim VR is 1.4.15; every SE/AE runtime is 1.5 or newer
 #if PENGULOD_RUNTIME_LINE == 17
-	constexpr auto kLine = "newer than 1.6.1170 (Skyrim 1.7.x)";
-	if (game <= kLastOld) return false;
+	constexpr auto kLine = "Skyrim 1.7 and newer";
+	if (game < kFirstNew) return false;
 #elif PENGULOD_RUNTIME_LINE == 14
 	constexpr auto kLine = "Skyrim VR 1.4.15";
 	if (game >= kFirstSE) return false;
 #else
-	constexpr auto kLine = "SE 1.5.97 to AE 1.6.1170";
-	if (game > kLastOld || game < kFirstSE) return false;
+	constexpr auto kLine = "SE 1.5.97 to AE 1.6.1170 (GOG 1.6.1179)";
+	if (game >= kFirstNew || game < kFirstSE) return false;
 #endif
 
 	SKSE::Init(a_skse);

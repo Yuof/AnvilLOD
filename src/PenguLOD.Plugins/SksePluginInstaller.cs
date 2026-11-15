@@ -7,9 +7,9 @@ public enum SkseDllChoice
 {
     /// <summary>Read the game's SkyrimSE.exe (or SkyrimVR.exe) version and pick the matching build.</summary>
     Auto,
-    /// <summary>SE 1.5.97 up to AE 1.6.1170.</summary>
+    /// <summary>Every 1.5 and 1.6 runtime: SE 1.5.97 up to AE 1.6.1170 on Steam and 1.6.1179 on GOG.</summary>
     UpTo1170,
-    /// <summary>Newer than 1.6.1170 (1.7.x).</summary>
+    /// <summary>Skyrim 1.7 and newer.</summary>
     Newer,
     /// <summary>Don't put the DLL in the output (it's installed separately, e.g. from the FOMOD).</summary>
     None,
@@ -29,7 +29,11 @@ public static class SksePluginInstaller
     public const string FolderVr = "1.4.15-VR";
     /// <summary>Every Skyrim SE/AE runtime is 1.5 or newer; Skyrim VR is 1.4.15.</summary>
     public static readonly Version FirstSpecialEdition = new(1, 5, 0, 0);
-    public static readonly Version LastOld = new(1, 6, 1170, 0);
+    /// <summary>
+    /// The first runtime of the newer build line. The lines split at Skyrim 1.7, not at a 1.6 build number:
+    /// GOG's last 1.6 build (1.6.1179) is numbered above Steam's (1.6.1170) and runs the same game code.
+    /// </summary>
+    public static readonly Version FirstNewer = new(1, 7, 0, 0);
     public const string RelativeDll = "SKSE\\Plugins\\PenguLOD.dll";
 
     public sealed record Result(bool Installed, string Message, Version? GameVersion = null, SkseDllChoice Used = SkseDllChoice.None);
@@ -75,7 +79,7 @@ public static class SksePluginInstaller
     }
 
     public static SkseDllChoice ForVersion(Version v) =>
-        v < FirstSpecialEdition ? SkseDllChoice.Vr : v <= LastOld ? SkseDllChoice.UpTo1170 : SkseDllChoice.Newer;
+        v < FirstSpecialEdition ? SkseDllChoice.Vr : v < FirstNewer ? SkseDllChoice.UpTo1170 : SkseDllChoice.Newer;
 
     public static string FolderFor(SkseDllChoice c) => c switch
     {
@@ -86,8 +90,8 @@ public static class SksePluginInstaller
 
     public static string Describe(SkseDllChoice c) => c switch
     {
-        SkseDllChoice.UpTo1170 => "SE 1.5.97 - AE 1.6.1170",
-        SkseDllChoice.Newer => "newer than 1.6.1170 (1.7.x)",
+        SkseDllChoice.UpTo1170 => "SE 1.5.97 - AE 1.6.1170 (GOG 1.6.1179)",
+        SkseDllChoice.Newer => "Skyrim 1.7 and newer",
         SkseDllChoice.Vr => "Skyrim VR 1.4.15",
         SkseDllChoice.None => "not installed by PenguLOD",
         _ => "auto-detect",

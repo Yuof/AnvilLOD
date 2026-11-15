@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
-set(PENGULOD_RUNTIME_LINE "1" CACHE STRING "Build line: 1 (SE 1.5.97 - AE 1.6.1170), 17 (newer than 1.6.1170) or 14 (Skyrim VR 1.4.15)")
+set(PENGULOD_RUNTIME_LINE "1" CACHE STRING "Build line: 1 (SE 1.5.97 - AE 1.6.1170, GOG 1.6.1179), 17 (Skyrim 1.7 and newer) or 14 (Skyrim VR 1.4.15)")
 
 find_package(CommonLibSSE CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
@@ -20,7 +20,7 @@ if(PENGULOD_RUNTIME_LINE STREQUAL "17" OR PENGULOD_RUNTIME_LINE STREQUAL "14")
 endif()
 
 # Two build lines from one source tree (like ApocryphaRealm Menu Framework):
-#   1  = Skyrim SE 1.5.97 / AE 1.6.x, CommonLibSSE-NG from the colorglass registry (root vcpkg.json)
+#   1  = Skyrim SE 1.5.97 / AE 1.6.x (Steam and GOG), CommonLibSSE-NG from the colorglass registry (root vcpkg.json)
 #   17 = Skyrim 1.7.x, CommonLibSSE-NG 7.2.0 (alandtse ng), which reads Address Library's format-5 databases
 #        (cmake/manifest-17 + cmake/ports-17, preset release-17)
 #   14 = Skyrim VR 1.4.15, the same CommonLibSSE-NG 7.2.0 built for VR only

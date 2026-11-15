@@ -10,8 +10,8 @@
             <optionalFileGroups order="Explicit">
                 <group name="Select your Skyrim Version:" type="SelectExactlyOne">
                     <plugins order="Explicit">
-                        <plugin name="SE 1.5.97 up to AE 1.6.1170">
-                            <description>1.5.97/1.6.x</description>
+                        <plugin name="SE 1.5.97 up to AE 1.6.1170 (GOG 1.6.1179)">
+                            <description>Every 1.5 and 1.6 version, including GOG 1.6.1179</description>
                             <image path="fomod\images\pengulod.png" />
                             <files>
                                 <folder source="1.5.97-1.6.1170\SKSE" destination="SKSE" priority="0" />
@@ -20,7 +20,7 @@
                                 <type name="Optional" />
                             </typeDescriptor>
                         </plugin>
-                        <plugin name="Newer than 1.6.1170 (1.7.99, 1.7.104 and later)">
+                        <plugin name="Skyrim 1.7 and newer (1.7.99, 1.7.104 and later)">
                             <description>1.7.x</description>
                             <image path="fomod\images\pengulod.png" />
                             <files>
