@@ -1,180 +1,97 @@
-# Texture generation
+# Textures
 
-On **Textures**, choose a separate **Texture output**. Recipes and
-render models in enabled mods are discovered automatically. Use **Primary resource folder**
-and **Additional resource folders** on **Game & resources** for standalone data packs.
-Existing DynDOLOD resource bundles also work. See [resource packs](RESOURCE-PACKS.md) for layouts and precedence.
-PenguLOD does not launch TexGen or Wine. Game/mod assets and resource packs are supplied separately.
+The texture stage makes the textures LOD uses and the images of distant trees and grass. It
+reads the whole load order; the worldspace selection does not limit it.
 
-**Generate textures** runs this stage alone. On **Overview**, select **Textures**
-and **Object LOD** to run both. Add grass cache or terrain there when needed.
-Install texture and LOD output as separate mods, with LOD output winning conflicts.
-Existing TexGen output can supply textures for unsupported features underneath these mods.
+## What it generates
 
-## Output categories
+| Category | What it makes | Default |
+| --- | --- | --- |
+| Stitched object textures | Object LOD texture sheets built from the recipes in your mods and resource packs | On |
+| Tree billboards | Images of each tree, rendered from its model | On |
+| Grass billboards | Images of each grass type, for grass LOD | Off |
+| Hybrid tree trunk textures | Trunk images for installed hybrid tree LOD models | On |
+| Rendered object textures | Object textures rendered from templates (experimental) | Off |
 
-- **Stitched object textures** follows enabled-plugin recipe order. Resources in virtual
-  `Data/DynDOLOD` override same-named installation recipes. Copy rules, cropped/fractional
-  tiles, intermediate textures, colour multipliers, matching normal maps and `x` mipmap
-  conversion recipes are supported.
-  Generated DDS files use BC7 and mipmaps; copy rules preserve the source format.
-- **Tree billboards** renders winning TREE and tree-flagged STAT models, including record
-  texture replacements, inclusion rules and seasonal replacement records. Height limits
-  use mesh bounds; texture resolution also considers placed scale. [Material calibration](MATERIALS.md) controls
-  source normal maps, lighting, brightness and supported PBR/AO baking.
-  Automatic discovery excludes whole trees whose animated, blended or view-dependent
-  effects cannot be rendered as static billboards. The texture report explains each
-  exclusion. Explicit billboard rules and model filters still require a supported render.
-- **Hybrid tree trunk textures** renders front/side diffuse and normal pairs from
-  `_trunk.nif` resources under `DynDOLOD/Render/Billboards/` or
-  `DynDOLOD/Render/Skyrim/Billboards/`. Matching installed hybrid meshes supply camera
-  directions and crops. Enabled mod resources override the standalone bundle.
-  Matching hybrid meshes are required for this texture pass. The optional
-  [native hybrid author](TREES.md#native-hybrid-trunks) can instead build trunk cards and
-  textures from supported full trees during LOD generation.
-- **Grass billboards** is optional and uses grass lists on winning landscape texture
-  records, including seasonal replacements. Unreferenced library records are skipped.
-  Explicit rules and filtered previews can select additional models.
-- **Rendered objects** is experimental and uses the NIF's TexGen viewport plane and
-  resolution scale. Standalone resource templates update matching installed LOD textures;
-  templates for absent games or mods are skipped.
+Recipes and render models come from your enabled mods and from any
+[resource packs](RESOURCE-PACKS.md) you add.
 
-For existing hybrid trees, enable **Hybrid tree trunk textures** and **3D tree LOD**,
-then run textures followed by LOD. Near/far model selection, budgets and native reduction
-are configured separately; see [3D trees](TREES.md).
+## Generate
 
-## HD billboards and complex grass
+1. On **Textures**, set **Texture output** to an empty folder of its own.
+2. Tick the categories you want. Each run replaces the whole folder, so tick everything you
+   want to keep.
+3. Click **Generate textures**, or tick **Textures** and **Object LOD** on **Overview** to
+   run both.
+4. Install the folder as a mod. The object LOD output must win conflicts with it.
 
-**HD front and side billboards** writes separate diffuse/normal pairs for two perpendicular
-views. Object-LOD tree cards and atlased grass use both views; standard BTT tree LOD uses
-the front image. Each view has its own width and height. Images include transparent space
-around the model origin so an off-center crown stays aligned with its trunk. An empty side
-view produces a warning and the front image is reused. Disable HD views to generate one view.
+After changing a texture setting, run textures and then object LOD, and install both.
 
-**Size tree textures for the largest placed reference** increases resolution for large
-winning TREE/STAT placements, up to **Maximum billboard size**. **World units per pixel**
-sets the base detail. **Unplaced tree resolution scale** applies when no placement exists
-or discovery is disabled. A billboard rule's explicit `Scale=` takes precedence. These
-controls change pixel resolution, not model size; physical dimensions remain in model
-units. Discovery includes disabled and interior placements as a conservative resolution
-estimate and does not change which references appear in LOD.
+**Use generated textures for LOD** makes a later object LOD run read this folder. A run that
+includes both stages does this automatically.
 
-**Grass texture layout** defaults to **Auto**. It detects the packed complex-grass layout
-used by Community Shaders: color/opacity in the top half and tangent normals in the bottom
-half. Each material is detected independently using the bottom-left normal sample and
-**Complex grass detection threshold**. **Basic** disables detection; **Packed** forces this
-layout for all grass rendered by the job. The two halves are separated before resizing.
-Normal maps and their atlas mipmaps are normalized without weighting by specular alpha.
+## Billboard quality
 
-This supports packed color and normals, not the full grass shader: specular alpha, wind,
-translucency and view-dependent lighting are not reproduced. Source-normal baking and
-material calibration still apply. Regenerate **Textures** and **Object LOD** on
-**Overview** to use these changes. Changing billboard settings does not require
-a new grass placement cache.
+- **HD front and side billboards** gives each tree and grass card separate front and side
+  images. Turn it off to render one view.
+- **Maximum billboard size** and **World units per pixel** set the resolution. A lower
+  units-per-pixel value is sharper and larger.
+- **Size tree textures for the largest placed reference** gives trees placed at a large
+  scale more detail, up to the maximum size.
+- **Grass texture layout** is **Auto** by default and detects the packed layout used by
+  Community Shaders complex grass. Choose **Basic** or **Packed** only if detection gets it
+  wrong.
 
-## Previews, reports and replacement
+## Brightness
 
-Use a model filter and **Preview selected texture** for a small test. Filtered generation
-requires a separate output folder and cannot feed a full LOD job. Clear the filter for
-a complete run. Categories, brightness, size limits and filters are stored in presets.
+Each kind of LOD has its own brightness control. Change one at a time and compare in the
+same place, weather and time of day.
 
-Each successful run replaces the previously owned texture set. Keep every category
-whose output should remain selected during regeneration. The report identifies generated,
-skipped, retained and failed assets. If an optional object template cannot render, a valid
-installed diffuse/normal pair can be retained unchanged; brightness controls do not alter
-retained textures. Missing fallback pairs and failed required renders stop publication.
+| Too bright or dark | Adjust | Then rerun |
+| --- | --- | --- |
+| Tree billboards | **Brightness multiplier** on Textures | Textures, then object LOD |
+| Distant grass | **Grass tip brightness** and **Grass root brightness** on Object LOD | Object LOD |
+| Ground | **Brightness** on Terrain | Terrain |
+| Objects | **Object brightness** on Object LOD | Object LOD |
 
-`PenguLOD.textures-report.json` records results. Successful output also includes
-`PenguLOD.textures.json` with ownership and hashes. Failed rendering and cancellation
-preserve published textures; LOD verifies the manifest before using them. If publication
-is interrupted and the next run reports changed files, keep that output disabled and
-generate into a fresh folder. See [persistent generation](PIPELINE.md).
+For PBR source textures, use **PBR scale**, **PBR gamma** and **PBR occlusion strength**
+under **Material calibration**.
 
-## Recipe-driven LOD materials
+## Preview one model
 
-Run **Textures** and **Object LOD** on **Overview**, or select **Use generated
-textures for LOD**. The generated manifest passes the exact recipe order, base
-size and brightness to LOD generation. CLI pipelines use the same preset with `pipeline --settings <preset.json>
---stages textures,lod`, or a JSON request with `Lod.GeneratedTextureFolder`. Texture matching
-is enabled by default. Regenerate older texture output once
-to save this metadata. Without a generated manifest, installed recipes can still be read
-from the resource folder and virtual `Data/DynDOLOD`, using the default recipe base size.
+1. Enter part of a model path in **Model path filter**.
+2. Use a separate output folder.
+3. Generate, select a result and click **Preview selected texture**.
 
-For a LOD shape using a full texture, PenguLOD can move its UVs into a recipe atlas when
-the complete UV range fits the recipe layout. Repeated tiles, clipped edges, copy chains
-and nested atlases participate in that check. Several equally applicable layouts, extra
-shader texture channels, or shader UV transforms retain the full texture and are reported.
+Clear the filter for a complete run. A filtered folder cannot feed a full LOD run.
 
-For a shape already using a recipe atlas, alternate textures rebuild that atlas with the
-relevant sources replaced. Unrelated tiles and the shape's UVs stay intact. Normal-only
-replacements use the texture set's actual normal path. Merged shapes combine their
-replacements; conflicting replacements for the same source cannot be resolved reliably
-and stop the combined job. Duplicate full-model shape names with alternate textures also
-require distinct names before generation. A full-model texture path changed by a mesh
-patch can be associated by an unambiguous source/UV region; unresolved associations are
-reported rather than guessed.
+## Failed items
 
-If a matched diffuse texture or explicit normal map is missing, PenguLOD keeps that
-material's supplied LOD textures and UVs and logs a warning naming the model, shape and
-missing file. Other materials and record/season variants continue to use texture matching.
-This fallback requires the supplied LOD textures to exist. Invalid texture data, broken
-recipe inputs, cycles and conflicting replacements still fail generation. Installing the
-missing replacement and regenerating restores the intended match automatically.
+A complete run publishes everything it could generate. A model that cannot be rendered, or
+a recipe whose source texture is not installed, is logged as an error, counted in the
+summary and listed as `Failed` in the report. It is left out of the output:
 
-`PenguLOD.recipes.json` in LOD output lists material mappings, generated variants, retained
-full textures, missing-replacement fallbacks and failures, with the source model path.
-Fallback warnings also appear in the run log and pipeline receipt. Variant textures live under `textures/pengulod/recipes` in
-LOD output. Keep texture output enabled underneath it. The texture manifest also owns
-original input copies under `textures/pengulod/recipe-inputs` for in-place conversions;
-keep those files with the output so subsequent jobs never process an already-adjusted
-input a second time.
+- A tree without a billboard has no tree LOD, unless a mod already supplies a billboard
+  for it.
+- Grass without a billboard is drawn in grass LOD with its own model texture.
+- A stitched texture that was not built is read from your mods where one supplies it.
 
-Recipe and source content participate in LOD block fingerprints. The pipeline's normal
-stage-reuse check uses asset metadata; select **Verify all source asset contents** (CLI
-`--verify-source-contents`) when checking assets whose timestamps might have been preserved.
+Fix the model or install the missing texture, then run textures again. A filtered preview
+publishes only when every selected model renders.
 
-## Conversion recipe format
+## Limits
 
-The twelve tab-separated columns in an `alpha` or `noalpha` recipe can describe either
-tile placement or a conversion. In a conversion, columns 6 and 12 contain `x`; these
-are mipmap instructions, not a request to execute a shader or another program.
+- Billboards are a fixed render. They do not reproduce wind, translucency, parallax or
+  lighting that changes with the view.
+- Trees that rely on animated, blended or view-dependent effects are skipped and listed in
+  the report.
+- Output is not identical to TexGen's. Existing TexGen output can stay installed below
+  PenguLOD's to cover anything PenguLOD does not generate.
+- Recipes use the TexGen format, including copy, stitching and mipmap conversion recipes.
+  See the [TexGen configuration guide](https://dyndolod.info/Help/TexGen-Configuration).
 
-| Columns (starting at 1) | Conversion meaning |
-| --- | --- |
-| 1 | Base RGB brightness offset, -255 to 255 |
-| 2–4 | Nonnegative RGB multipliers, interpreted with gamma 2.2 |
-| 5 | Source DDS path; `\|` separates alternatives in priority order |
-| 6 | `x` |
-| 7 | Mipmap filter number |
-| 8 | Mipmap contrast percentage, -100 to 100 |
-| 9 | Mipmap brightness percentage, -100 to 100 |
-| 10 | Destination DDS path |
-| 11 | First adjusted mip level, starting at 0 |
-| 12 | `x` |
+## Reports
 
-Filters are 0 nearest, 1 linear, 2 cosine, 3 Hermite, 4 quadratic, 5 Gaussian,
-6 spline, 7 Lanczos, 8 Mitchell and 9 Catmull–Rom. Each mip samples the base image.
-At level `m >= start`, contrast and brightness are multiplied by `m - start + 1`;
-RGB is adjusted as `RGB × (1 + contrast/100) + brightness/100`, then clamped to 0–1.
-Alpha is retained by `alpha` recipes and removed by `noalpha` recipes. These operations
-retain source dimensions and generate a complete mip chain down to 1×1 in BC7; compressed
-bytes need not match TexGen. A conversion writes the specified texture, without inventing
-a normal companion. See the upstream [TexGen configuration guide](https://dyndolod.info/Help/TexGen-Configuration)
-and [mod-author resource conventions](https://dyndolod.info/Mod-Authors). Filter numbering
-follows the [ImagingLib sampling filters](https://github.com/ElminsterAU/imaginglib/blob/aef974039fb64d8d4ee8709cf07c667c59d88a91/Source/ImagingFormats.pas).
-
-## Supported scope
-
-Texture generation supports front/side billboards, packed grass color/normals, reference-scale
-resolution selection and a configurable static PBR/AO bake. It does not reproduce the game's
-full shader or promise identical output to TexGen. [Seasons](SEASONS.md) uses written swap INIs.
-Recipe parsing and rendering are native; resource directories named `DynDOLOD` do not
-require TexGen/DynDOLOD executables. Resource files and models must still be supplied by
-their authors and installed with their required mods.
-
-Triangle strips, dynamic vertex buffers and suitable self-contained static skin poses
-are supported. Static effect materials can be rendered from compatible resources; see
-[model support](MODEL-SUPPORT.md) for formats and limits. An unreadable visible shape,
-missing required texture or unsupported required render resource stops publication and
-preserves existing output. Missing assets must be supplied by the source mod; generation
-does not repair or rewrite that mod.
+`PenguLOD.textures-report.json` in the texture output lists what was generated, skipped,
+kept and failed. `PenguLOD.recipes.json` in the object LOD output lists how each model's
+textures were matched and which ones fell back to their supplied LOD textures.

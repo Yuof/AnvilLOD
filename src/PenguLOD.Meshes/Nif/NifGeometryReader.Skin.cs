@@ -97,48 +97,59 @@ public static partial class NifGeometryReader
         var r = nif.ReaderFor(nif.Blocks[skin.Data]);
         ReadSkinTransform(ref r); // global-to-skin bind transform; per-bone inverse binds map directly into each bone
         int count = checked((int)r.U32());
-        if (count != skin.Bones.Length) throw new InvalidDataException("Skin instance and skin data bone counts differ.");
+        // The skin instance names the bones and the skin data holds their bind transforms, both indexed by bone number.
+        // Edited meshes can list more in one than in the other; that matters only for a bone a vertex actually uses.
+        int usable = Math.Min(count, skin.Bones.Length);
         bool hasWeights = r.U8() != 0;
         bool vertexBufferWeights = influences is not null;
         influences ??= new List<Influence>[positions.Length];
         if (!vertexBufferWeights && !hasWeights) throw new NotSupportedException("Legacy skin has no per-bone vertex weights.");
-        var matrices = new Matrix4x4[count];
-        var directions = new Matrix4x4[count];
+        var matrices = new Matrix4x4[usable];
+        var directions = new Matrix4x4[usable];
         r.Require(checked(count * 70));
         for (int bone = 0; bone < count; bone++)
         {
-            var inverseBind = ReadSkinTransform(ref r);
-            if (!scene.TryGetValue(skin.Bones[bone], out var boneWorld))
-                throw new NotSupportedException($"Skinned shape bone {bone} is missing or needs an external skeleton.");
-            matrices[bone] = inverseBind * boneWorld;
-            ValidateTransform(matrices[bone]);
-            directions[bone] = Transforms.RotationOnly(matrices[bone]);
+            if (bone < usable)
+            {
+                var inverseBind = ReadSkinTransform(ref r);
+                if (!scene.TryGetValue(skin.Bones[bone], out var boneWorld))
+                    throw new NotSupportedException($"Skinned shape bone {bone} is missing or needs an external skeleton.");
+                matrices[bone] = inverseBind * boneWorld;
+                ValidateTransform(matrices[bone]);
+                directions[bone] = Transforms.RotationOnly(matrices[bone]);
+            }
+            else r.Skip(52); // bind transform of a bone the skin instance does not list
             r.Skip(16); // bounding sphere
             int weighted = r.U16();
             if (!hasWeights) continue;
             r.Require(weighted * 6);
+            // A vertex buffer with weights is the only list the game reads. The per-bone list is left over from
+            // the legacy format and is often stale after an edit, so it is not validated when it is not used.
+            if (vertexBufferWeights) { r.Skip(weighted * 6); continue; }
             for (int j = 0; j < weighted; j++)
             {
                 int vertex = r.U16(); float weight = r.F32();
                 if (vertex >= positions.Length || !float.IsFinite(weight) || weight < 0)
                     throw new InvalidDataException("Invalid skin weight or vertex index.");
-                if (!vertexBufferWeights) (influences[vertex] ??= []).Add(new(bone, weight));
+                (influences[vertex] ??= []).Add(new(bone, weight));
             }
         }
         var used = new bool[positions.Length];
         foreach (int v in triangles) used[v] = true;
+        var undrawn = new List<int>();
         for (int v = 0; v < positions.Length; v++)
         {
             var weights = influences[v];
             if (!used[v] && (weights is null || weights.Count == 0)) continue;
             Vector3 p = default, n = default, t = default, b = default;
             float total = 0;
+            string? error = null;
             foreach (var influence in weights ?? [])
             {
                 float weight = influence.Weight; int bone = influence.Bone;
-                if (!float.IsFinite(weight) || weight < 0) throw new InvalidDataException("Non-finite or negative skin weight.");
+                if (!float.IsFinite(weight) || weight < 0) { error = "Non-finite or negative skin weight."; break; }
                 if (weight == 0) continue;
-                if (bone < 0 || bone >= count) throw new InvalidDataException("Skin weight references an invalid bone.");
+                if (bone < 0 || bone >= usable) { error = "Skin weight references an invalid bone."; break; }
                 total += weight;
                 p += Vector3.Transform(positions[v], matrices[bone]) * weight;
                 n += Vector3.TransformNormal(normals[v], directions[bone]) * weight;
@@ -146,13 +157,23 @@ public static partial class NifGeometryReader
                 b += Vector3.TransformNormal(bitangents[v], directions[bone]) * weight;
             }
             // Half-float rounding is expected; missing influences are not. Never invent a pose.
-            if (!float.IsFinite(total) || MathF.Abs(total - 1) > 0.05f)
-                throw new InvalidDataException($"Skin weights at vertex {v} sum to {total:G6}, expected approximately 1.");
+            if (error is null && (!float.IsFinite(total) || MathF.Abs(total - 1) > 0.05f))
+                error = $"Skin weights at vertex {v} sum to {total:G6}, expected approximately 1.";
+            if (error is not null)
+            {
+                // No triangle uses this vertex, so its weights never reach the screen.
+                if (!used[v]) { undrawn.Add(v); continue; }
+                throw new InvalidDataException(error);
+            }
             positions[v] = p / total;
             normals[v] = Transforms.SafeNormalize(n, Vector3.UnitZ);
             tangents[v] = Transforms.SafeNormalize(t, Vector3.UnitX);
             bitangents[v] = Transforms.SafeNormalize(b, Vector3.UnitY);
         }
+        // These vertices have no usable pose. Park them on a drawn vertex so their unposed
+        // positions cannot widen the model's bounds.
+        if (undrawn.Count > 0 && triangles.Length > 0)
+            foreach (int v in undrawn) positions[v] = positions[triangles[0]];
     }
 
     private static Matrix4x4 ReadSkinTransform(ref NifSpanReader r)

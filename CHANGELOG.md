@@ -3,11 +3,80 @@
 PenguLOD uses its own semantic version, independent of AnvilLOD’s game plugin version.
 Pre-release versions are marked alpha or beta until the supported workflows have broader validation.
 
+## [0.6.0-beta.2] - 2026-11-14
+
+A run no longer stops because one model or recipe cannot be generated, and Skyrim 1.6.1179
+(GOG) and Skyrim VR load orders are handled.
+
+Textures
+
+- One model or recipe that cannot be generated no longer stops the texture stage and
+  everything after it. A complete run now publishes what it could generate. Each failed
+  item is still logged as an error, counted in the summary and listed as `Failed` in the
+  report, and the run ends with a warning giving their number. Before, a single tree with
+  unusual skin data, a grass mesh with a missing texture or a recipe naming a texture that
+  is not installed left the whole load order without textures, terrain or LOD. A failed
+  item is left out with no partial files: a tree without a billboard has no tree LOD unless
+  the load order supplies one, grass is drawn with its own model texture, and a stitched
+  texture is read from the load order. A filtered preview still publishes only when every
+  selected model renders.
+- An output folder that cannot be written stops the run with that error. It is no longer
+  recorded as a failed item.
+- Grass meshes whose normal-map slot holds Bethesda's "no normal map" marker behind a
+  `textures` folder, as mesh tools that normalize texture paths write it, are rendered.
+  Only the bare marker was accepted, so these failed with "Expected a safe Data-relative
+  game path".
+
+Models
+
+- Skinned models are no longer rejected for data the game never reads: the leftover
+  `NiSkinData` weight list of a shape whose vertex buffer has weights ("Invalid skin weight
+  or vertex index"), a different number of bones in the skin instance and the skin data
+  when no vertex uses the extra ones ("Skin instance and skin data bone counts differ"),
+  and missing weights on a vertex no triangle uses ("Skin weights at vertex N sum to 0").
+  A drawn vertex with unusable weights is still an error.
+- A geometry, skin or animation data block listed in the scene without an owning shape is
+  ignored. It was reported as an unsupported scene child, which failed the model.
+
+Grass LOD
+
+- A grass type in the grass cache that has no billboard and cannot be rendered from its
+  model, because a shape is unreadable or its texture is not installed, is left out of
+  grass LOD and named in a warning. It stopped LOD generation before.
+
+Seasons
+
+- A seasonal tree swap to a tree that has no billboard is a warning, and those trees keep
+  their base LOD in that season. It stopped LOD generation before. **Strict seasonal
+  swaps** still stops.
+
+Skyrim VR
+
+- A Data folder and `plugins.txt` source no longer warns "Could not read Skyrim.ccc" at
+  every stage when the game folder has no `Skyrim.ccc`. Skyrim VR has no Creation Club and
+  never has that file, so it is not read there; on Skyrim SE a missing file means there
+  are no Creation Club plugins to add. A file that is present and unreadable still warns.
+
+Game plugin
+
+- Skyrim 1.6.1179, the GOG version, is supported. The build for SE 1.5.97 to AE 1.6.1170
+  refused to load on it, and automatic installation picked the build for Skyrim 1.7, which
+  cannot run there. Every 1.5 and 1.6 version now uses the first build; the second is for
+  Skyrim 1.7 and newer. The installer options name the GOG version.
+
+Packages and documentation
+
+- The Windows package no longer includes debug symbols for third-party libraries. The ZIP
+  is about 25 MB smaller and the extracted folder about 105 MB smaller.
+- The documentation is shorter and organised around what to do. The pipeline, diagnostics,
+  texture compute, materials, atlases, model support, packaging and roadmap pages are gone;
+  their instructions are in the user guide, the stage guides and troubleshooting.
+- The SKSE package's README now explains how to install the plugin.
+
 ## [0.6.0-beta.1] - 2026-11-13
 
-The first beta. A full run of grass, textures, terrain and object LOD over 85 worldspaces
-of a 2,044-plugin load order now takes about 35 minutes on a 32-thread machine with NVMe
-storage; terrain alone went from 70 minutes to under 7.
+The first beta. Terrain is now built on every worker thread and is several times faster on
+multi-core machines.
 
 Terrain
 

@@ -21,6 +21,20 @@ public sealed record TextureGenerationResult(string OutputFolder, bool Published
     public int Errors => Items.Count(i => i.Status == "Failed");
 }
 
+/// <summary>
+/// The output folder could not be written. Unlike a model or recipe that cannot be rendered, this stops the run:
+/// the per-item handlers let it through, so a full disk is never reported as a few missing textures.
+/// </summary>
+internal sealed class TextureOutputException(string message, Exception inner) : IOException(message, inner)
+{
+    /// <summary>True if this failure, or one it was wrapped in, came from writing the output.</summary>
+    internal static bool Caused(Exception? ex)
+    {
+        for (; ex is not null; ex = ex.InnerException) if (ex is TextureOutputException) return true;
+        return false;
+    }
+}
+
 /// <summary>Native texture preparation shared by the desktop and automation. No game or source mod is modified.</summary>
 public static partial class TextureGeneration
 {
@@ -91,8 +105,13 @@ public static partial class TextureGeneration
                 relative = GamePath.Normalize(relative); GamePath.ValidateRelative(relative);
                 if (!(relative.StartsWith("textures\\") || relative.StartsWith("dyndolod-temp\\textures\\"))) throw new InvalidDataException("Output must be under textures: " + relative);
                 string path = GamePath.ToFileSystemPath(stage, relative);
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                using (WorkTiming.Measure("file-write-worker")) File.WriteAllBytes(path, bytes);
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    using (WorkTiming.Measure("file-write-worker")) File.WriteAllBytes(path, bytes);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                { throw new TextureOutputException("Cannot write texture output " + path + ": " + e.Message, e); }
                 if (relative.StartsWith("textures\\")) files[relative] = Convert.ToHexString(SHA256.HashData(bytes));
                 else temporary.Add(relative);
             }
@@ -123,12 +142,19 @@ public static partial class TextureGeneration
             if (request.TreeTrunks) GenerateTrunks(request, assets, resources, Read, Write, items, Warn, progress, ct);
             if (request.RenderedObjects) RenderObjects(request, assets, resources, Read, Write, items, Warn, progress, ct);
             ct.ThrowIfCancellationRequested();
+            int failed = items.Count(i => i.Status == "Failed");
             progress?.Report($"Texture results: {items.Count(i => i.Status == "Written"):N0} generated, " +
                 $"{items.Count(i => i.Status == "Retained"):N0} retained, {items.Count(i => i.Status == "Skipped"):N0} skipped, " +
-                $"{items.Count(i => i.Status == "Failed"):N0} failed.");
+                $"{failed:N0} failed.");
             generationTiming.Dispose();
             using var publicationTiming = WorkTiming.Measure("publication");
-            bool publish = files.Count > 0 && items.All(i => i.Status != "Failed");
+            // A complete run publishes everything it could make: one unreadable model or missing recipe source must
+            // not cost the whole load order its LOD textures. Each failure stays in the report and the log. A filtered
+            // preview is an explicit request for those models, so it still has to succeed.
+            bool publish = files.Count > 0 && (failed == 0 || request.ModelFilter.Length == 0);
+            if (publish && failed > 0)
+                Warn($"{failed:N0} texture items could not be generated and were left out; the ERROR lines above and the report name each one. "
+                    + "LOD uses textures already installed in the load order for them where there are any.");
             string fingerprint = "";
             if (publish)
             {
@@ -156,7 +182,9 @@ public static partial class TextureGeneration
                 staged.Commit(progress);
                 progress?.Report($"Published {files.Count:N0} texture and billboard files to {request.OutputFolder}.");
             }
-            else progress?.Report("Texture output was not published. Review failures; any previous completed output was kept.");
+            else progress?.Report(files.Count == 0
+                ? "Texture output was not published: nothing could be generated. Any previous completed output was kept."
+                : "Texture output was not published: a filtered preview must render every selected model. Review failures; any previous completed output was kept.");
             return result;
         }
     }
@@ -245,7 +273,7 @@ public static partial class TextureGeneration
             ct.ThrowIfCancellationRequested();
             progress?.Report($"Preparing texture {++index}/{renderer.Plans.Count}: {output}");
             try { renderer.Build(output); }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException && !TextureOutputException.Caused(ex))
             { items.Add(new("Recipe", "", output, "Failed", ex.Message)); progress?.Report("ERROR: " + ex.Message); }
         }
     }

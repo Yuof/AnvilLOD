@@ -145,15 +145,18 @@ public sealed class GameContext : IDisposable
             foreach (var key in Implicits.Get(o.Release).Listings)
                 if (GamePath.ResolveExisting(dataFolder, key.ToString()) is { } implicitPath && File.Exists(implicitPath))
                     Add(new LoadOrderListing(key, enabled: true));
-            try
-            {
-                foreach (var cc in CreationClubListings.GetLoadOrderListings(GameCategory.Skyrim, dataFolder))
-                    if (GamePath.ResolveExisting(dataFolder, cc.ModKey.ToString()) is { } ccPath && File.Exists(ccPath)) Add(cc);
-            }
-            catch (Exception ex)
-            {
-                warnings.Add("Could not read Skyrim.ccc: " + ex.Message);
-            }
+            // Skyrim VR has no Creation Club and ships no Skyrim.ccc; the game does not read one there. An SE install
+            // without the file has no Creation Club plugins to add either. Only a file that is present can fail to read.
+            if (o.Release != GameRelease.SkyrimVR && HasCreationClubList(dataFolder))
+                try
+                {
+                    foreach (var cc in CreationClubListings.GetLoadOrderListings(GameCategory.Skyrim, dataFolder))
+                        if (GamePath.ResolveExisting(dataFolder, cc.ModKey.ToString()) is { } ccPath && File.Exists(ccPath)) Add(cc);
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add("Could not read Skyrim.ccc: " + ex.Message);
+                }
             foreach (var l in PluginListings.LoadOrderListingsFromPath(o.PluginsTxt, o.Release, dataFolder, throwOnMissingMods: false))
                 Add(l);
 
@@ -183,6 +186,11 @@ public sealed class GameContext : IDisposable
             warnings.Add("Outside MO2, mods installed through MO2 aren't in the Data folder. Use MO2 instance mode instead.");
         return ctx;
     }
+
+    /// <summary>True if the game folder beside <paramref name="dataFolder"/> holds a Skyrim.ccc, in any letter case.</summary>
+    private static bool HasCreationClubList(string dataFolder) =>
+        Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(dataFolder))) is { } gameFolder
+        && GamePath.ResolveExisting(gameFolder, "Skyrim.ccc") is { } ccc && File.Exists(ccc);
 
     internal static IReadOnlyList<string> IniPaths(GameContextOptions o, string data)
     {

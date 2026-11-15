@@ -12,11 +12,14 @@ foreach ($app in @('Cli', 'Desktop')) {
     dotnet publish "src/PenguLOD.$app/PenguLOD.$app.csproj" -c Release -r win-x64 --self-contained true `
         -o $package --disable-build-servers -m:1 -nr:false -p:UseSharedCompilation=false
 }
+# Debug symbols of third-party native libraries are not needed to run or to read a
+# PenguLOD stack trace, and are over 100 MB unpacked. PenguLOD's own symbols stay.
+Get-ChildItem $package -Filter *.pdb | Where-Object { $_.Name -notlike 'PenguLOD*' } | Remove-Item -Force
 Copy-Item LICENSE.txt, VERSION, UPSTREAM_VERSION $package
 Copy-Item assets/pengulod-256.png "$package/pengulod.png"
 Copy-Item packaging/README-WINDOWS.md $package
 New-Item -ItemType Directory -Force "$package/docs" | Out-Null
-foreach ($guide in @('USER-GUIDE', 'UPGRADING', 'SETTINGS', 'TOOLS', 'REPORTS-AND-OUTPUTS', 'GRASS', 'TEXTURES', 'TERRAIN', 'TREES', 'OBJECTS', 'RESOURCE-PACKS', 'MODEL-SUPPORT', 'MATERIALS', 'SEASONS', 'ATLASES', 'PIPELINE', 'CLI', 'DIAGNOSTICS', 'TROUBLESHOOTING', 'COMPUTE', 'PACKAGING', 'PROVENANCE', 'ROADMAP')) {
+foreach ($guide in @('USER-GUIDE', 'SETTINGS', 'CLI', 'GRASS', 'TEXTURES', 'TERRAIN', 'TREES', 'OBJECTS', 'SEASONS', 'RESOURCE-PACKS', 'REPORTS-AND-OUTPUTS', 'TOOLS', 'TROUBLESHOOTING', 'UPGRADING', 'PROVENANCE')) {
     Copy-Item "docs/$guide.md" "$package/docs/"
 }
 $env:PENGULOD_PACKAGE_DIR = $package

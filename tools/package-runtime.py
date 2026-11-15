@@ -33,7 +33,7 @@ def package(root: pathlib.Path) -> pathlib.Path:
         ini.mkdir(parents=True)
         shutil.copyfile(root / 'packaging/PenguLOD.ini', ini / 'PenguLOD.ini')
         shutil.copyfile(root / 'LICENSE.txt', stage / 'LICENSE.txt')
-        shutil.copyfile(root / 'docs/UPGRADING.md', stage / 'README.md')
+        shutil.copyfile(root / 'packaging/README-SKSE.md', stage / 'README.md')
         with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             for file in sorted(stage.rglob('*')):
                 if file.is_file():

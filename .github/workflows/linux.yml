@@ -39,6 +39,7 @@ jobs:
         run: |
           bash tools/test-runtime.sh
           python3 tools/test-runtime-packaging.py
+          python3 tools/test-nexus-upload.py
       - name: Build optional texture compute backend
         run: bash tools/build-texture-compute.sh
       - name: Engine and rendered UI tests

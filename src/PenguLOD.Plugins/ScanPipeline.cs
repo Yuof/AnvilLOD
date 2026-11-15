@@ -658,7 +658,8 @@ public static class ScanPipeline
                 if (req.Seasons)
                     foreach (var (season, swaps) in treeSeasons)
                     {
-                        var seasonalRefs = treeRefs.Select(t=>SeasonalAssets.SwapTree(game,assets,t,swaps,req.Scan.Tree3D??Tree3DSettings.Off)).ToArray();
+                        var missingBillboard = SeasonalAssets.MissingBillboardWarning(req.SeasonsStrict, season, Warn);
+                        var seasonalRefs = treeRefs.Select(t=>SeasonalAssets.SwapTree(game,assets,t,swaps,req.Scan.Tree3D??Tree3DSettings.Off,missingBillboard)).ToArray();
                         var seasonalResult = TreeLodGenerator.Generate(scan.Grids,seasonalRefs,assets,output,manifest,progress,ct,req.TreeBrightness,objectLodWorlds,season);
                         foreach (var warning in seasonalResult.Warnings) Warn(season + ": " + warning);
                     }
@@ -932,6 +933,12 @@ public static class ScanPipeline
                 if (grass.Atlas is { } atlas)
                     progress?.Report($"Grass LOD: {atlas.Tiles} billboards in one {atlas.Size}x{atlas.Size} atlas (tiles up to {(atlas.SizeCap == int.MaxValue ? "full size" : atlas.SizeCap + " px")}, {atlas.Reduced} scaled down), so each block needs one grass material.");
                 Classify(grass.MissingBillboards, "grass", "Re-run TexGen with grass billboards enabled.");
+                if (grass.RenderFailures.Count > 0)
+                {
+                    var first = grass.RenderFailures.OrderBy(kv => kv.Key, StringComparer.Ordinal).First();
+                    Warn($"Grass LOD: {grass.RenderFailures.Count} grass models could not be rendered and have no grass LOD (first: {first.Key}: {first.Value}). "
+                         + "Correct the model or install its texture, then generate again.");
+                }
                 if (grass.ModelsNotFound.Count > 0)
                     Warn($"The grass cache names {grass.ModelsNotFound.Count} grass models that no enabled mod provides ({string.Join(", ", grass.ModelsNotFound.OrderByDescending(kv => kv.Value).Take(4).Select(kv => Path.GetFileName(kv.Key)))}). "
                          + "The cache was probably made with a different set of grass mods (or with one disabled since): rebuild the grass cache (NGIO / FasterNGIO) with the grass mods you use now, otherwise those areas get no grass LOD and no real grass either.");

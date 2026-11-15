@@ -28,7 +28,9 @@ public class SksePluginInstallerTests : IDisposable
     [InlineData(1, 4, 15, 0, SkseDllChoice.Vr)]          // Skyrim VR
     [InlineData(1, 5, 97, 0, SkseDllChoice.UpTo1170)]
     [InlineData(1, 6, 1170, 0, SkseDllChoice.UpTo1170)]
-    [InlineData(1, 6, 1179, 0, SkseDllChoice.Newer)]
+    [InlineData(1, 6, 1179, 0, SkseDllChoice.UpTo1170)]   // GOG: numbered above Steam's 1.6.1170, same build line
+    [InlineData(1, 6, 9999, 0, SkseDllChoice.UpTo1170)]
+    [InlineData(1, 7, 0, 0, SkseDllChoice.Newer)]
     [InlineData(1, 7, 29, 0, SkseDllChoice.Newer)]
     public void The_game_version_picks_the_build(int a, int b, int c, int d, SkseDllChoice expected) =>
         Assert.Equal(expected, SksePluginInstaller.ForVersion(new Version(a, b, c, d)));

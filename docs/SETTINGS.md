@@ -1,14 +1,13 @@
-# PenguLOD settings reference
+# Settings reference
 
-This reference follows the **v0.6** desktop interface. Use the
-[walkthrough](USER-GUIDE.md) for a normal run and the [tool reference](TOOLS.md) for
-mesh authoring, texture repair and custom rules. Settings save automatically.
+Every option in the desktop, page by page. For a first run, follow the
+[user guide](USER-GUIDE.md). The mesh, texture and rule tools are in the
+[tools reference](TOOLS.md).
 
-Defaults below describe a fresh configuration. A saved configuration or preset
-can have different values. Changing a setting takes effect on the next run;
-install the regenerated output to see the change in game.
+Settings are saved automatically. Defaults are those of a fresh install. A changed setting
+applies to the next run; install the new output to see it in game.
 
-## Find a page
+## Pages
 
 - [Generation Overview](#generation-overview)
 - [Game & resources](#game--resources)
@@ -260,7 +259,7 @@ and opens **Scan results** without generating output.
 ### Presets
 
 Each button resets the Object LOD options before applying its choices.
-It leaves source paths and the separate TexGen and grass-cache settings in place.
+It leaves source paths and the separate texture and grass-cache settings in place.
 Terrain's seasonal switch is shared with this page and therefore resets too.
 
 | Button | What it selects |
@@ -372,13 +371,13 @@ the grass included in this LOD output.
 | Strict seasonal swaps | Stops generation when a seasonal INI names a record that is not in the load order. Off by default: such lines are skipped and reported, as the game does. |
 | Include initially disabled objects | Includes objects initially disabled by plugins. Off by default. Enabling it can bake unwanted removed objects into LOD. |
 | Include enable-parented objects | Includes objects whose visibility is controlled by another reference. On by default. |
-| SKSE DLL installation | **None** means install the matching DLL separately; it does not disable runtime features. **Auto** or an explicit runtime selects a supplied compatible DLL when available. PenguLOD packages do not bundle that DLL. |
+| SKSE DLL installation | **None** means you install the SKSE plugin yourself; it does not turn off runtime features. **Auto** or a named version copies a matching DLL into the output when one is available. The generator packages do not include the DLL. |
 | ESL record limit | **Auto** detects the game's limit. `2048` is the older limit; `4096` requires Skyrim 1.6.1130 or newer. Normally leave Auto. |
 | Large-reference master | Writes additional eligible large references to `PenguLOD.esm`, allowing full models to remain visible farther away. Off by default; can add drawing cost. No master is needed when there are no additional eligible entries. |
 | Flag large-reference master as ESL | Uses a light plugin slot when the generated master fits. On by default. |
 
 Disable previous generated object LOD mods, including their plugins, before a new
-generation. For runtime requirements, see [Provenance](PROVENANCE.md#game-runtime).
+generation. The runtime features need the [SKSE plugin](PROVENANCE.md#game-runtime).
 
 ### Object atlases
 
@@ -399,7 +398,7 @@ before lowering several quality controls together.
 | Setting | What it does |
 | --- | --- |
 | PBR object LOD | Uses suitable PBR albedo textures and generated equivalents for object LOD. Off by default. Enable when they match the materials used by the game. |
-| PBR brightness | Multiplier on object PBR conversion brightness. Default `1`; separate from TexGen and Terrain calibration. |
+| PBR brightness | Multiplier on object PBR conversion brightness. Default `1`; separate from the Textures and Terrain calibration. |
 | PBR texture size | Maximum side length for converted object PBR textures. Default `512`. |
 | PBR waterfalls | Selects full models for PBR-patched waterfalls. Independent of PBR object LOD; enable it only when the installed waterfall models need it. |
 | Terrain underside | Adds a lower terrain surface for volumetric lighting. Off by default; this does not generate the landscape LOD itself. |
@@ -472,7 +471,7 @@ on its version. They can help compare costs without regenerating.
 
 For a fair comparison, restore the layers you intend to use, restart after
 replacing generated files, and test the same camera view and conditions. See the
-[walkthrough's testing steps](USER-GUIDE.md#7-compare-in-game).
+[user guide](USER-GUIDE.md#8-check-in-game).
 
 ## Reports & outputs
 

@@ -127,7 +127,8 @@ public static partial class Program
           --seasons-strict       With --seasons: stop on a swap naming a form that is not in the load order
                                  (default: skip and report it, as the game does)
           --skse-dll <which>     SKSE plugin put in the output: auto (default, reads SkyrimSE.exe),
-                                 1170 (SE 1.5.97 - AE 1.6.1170), 17 (newer, 1.7.x), none (installed separately)
+                                 1170 (SE 1.5.97 - AE 1.6.1170, GOG 1.6.1179), 17 (Skyrim 1.7 and newer),
+                                 vr, none (installed separately)
           --no-grid-objects      Don't hand water planes, waterfalls, fires and windmills (DynDOLOD
                                  "grid" objects) to the PenguLOD SKSE plugin
           --glow-windows         (experimental) DynDOLOD's window glow: the <model>glow_lod_N.nif meshes of farmhouses, inns and forts are

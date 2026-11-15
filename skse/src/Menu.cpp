@@ -362,11 +362,11 @@ namespace PenguLOD::Menu
 		{
 			Smf::Text("PenguLOD %s", PENGULOD_VERSION_STRING);
 #if PENGULOD_RUNTIME_LINE == 17
-			Smf::Text("Build: game versions newer than 1.6.1170 (Skyrim 1.7.x)");
+			Smf::Text("Build: Skyrim 1.7 and newer");
 #elif PENGULOD_RUNTIME_LINE == 14
 			Smf::Text("Build: Skyrim VR 1.4.15");
 #else
-			Smf::Text("Build: game versions SE 1.5.97 to AE 1.6.1170");
+			Smf::Text("Build: game versions SE 1.5.97 to AE 1.6.1170 (GOG 1.6.1179)");
 #endif
 			Smf::Text("Game version: %s", g_gameVersion.c_str());
 			Smf::Separator();

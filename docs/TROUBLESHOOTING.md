@@ -1,85 +1,102 @@
 # Troubleshooting
 
+## Windows blocks PenguLOD
+
+The Windows programs are not code-signed, so Windows reports an unknown publisher the first
+time they start, and some antivirus programs block them.
+
+1. Check the download against `SHA256SUMS` from the release page: run
+   `Get-FileHash <file> -Algorithm SHA256` in PowerShell and compare the result.
+2. Before extracting, right-click the ZIP, choose **Properties**, tick **Unblock** and
+   click **OK**. Then extract it.
+3. If "Windows protected your PC" still appears, click **More info**, then **Run anyway**.
+4. If your antivirus removes or blocks files, restore them and add the PenguLOD folder to
+   its exclusions.
+
 ## A stage failed
 
-Use **Open run folder** to read the full log and result report. Correct the first reported
-error, then repeat the same pipeline selection. Verified completed stages can be reused;
-failed stages rerun. Each stage publishes separately, so a later failure does not undo
-earlier completed stages. See [persistent generation](PIPELINE.md).
+1. Click **Open run folder** and read the log. Fix the first error it reports.
+2. Run the same selection again. Finished stages and terrain tiles are reused.
 
-Use **Diagnostics** to check missing plugins, source precedence, stale generated inputs
-and runtime requirements. For missing models or textures, inspect which enabled mod or
-archive supplies the named asset. Reinstall or correct the source mod when necessary.
+A failed or cancelled stage leaves your previous output untouched.
 
-Terrain logs identify the default landscape texture. Before the first tile, and in the
-pipeline preflight, every missing landscape texture and every tile without landscape or
-existing terrain LOD is listed with its worldspace, cell count and first cell. By default
-those use the default texture and the worldspace's default land height; turn the two terrain
-settings off to stop instead. The default texture is `textures/landscape/dirt02.dds`, subject
-to the selected INI's `sDefaultLandDiffuseTexture`. See [terrain settings](TERRAIN.md).
+To find which mod supplies a file named in an error, open **Diagnostics**, enter the path
+under **Inspect asset precedence** and click **Run diagnostics**.
 
-### A file could not be read partway through the run
+## Textures finished with failed items
 
-The storage under a file PenguLOD had open changed or went away. On Linux, a mod manager
-that mounts a virtual file system on the game's `Data` folder does this each time the game
-is started or closed from it; a drive that disconnects does the same. Close the game and
-repeat the same pipeline selection, and do not start or close the game until it finishes.
-Completed stages and finished terrain tiles are reused.
+The texture stage publishes what it could generate and lists the rest as failed in the log
+and the report. See [failed items](TEXTURES.md#failed-items).
 
-The preflight warns when the game is running (`game-running`) and when `Data` is such a
-mount at that moment (`data-folder-mounted`). It cannot foresee the game being started
-later in the run.
+## "A file could not be read partway through the run"
 
-## Output looks different from nearby terrain or trees
+The storage under a file PenguLOD was reading went away. On Linux this happens when the
+game is started or closed from a mod manager that mounts a virtual file system over the
+Data folder. A drive that disconnects does the same.
 
-Use [material calibration](MATERIALS.md) to adjust the affected output's brightness.
-Tree coverage reports explain when a tree uses an authored model, native reduction or
-a billboard fallback. Regenerate the affected stages, install their output, then compare
-at the same location, time and weather. Follow the [transition checks](DIAGNOSTICS.md#repeatable-checks).
+Close the game and run the same selection again. Do not start or close the game until the
+run finishes.
 
-## No large-reference master in the output
+## Terrain reports missing landscape or textures
 
-`PenguLOD.esm` contains additional large-reference lists for Skyrim's full-detail
-object grid. It is separate from object and tree LOD meshes. The generator omits it
-when large references are disabled or no additional eligible references are found;
-read `PenguLOD Large References.txt` for the result.
+By default these are filled in and listed as warnings. See
+[missing landscape data](TERRAIN.md#missing-landscape-data). If the default landscape
+texture itself is missing, install the mod that provides it or correct
+`sDefaultLandDiffuseTexture` in your Skyrim INI.
 
-Older builds counted entries from an enabled previous generated master as source data,
-which could cause the replacement master to be omitted. Disable the previous object
-output before regenerating with those builds. Current builds ignore previous generated
-plugins during large-reference generation and rebuild the required lists from source
-plugins. Replace the installed object output as a complete mod after generation.
+## Distant ground, trees or grass are too bright or too dark
 
-## Trees or grass disappear after a quality comparison
+Each kind of LOD has its own brightness control. See
+[brightness](TEXTURES.md#brightness).
 
-The PenguLOD runtime's **Quality Layers** controls persist in
-`Data/SKSE/Plugins/PenguLOD.ini` when saved. Restore the layers used for comparison before
-judging new output. Disabling **3D trees → LOD4** hides that near LOD layer without
-substituting billboard cards; the farther card layers start at their own block distances.
-Changing the generator version does not reset these game-side settings.
+## Tree billboards are purple
+
+The installed texture output is older than the object LOD that uses it. Install the texture
+output from the same run.
+
+## Trees or grass are missing after a comparison
+
+The SKSE plugin's in-game **Quality Layers** settings are saved in
+`SKSE/Plugins/PenguLOD.ini` and survive a new generation. Show the hidden layers again.
+Hiding **3D trees → LOD4** does not put billboards in their place.
+
+## A tree or object has no LOD, or uses a billboard
+
+Click **Scan load order** and open **Scan results**. The tables give the reason for each
+model: a missing LOD model or texture, an unsupported model, or a triangle budget it could
+not meet. See [trees](TREES.md) and [objects](OBJECTS.md).
+
+## There is no PenguLOD.esm
+
+`PenguLOD.esm` is written only when **Large-reference master** is on and there are
+references to add to it. `PenguLOD Large References.txt` in the output gives the result.
+Other generated plugins also depend on your settings, and the run summary lists the ones
+that were written.
 
 ## PGLite reports a missing drive such as `d:`
 
-Malformed generated textures can contain a literal Windows drive directory such as
-`textures/d:`. Check the installed output for that directory. Generate clean output
-with the current application and replace the installed output mod so malformed files
-are removed.
+Output from an old version can contain a folder named like a Windows drive, for example
+`textures/d:`. Generate again with the current version and replace the installed mod
+completely, so the bad files are removed.
 
-The packaged repair script can preview and quarantine verified malformed placeholder
-folders from older output. Close Skyrim and run it from the package directory:
+To clean an old output without regenerating, close Skyrim and run the packaged script from
+the PenguLOD folder:
 
 ```sh
 python3 repair-pglite-paths.py "/path/to/installed/output" "/path/to/generated/output"
 ```
 
-Add `--apply` to quarantine matching files. The script requires the output manifest,
-validates placeholder contents, refuses unknown files/symlinks and writes a backup receipt.
-Regeneration is still needed to correct mesh references. The script is also available
-under `tools/` in the source checkout.
+It lists what it would remove. Add `--apply` to move those files aside and write a backup
+receipt.
 
-## Reporting a problem
+## Report a problem
 
-Include the PenguLOD version, Linux distribution, source mode, failed stage, reproducible
-settings and a relevant log excerpt. [Diagnostics](DIAGNOSTICS.md) exports metadata with
-known local paths replaced. Review reports and logs for private information before posting
-to [GitHub issues](https://github.com/opteron-x86/PenguLOD/issues).
+Open a [GitHub issue](https://github.com/opteron-x86/PenguLOD/issues) with:
+
+- the PenguLOD version and your operating system
+- whether you use Mod Organizer 2 or a Data folder
+- the stage that failed and the part of the log around the error
+- the report from **Diagnostics → Export diagnostic report**
+
+The diagnostic report replaces known personal paths, but read it and any log before
+posting.

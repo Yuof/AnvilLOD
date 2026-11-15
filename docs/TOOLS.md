@@ -1,8 +1,7 @@
-# PenguLOD tool reference
+# Tools
 
-These optional pages create or repair source assets. You can complete a normal
-generation without using them. Follow the [walkthrough](USER-GUIDE.md) for that
-workflow; see the [settings reference](SETTINGS.md) for generation controls.
+These pages create or repair source assets: LOD models, billboards, textures and rules. A
+normal generation does not need them.
 
 ## Mesh maker
 
@@ -61,7 +60,7 @@ fill gaps in a particular mod's LOD resources.
 
 **Analyze only** reports coverage without generating assets. **Generate assets**
 creates the selected outputs. Install suitable results as a source mod before
-the next generation. See [model support](MODEL-SUPPORT.md) for supported inputs.
+the next generation. See [supported models](#supported-models).
 
 ## Texture tools
 
@@ -75,9 +74,8 @@ LOD copy. It creates an override mod and leaves the originals in place.
 | Repaired texture output | Destination for repaired texture copies. Keep separate from the scanned mods. |
 
 **Scan textures** lists problems. **Repair BC6H textures** converts supported
-files to BC7 while preserving their dimensions and mip levels. Mip levels are the
-smaller versions of a texture used at a distance. HDR colour values outside the
-normal range are clipped during conversion.
+files to BC7 at the same size. HDR colour values outside the normal range are
+clipped.
 
 The repair scans loose files; it does not repair textures inside BSA archives or
 unsupported cube, array or volume textures. Install the repair mod so its files
@@ -125,3 +123,21 @@ written, so retain the original if it also contains other settings.
 To remove an object from static LOD, use **None** in its LOD columns or correct
 its placement in the source load order. A Reference value such as Disable or
 Delete is not a substitute for that.
+
+## Supported models
+
+PenguLOD reads Skyrim SE and LE models (NIF files).
+
+- **Geometry:** `BSTriShape`, `BSSubIndexTriShape`, `BSMeshLODTriShape`,
+  `BSDynamicTriShape`, `NiTriShape`, `BSLODTriShape` and `NiTriStrips`.
+- **Skinned models:** baked to the pose stored in the file. Every bone must be in the same
+  file. Animation, wind and physics are not applied.
+- **Switch and LOD nodes:** only the active child is used.
+- **Materials:** ordinary lighting shaders with diffuse and normal maps. Effect shaders can
+  be rendered into billboards and textures when they are static. Animated, blended and
+  view-dependent effects are not supported.
+
+A model PenguLOD cannot read is skipped, or falls back to a billboard for trees, and the
+scan results give the reason. Tree LOD models made by
+[TreeLODGen](https://github.com/Cl3mus33/TreeLODGen) work as installed LOD models.
+

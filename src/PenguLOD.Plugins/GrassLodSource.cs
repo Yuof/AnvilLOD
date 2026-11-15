@@ -253,6 +253,11 @@ public sealed class GrassLodSource : ISyntheticMeshSource
     /// <summary>Grass types drawn with their own model texture because no billboard exists.</summary>
     public int TypesFromModelTexture => _fromModel;
 
+    private readonly ConcurrentDictionary<string, string> _renderFailures = new(StringComparer.Ordinal);
+
+    /// <summary>Grass models without a billboard that could not be rendered either, with the reason. They get no grass LOD.</summary>
+    public IReadOnlyDictionary<string, string> RenderFailures => _renderFailures;
+
     private GrassBillboard? FromModel(string model)
     {
         var path = GamePath.Join("meshes", model);
@@ -267,7 +272,15 @@ public sealed class GrassLodSource : ISyntheticMeshSource
         }
         if (mesh.Parts.Count == 0) return null;
         Interlocked.Increment(ref _fromModel);
-        if (_outputFolder is not null && Rendered(model, mesh) is { } rendered) return rendered;
+        if (_outputFolder is not null)
+            try { if (Rendered(model, mesh) is { } rendered) return rendered; }
+            catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or FileNotFoundException or ArgumentException)
+            {
+                // An unreadable shape or a missing texture: there is nothing to draw for this grass type from afar.
+                // It is left out and reported; one unusable grass model must not cost the load order its grass LOD.
+                _renderFailures.TryAdd(model.Replace('/', '\\').ToLowerInvariant(), ex.Message);
+                return null;
+            }
         var part = mesh.Parts.OrderByDescending(p => p.TriangleCount).FirstOrDefault();
         if (part is null) return null;
         var min = new Vector3(float.MaxValue);

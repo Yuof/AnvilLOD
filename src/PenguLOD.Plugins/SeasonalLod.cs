@@ -40,6 +40,7 @@ public static class SeasonalLod
         foreach (var (suffix, name) in SeasonSwaps.Seasons)
         {
             ct.ThrowIfCancellationRequested();
+            var missingBillboard = SeasonalAssets.MissingBillboardWarning(strict, suffix, warn);
             RemoveSeasonFiles(outputFolder, scopes, suffix);
             var seasonFiles = files.Where(f => SeasonSwaps.SeasonOf(GamePath.GetFileName(f)) == suffix).ToList();
             bool seasonalGrass = grass?.HasSeason(suffix) == true; // grass\<ws>x..y...<SUF>.cgid from Grass Cache Helper
@@ -81,7 +82,7 @@ public static class SeasonalLod
                         && treeLookup.TryGetValue((r.Worldspace,r.FormKey),out var tree)
                         && seasonalTrees.TryGetValue(suffix,out var treeSwaps))
                     {
-                        var replacement = SeasonalAssets.SwapTree(game,(AssetIndex)assets,tree,treeSwaps,settings);
+                        var replacement = SeasonalAssets.SwapTree(game,(AssetIndex)assets,tree,treeSwaps,settings,missingBillboard);
                         if (replacement == tree) {seasonal.Add(r);continue;}
                         var card = TreeCardSource.Prefix + replacement.Billboard.TexturePath;
                         LodMeshSet meshes;

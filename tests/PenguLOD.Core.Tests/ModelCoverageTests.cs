@@ -109,6 +109,8 @@ public class ModelCoverageTests
     [InlineData("bhkCollisionObject", false)]
     [InlineData("bhkRigidBody", false)]
     [InlineData("NiAlphaProperty", false)]
+    [InlineData("NiTriShapeData", false)]   // an orphaned data block listed in the scene: it draws only through a shape
+    [InlineData("NiSkinData", false)]
     [InlineData("NiParticles", true)]
     public void NonvisualChildrenAreIgnoredButUnsupportedVisibleGeometryIsReported(string type, bool incomplete)
     {
@@ -130,6 +132,37 @@ public class ModelCoverageTests
         var bad = NifGeometryReader.Read("weight", ModelNifFixture.Create(geometry, skinned: true, weight: 0));
         Assert.True(bad.HasIncompleteGeometry); Assert.Empty(bad.Parts);
         Assert.Contains(bad.Warnings, w => w.Contains("weights") && w.Contains("expected"));
+    }
+
+    [Theory]
+    [InlineData(ModelNifFixture.Geometry.Packed)]
+    [InlineData(ModelNifFixture.Geometry.Partition)]
+    public void SkinDataTheGameNeverReadsDoesNotRejectTheModel(ModelNifFixture.Geometry geometry)
+    {
+        var expected = Assert.Single(NifGeometryReader.Read("skin", ModelNifFixture.Create(geometry, skinned: true)).Parts);
+        // The vertex buffer carries the weights; the legacy per-bone list is unused, so a stale one is not an error.
+        var stale = NifGeometryReader.Read("stale", ModelNifFixture.Create(geometry, skinned: true, staleLegacyWeights: true));
+        Assert.Empty(stale.Warnings); Assert.Equal(expected.Positions, Assert.Single(stale.Parts).Positions);
+        // A bind transform for a bone the skin instance does not list is never applied.
+        var extra = NifGeometryReader.Read("extra", ModelNifFixture.Create(geometry, skinned: true, skinDataBones: 3));
+        Assert.Empty(extra.Warnings); Assert.Equal(expected.Positions, Assert.Single(extra.Parts).Positions);
+        // A vertex no triangle uses is never drawn. It needs no weights, and it must not widen the bounds.
+        var orphan = NifGeometryReader.Read("orphan", ModelNifFixture.Create(geometry, skinned: true, orphanVertex: true));
+        Assert.Empty(orphan.Warnings);
+        var part = Assert.Single(orphan.Parts);
+        Assert.Equal(expected.Positions[..3], part.Positions[..3]);
+        Assert.Contains(part.Positions[3], part.Positions[..3]);
+    }
+
+    [Theory]
+    [InlineData(ModelNifFixture.Geometry.Triangles)]
+    [InlineData(ModelNifFixture.Geometry.Packed)]
+    [InlineData(ModelNifFixture.Geometry.Partition)]
+    public void AVertexWeightedToABoneWithoutABindTransformIsStillRejected(ModelNifFixture.Geometry geometry)
+    {
+        // Every vertex is weighted to bone 1, and the skin data only describes bone 0.
+        var bad = NifGeometryReader.Read("short", ModelNifFixture.Create(geometry, skinned: true, skinDataBones: 1));
+        Assert.True(bad.HasIncompleteGeometry); Assert.Empty(bad.Parts);
     }
 
     [Theory]
