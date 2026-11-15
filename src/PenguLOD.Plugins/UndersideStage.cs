@@ -9,7 +9,7 @@ using Mutagen.Bethesda.Skyrim;
 namespace PenguLOD.Plugins;
 
 /// <summary>
-/// The terrain underside step of a Generate run: one <c>meshes\Terrain\&lt;ws&gt;\&lt;ws&gt;_Underside.nif</c> per worldspace
+/// The terrain underside step of a Generate run: one <c>meshes\terrain\&lt;ws&gt;\&lt;ws&gt;_Underside.nif</c> per worldspace
 /// that has LOD32 blocks, plus <c>PenguLOD.esp</c> (ESL) that places them. Volumetric lighting mods (DVLaSS,
 /// EVLaS, Community Shaders' sky sync) need it to stop rays and shadows leaking through the landscape.
 /// </summary>
@@ -193,17 +193,20 @@ public static class UndersideStage
 
     private static void RemoveFiles(string output, IReadOnlyCollection<string> keep)
     {
-        var root = Path.Combine(output, "meshes", "Terrain");
-        if (!Directory.Exists(root)) return;
-        var keepSet = new HashSet<string>(keep, StringComparer.OrdinalIgnoreCase);
+        // Every spelling of meshes\terrain: output from 0.6.0-beta.2 and earlier has the underside files under "meshes/Terrain",
+        // beside the blocks in "meshes/terrain". Only a file at the path this version writes is kept.
+        var keepPaths = new HashSet<string>(keep.Select(ws => GamePath.ToFileSystemPath(output, UndersideBuilder.RelativePath(ws))), StringComparer.Ordinal);
         try
         {
-            foreach (var file in Directory.EnumerateFiles(root, "*_Underside.nif", SearchOption.AllDirectories))
-            {
-                var dir = Path.GetFileName(Path.GetDirectoryName(file));
-                if (dir is not null && keepSet.Contains(dir)) continue;
-                File.Delete(file);
-            }
+            foreach (var root in GamePath.ResolveAllExisting(output, @"meshes\terrain").Where(Directory.Exists))
+                foreach (var file in Directory.EnumerateFiles(root, "*_Underside.nif", SearchOption.AllDirectories).ToList())
+                {
+                    if (keepPaths.Contains(file)) continue;
+                    File.Delete(file);
+                    // Folders this left empty go too, up to the terrain folder itself, so no second spelling stays behind.
+                    for (var dir = Path.GetDirectoryName(file); dir is not null && dir.Length >= root.Length && !Directory.EnumerateFileSystemEntries(dir).Any(); dir = Path.GetDirectoryName(dir))
+                        Directory.Delete(dir);
+                }
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }

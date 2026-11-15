@@ -171,6 +171,9 @@ public static class OutputManagement
                 foreach (var s in receipt.Stages.Where(s => !s.Complete)) findings.Add(new("Error", s.Id + " is a preview or filtered output, not a complete stage."));
                 var owned = receipt.Stages.SelectMany(s => s.Files).GroupBy(k => k.Key, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(g => g.Key, g => g.First().Value, StringComparer.OrdinalIgnoreCase);
+                foreach (var group in OutputCase.Conflicts(root))
+                    findings.Add(new("Warning", "Names that differ only in case: " + string.Join(", ", group)
+                        + ". The game reads them as one path and may see only one of them. Generate this output again to merge them.", "case-conflict"));
                 var actual = OutputFiles.Enumerate(root, ct).ToDictionary(p => p, StringComparer.OrdinalIgnoreCase);
                 foreach (var stage in receipt.Stages)
                     foreach (var (relative, expected) in stage.Files)
