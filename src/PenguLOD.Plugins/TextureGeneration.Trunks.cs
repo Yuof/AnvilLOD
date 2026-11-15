@@ -98,7 +98,8 @@ public static partial class TextureGeneration
                 foreach (var (view, frame) in card.Views.OrderBy(p => p.Key))
                 {
                     ct.ThrowIfCancellationRequested();
-                    var image = frame.Render(source, loader, request.BillboardMaxSize, request.UnitsPerPixel, request.Brightness, request.Materials);
+                    var image = frame.Render(source, loader, request.BillboardMaxSize, request.TrunkUnitsPerPixel, request.Brightness, request.Materials,
+                        (request.Billboards ?? new()).Trunks);
                     string output = stem + $"_{view}.dds";
                     outputs.Add((output, TextureImages.Encode(new(image.Rgba, image.Width, image.Height), alpha: true)));
                     outputs.Add((stem + $"_{view}_n.dds", TextureImages.Encode(new(image.NormalRgba!, image.Width, image.Height), normal: true)));

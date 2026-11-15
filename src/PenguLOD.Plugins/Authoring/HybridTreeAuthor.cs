@@ -31,7 +31,7 @@ internal sealed class HybridTreeAuthor(AssetIndex assets, Tree3DSettings setting
             { reason = "Hybrid authoring needs separate opaque trunk and alpha-tested crown shapes, without blended/effect parts."; return null; }
             var trunk = new LodMesh { Path = source.Path, Parts = bark };
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            hash.AppendData(Encoding.UTF8.GetBytes(FormattableString.Invariant($"hybrid2|{source.Path}|{settings.TrunkTextureSize}|{settings.TrunkUnitsPerPixel:R}")));
+            hash.AppendData(Encoding.UTF8.GetBytes(FormattableString.Invariant($"hybrid3|{source.Path}|{settings.TrunkTextureSize}|{settings.TrunkUnitsPerPixel:R}")));
             hash.AppendData(Read(source.Path) ?? throw new FileNotFoundException(source.Path));
             foreach (var part in bark) hash.AppendData(Encoding.UTF8.GetBytes(part.Material.Key));
             foreach (var texture in bark.SelectMany(p => p.Material.Textures).Where(t => !string.IsNullOrWhiteSpace(t)).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase))
@@ -57,7 +57,7 @@ internal sealed class HybridTreeAuthor(AssetIndex assets, Tree3DSettings setting
                 {
                     var loader = TextureGeneration.TextureLoader(Read);
                     BillboardImage Render(BillboardView view) => BillboardRenderer.Render(trunk, loader, settings.TrunkTextureSize,
-                        unitsPerPixel: settings.TrunkUnitsPerPixel, view: view, originCentered: true)
+                        unitsPerPixel: settings.TrunkUnitsPerPixel, view: view, originCentered: true, light: BillboardLight.Trunk)
                         ?? throw new InvalidDataException("Trunk has no visible surface in the " + view + " view.");
                     var front = Render(BillboardView.Front); var side = Render(BillboardView.Side);
                     var files = new Dictionary<string, string>(StringComparer.Ordinal);

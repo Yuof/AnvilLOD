@@ -310,7 +310,7 @@ public sealed class GrassLodSource : ISyntheticMeshSource
             var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(model.ToLowerInvariant())), 0, 4).ToLowerInvariant();
             var rel = GamePath.Join("textures", "pengulod", "grass", $"{stem}_{hash}.dds");
             var img = Authoring.BillboardRenderer.Render(mesh, LoadTexture, maxPixels: 256, vertexColors: false, minCoverage: 0.3f,
-                originCentered: true, grassTextures: Authoring.GrassTextureMode.Auto);
+                originCentered: true, grassTextures: Authoring.GrassTextureMode.Auto, light: Authoring.BillboardLight.Grass);
             if (img is null) return null;
             var full = Path.Combine(_outputFolder!, rel.Replace('\\', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(full)!);

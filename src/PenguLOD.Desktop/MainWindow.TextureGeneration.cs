@@ -39,7 +39,8 @@ public sealed partial class MainWindow
             Row(TextureSizeChoice("Stitch base size", nameof(_settings.TextureGenBaseSize), [64, 128, 256, 512, 1024]),
                 TextureSizeChoice("Maximum billboard size", nameof(_settings.TextureGenMaxSize), [32, 64, 128, 256, 512, 1024, 2048])),
             Row(Help(Number("Tree world units per pixel", nameof(_settings.TextureGenUnitsPerPixel), .25m, 128, .25m), "Lower values increase texture resolution."),
-                Help(Number("Grass world units per pixel", nameof(_settings.TextureGenGrassUnitsPerPixel), .25m, 128, .25m), "Lower values increase texture resolution. Grass is small, so it needs a much lower value than trees.")),
+                Help(Number("Grass world units per pixel", nameof(_settings.TextureGenGrassUnitsPerPixel), .25m, 128, .25m), "Lower values increase texture resolution. Grass is small, so it needs a much lower value than trees."),
+                Help(Number("Trunk world units per pixel", nameof(_settings.TextureGenTrunkUnitsPerPixel), .25m, 128, .25m), "For hybrid tree trunk textures. Lower values increase texture resolution.")),
             Number("Brightness multiplier", nameof(_settings.TextureGenBrightness), .1m, 4, .05m),
             Row(Number("Minimum tree height", nameof(_settings.TextureGenMinTreeHeight), 0, 65536, 16), Number("Minimum grass height", nameof(_settings.TextureGenMinGrassHeight), 0, 65536, 4)),
             Field("Model path filter", nameof(_settings.TextureGenFilter), "For previews of matching models. Leave blank for a complete run. Stitched textures are always included."))),
@@ -47,7 +48,12 @@ public sealed partial class MainWindow
             Check("Bake source normal maps", nameof(_settings.BakeSourceNormals)),
             Check("Calibrate PBR albedo", nameof(_settings.BakePbr)),
             Row(Number("PBR scale", nameof(_settings.BakePbrScale), .1m, 4, .05m), Number("PBR gamma", nameof(_settings.BakePbrGamma), .1m, 4, .05m)),
-            Row(Number("PBR occlusion strength", nameof(_settings.BakeAo), 0, 1, .05m), Number("Ambient light", nameof(_settings.BakeAmbient), 0, 2, .05m), Number("Directional light", nameof(_settings.BakeDirectional), 0, 2, .05m))) },
+            Number("PBR occlusion strength", nameof(_settings.BakeAo), 0, 1, .05m),
+            Help(Row(Number("Tree ambient light", nameof(_settings.TextureGenTreeAmbient), 0, 4, .05m), Number("Tree direct light", nameof(_settings.TextureGenTreeDirect), 0, 4, .05m)),
+                "Trees and trunks are lit from above. Ambient reaches every surface; direct light adds to the surfaces that face up."),
+            Row(Number("Trunk ambient light", nameof(_settings.TextureGenTrunkAmbient), 0, 4, .05m), Number("Trunk direct light", nameof(_settings.TextureGenTrunkDirect), 0, 4, .05m)),
+            Help(Row(Number("Grass ambient light", nameof(_settings.TextureGenGrassAmbient), 0, 4, .05m), Number("Grass direct light", nameof(_settings.TextureGenGrassDirect), 0, 4, .05m)),
+                "Grass is lit softly from the front and above, on both sides of a blade.")) },
         Card("Results", Stack(12, _textureGenSummary, _textureGenResults, Button("Preview selected texture", PreviewGeneratedTexture)))));
 
     private Control TextureSizeChoice(string label, string property, decimal[] sizes)
