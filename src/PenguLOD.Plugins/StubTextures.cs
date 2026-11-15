@@ -24,6 +24,27 @@ public static class StubTextures
         return normal ? null : color;
     }
 
+    /// <summary>
+    /// True if what the load order has at this path is a stand-in written by <see cref="Write"/>: a loose file with exactly the bytes
+    /// a stand-in for this path has. An installed PenguLOD output is part of the load order, and its stand-ins must not pass for
+    /// the textures they stand in for.
+    /// </summary>
+    public static bool IsStandIn(AssetIndex assets, string texturePath)
+    {
+        string rel;
+        try { rel = GamePath.NormalizeTexture(texturePath).ToLowerInvariant(); }
+        catch (ArgumentException) { return false; }
+        bool normal = rel.EndsWith("_n.dds", StringComparison.Ordinal);
+        var color = normal ? (R: (byte)128, G: (byte)128, B: (byte)255) : ColorFor(rel);
+        var expected = Build(color.R, color.G, color.B);
+        if (assets.LooseSize(rel) != expected.Length || !assets.TryOpen(rel, out var stream)) return false;
+        using (stream)
+        {
+            var actual = new byte[expected.Length];
+            return stream.ReadAtLeast(actual, actual.Length, throwOnEndOfStream: false) == actual.Length && actual.AsSpan().SequenceEqual(expected);
+        }
+    }
+
     public static (byte R, byte G, byte B) ColorFor(string texturePath)
     {
         var n = texturePath.ToLowerInvariant();

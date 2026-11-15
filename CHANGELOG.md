@@ -94,6 +94,12 @@ Output
   when the output had the game plugin's settings file, `SKSE/Plugins/PenguLOD.ini`, which
   every object LOD run with dynamic LOD writes: the file was carried into the new run's
   work folder, which then failed the check for an empty folder.
+- Stand-ins for textures that are not installed are written on every run. An installed
+  PenguLOD output is part of the load order of the next run, and its stand-ins passed for
+  the real textures, so the next output had none: on a test load order one run wrote 61
+  stand-ins, the next 1, the one after 55. With such an output installed the textures were
+  missing in game, which draws purple and can crash. A stand-in is now recognised by its
+  exact content and still counts as missing.
 
 Reports
 

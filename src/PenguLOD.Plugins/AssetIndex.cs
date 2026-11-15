@@ -156,6 +156,13 @@ public sealed class AssetIndex : IAssetSource
 
     private FileInfo? Loose(string key) => _looseCache.GetOrAdd(key, _looseResolver);
 
+    /// <summary>Size of the file when the winning copy is a loose file of a mod or the game; null for an archive entry, a generated file or nothing.</summary>
+    public long? LooseSize(string dataRelativePath)
+    {
+        var key = GamePath.Normalize(dataRelativePath);
+        return _overrides.ContainsKey(key) || Replaced(key) ? null : Loose(key)?.Length;
+    }
+
     /// <summary>
     /// A folder read as the lowest-priority layer (below every mod and archive): files PenguLOD made itself, such as tree billboards rendered
     /// without TexGen. Not cached, because those files appear while a run is going on.

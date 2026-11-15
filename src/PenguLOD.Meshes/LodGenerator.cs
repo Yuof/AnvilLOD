@@ -465,9 +465,14 @@ public sealed class LodGenerator
     /// Textures"). Call after everything that writes textures into the output has run. Key = texture, value = first
     /// mesh that uses it and how many meshes do.
     /// </summary>
-    public IReadOnlyDictionary<string, (string FirstMesh, int Meshes)> AuditTextures(string outputFolder) =>
+    /// <param name="isStandIn">
+    /// True for a texture the load order only has as a stand-in an earlier run wrote for it. An installed output is part of the
+    /// load order, so without this its stand-ins pass for the real textures, the next output gets none, and after that one is
+    /// installed the textures are missing in game.
+    /// </param>
+    public IReadOnlyDictionary<string, (string FirstMesh, int Meshes)> AuditTextures(string outputFolder, Func<string, bool>? isStandIn = null) =>
         FindMissingTextures(OutputMeshes(),
-            tex => _assets.Exists(tex) || File.Exists(GamePath.ToFileSystemPath(outputFolder, tex)));
+            tex => _assets.Exists(tex) && isStandIn?.Invoke(tex) != true || File.Exists(GamePath.ToFileSystemPath(outputFolder, tex)));
 
     /// <summary>
     /// Opens every texture the loaded LOD meshes name (all nine slots) and checks its DDS header. A texture the engine can't create is
