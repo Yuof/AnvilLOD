@@ -61,6 +61,12 @@ Grass LOD
   grass instances near a random point in its square, at its own size. Tufts are no longer
   enlarged to fill large squares. Generate object LOD again; every grass block is rebuilt.
 
+- Grass LOD is darker by default: **Grass tip brightness** `0.3` and **Grass root
+  brightness** `0.18`, instead of `0.85` and `0.5`. At the old values a field of grass LOD
+  measured four times as bright as the real grass beside it and as bright as bare ground.
+  The new values were checked in game on one load order with complex grass; adjust them if
+  your grass or lighting differs. Values you have set yourself are kept.
+
 Seasonal LOD
 
 - Seasonal LOD can be limited to the seasons you play. Four new boxes, **Seasonal LOD:

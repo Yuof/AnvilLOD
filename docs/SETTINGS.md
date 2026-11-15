@@ -349,8 +349,8 @@ output; original source files remain unchanged.
 | Grass billboard LOD | Builds distant grass from a cache and grass billboards. On by default; both inputs must be available. |
 | Grass density | Fraction of cached placements kept for billboard LOD. Default `0.08` means 8%; Balanced uses `0.05`. Lower reduces distant grass density and cost. |
 | Grass size | Scale of retained billboard tufts. Default `1`; larger tufts cover more ground but can overlap more. |
-| Grass tip brightness | Brightness at tuft tips. Default `0.85`; lower darkens the upper grass. |
-| Grass root brightness | Brightness at tuft bases. Default `0.5`; lower darkens the roots. |
+| Grass tip brightness | Brightness at tuft tips. Default `0.3`; lower darkens the upper grass. Distant grass has none of the shading real grass gets from its neighbours, so values near `1` look far too bright. |
+| Grass root brightness | Brightness at tuft bases. Default `0.18`; lower darkens the roots. |
 | Community Shaders grass | Generates simpler grass meshes when the Grass Optimizations feature is installed. On by default. This is separate from billboard grass and the game's shader settings. |
 
 Changing Grass density does not rebuild or thin the source cache. It only changes

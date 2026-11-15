@@ -212,8 +212,8 @@ public class GrassAtlasTests
     [Fact]
     public void Default_brightness_matches_the_old_constants()
     {
-        Assert.Equal(0xFF808080u, GrassPatchBuilder.Grey(GrassPatchBuilder.DefaultBottom));
-        Assert.Equal(0xFFD9D9D9u, GrassPatchBuilder.Grey(GrassPatchBuilder.DefaultTop));
+        Assert.Equal(0xFF2E2E2Eu, GrassPatchBuilder.Grey(GrassPatchBuilder.DefaultBottom));
+        Assert.Equal(0xFF4C4C4Cu, GrassPatchBuilder.Grey(GrassPatchBuilder.DefaultTop));
     }
 
     [Fact]

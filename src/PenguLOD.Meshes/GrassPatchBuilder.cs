@@ -30,8 +30,12 @@ public static class GrassPatchBuilder
     /// <summary>A tuft may be this much wider than its bin (slight overlap hides the seams between bins).</summary>
     private const float BinOverlap = 1.15f;
     private const float MaxTaller = 1.6f;
-    /// <summary>Default vertex-colour brightness (share of white): darker at the roots, slightly dimmed at the top (LOD has no grass shading).</summary>
-    public const float DefaultTop = 0.85f, DefaultBottom = 0.5f;
+    /// <summary>
+    /// Default vertex-colour brightness (share of white): darker at the roots. LOD grass has none of the shading real grass gets from
+    /// its neighbours, so it must be tinted well below white: at 0.85 and 0.5 a field of it was four times as bright as the real grass
+    /// beside it and as bright as bare ground. DynDOLOD's defaults for ordinary grass are 0.40-0.45 and 0.20-0.225.
+    /// </summary>
+    public const float DefaultTop = 0.3f, DefaultBottom = 0.18f;
 
     /// <summary>Opaque grey vertex colour (RGBA little-endian) for a brightness between 0 and about 1.5 (values above 1 clamp to white).</summary>
     internal static uint Grey(float brightness)

@@ -149,8 +149,8 @@ public static partial class Program
           --water-standins       Stream/creek/pond water planes (grid objects) that use a real water shader, which
                                  draws black beyond the loaded cells, get a lit fake-water stand-in mesh in the output
           --grass-density <pct>  Share of cached grass kept as LOD, 1-100 (default 8; 15 is high, 100 keeps every blade)
-          --grass-top <pct>      Grass LOD brightness at the top of a tuft, 20-120 (default 85), like DynDOLOD's GrassBrightnessTop
-          --grass-bottom <pct>   Grass LOD brightness at the roots, 10-120 (default 50), like GrassBrightnessBottom
+          --grass-top <pct>      Grass LOD brightness at the top of a tuft, 20-120 (default 30), like DynDOLOD's GrassBrightnessTop
+          --grass-bottom <pct>   Grass LOD brightness at the roots, 10-120 (default 18), like GrassBrightnessBottom
           --tree-brightness <pct> Tree LOD billboard brightness, 10-110 (default 100)
           --object-brightness <pct> Object LOD brightness, 10-110 (default 100)
           --esl-range <auto|2048|4096>  Records per ESL effects plugin: auto reads the installed game (4096 on 1.6.1130 or newer, else 2048)
@@ -556,8 +556,8 @@ public static partial class Program
             TreeBrightness: a.Number("tree-brightness", 100f, 10f, 110f) / 100f,
             GrassDensity: a.Number("grass-density", 8f, 1f, 100f) / 100f,
             WaterStandIns: a.Has("water-standins"),
-            GrassTop: a.Number("grass-top", 85f, 20f, 120f) / 100f,
-            GrassBottom: a.Number("grass-bottom", 50f, 10f, 120f) / 100f);
+            GrassTop: a.Number("grass-top", 30f, 20f, 120f) / 100f,
+            GrassBottom: a.Number("grass-bottom", 18f, 10f, 120f) / 100f);
 
         // Progress<T> posts asynchronously; a synchronous reporter keeps console output ordered.
         var sync = new SyncProgress(m => Console.WriteLine($"[{total.Elapsed:mm\\:ss\\.f}] {m}"));
