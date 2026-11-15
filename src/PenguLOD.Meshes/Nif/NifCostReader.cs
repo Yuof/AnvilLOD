@@ -4,6 +4,12 @@ namespace PenguLOD.Meshes.Nif;
 
 public sealed record GeometryCost(string Layer, long Triangles, long Vertices, int MeshGroups);
 
+/// <summary>
+/// One drawn shape of a block: its layer and name, size, shader flags and first texture (lower case, empty when the shader is not a
+/// lighting shader or names none). A shape is a draw call; shapes with the same texture and flags could have been one.
+/// </summary>
+public sealed record ShapeCost(string Layer, string Name, int Triangles, int Vertices, uint ShaderFlags1, uint ShaderFlags2, string Texture);
+
 /// <summary>Counts reachable drawable geometry without decoding vertex buffers or textures.</summary>
 public static class NifCostReader
 {
@@ -14,7 +20,43 @@ public static class NifCostReader
         { throw new InvalidDataException("Malformed NIF: " + e.Message, e); }
     }
 
-    private static IReadOnlyList<GeometryCost> ReadCore(byte[] bytes, string defaultLayer)
+    /// <summary>Every visible shape with geometry, in scene order. Reads headers and shader blocks only.</summary>
+    public static IReadOnlyList<ShapeCost> ReadShapes(byte[] bytes, string defaultLayer = LodLayers.Objects)
+    {
+        var shapes = new List<ShapeCost>();
+        try { ReadCore(bytes, defaultLayer, shapes); }
+        catch (Exception e) when (e is OverflowException or ArgumentOutOfRangeException or IndexOutOfRangeException or EndOfStreamException)
+        { throw new InvalidDataException("Malformed NIF: " + e.Message, e); }
+        return shapes;
+    }
+
+    /// <summary>Shader flags and first texture of a lighting shader block; zeros and "" for anything else or a damaged block.</summary>
+    private static (uint Flags1, uint Flags2, string Texture) Shader(NifFile nif, int shaderRef)
+    {
+        if (shaderRef < 0 || shaderRef >= nif.Blocks.Count || nif.Blocks[shaderRef].Type != "BSLightingShaderProperty") return (0, 0, "");
+        try
+        {
+            var r = nif.ReaderFor(nif.Blocks[shaderRef]);
+            r.U32();                                        // shader type
+            r.I32();                                        // name
+            r.Skip(checked((int)r.U32() * 4));              // extra data
+            r.I32();                                        // controller
+            uint f1 = r.U32(), f2 = r.U32();
+            r.Skip(16);                                     // UV offset and scale
+            int textureSet = r.I32();
+            string texture = "";
+            if (textureSet >= 0 && textureSet < nif.Blocks.Count && nif.Blocks[textureSet].Type == "BSShaderTextureSet")
+            {
+                var t = nif.ReaderFor(nif.Blocks[textureSet]);
+                if (t.U32() > 0) texture = t.SizedString().Replace('/', '\\').ToLowerInvariant();
+            }
+            return (f1, f2, texture);
+        }
+        catch (Exception e) when (e is OverflowException or ArgumentOutOfRangeException or IndexOutOfRangeException or EndOfStreamException or InvalidDataException)
+        { return (0, 0, ""); }
+    }
+
+    private static IReadOnlyList<GeometryCost> ReadCore(byte[] bytes, string defaultLayer, List<ShapeCost>? shapes = null)
     {
         var nif = NifFile.Read(bytes);
         if (nif.BsVersion != NifFile.BsVersionSse) throw new NotSupportedException("Geometry costs require an SSE NIF.");
@@ -51,7 +93,9 @@ public static class NifCostReader
             }
             else
             {
-                reader.Skip(28); // bound, skin, shader, alpha
+                reader.Skip(20); // bound, skin
+                int shaderRef = reader.I32();
+                reader.Skip(4);  // alpha
                 ulong descriptor = reader.U64();
                 int triangles = reader.U16(), vertices = reader.U16();
                 uint size = reader.U32();
@@ -60,6 +104,11 @@ public static class NifCostReader
                 if (hidden || triangles == 0 || vertices == 0) continue;
                 var old = costs.GetValueOrDefault(layer) ?? new(layer, 0, 0, 0);
                 costs[layer] = new(layer, old.Triangles + triangles, old.Vertices + vertices, old.MeshGroups + 1);
+                if (shapes is not null)
+                {
+                    var (f1, f2, texture) = Shader(nif, shaderRef);
+                    shapes.Add(new(layer, name ?? "", triangles, vertices, f1, f2, texture));
+                }
             }
         }
         return costs.Values.OrderBy(x => x.Layer, StringComparer.Ordinal).ToArray();

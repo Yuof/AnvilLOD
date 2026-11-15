@@ -82,7 +82,7 @@ PenguLOD job-status --job-folder /path/to/cache/jobs/job-id
 
 | Command | Purpose |
 | --- | --- |
-| `cost-report`, `compare-costs`, `verify-output`, `plan-update`, `publish-update`, `plan-generation`, `clean` | [Reports and outputs](REPORTS-AND-OUTPUTS.md) |
+| `cost-report`, `compare-costs`, `compare-reference`, `verify-output`, `plan-update`, `publish-update`, `plan-generation`, `clean` | [Reports and outputs](REPORTS-AND-OUTPUTS.md) |
 | `lodmaker`, `author`, `convert-lod`, `fix-textures` | The [tools](TOOLS.md), from the command line |
 | `compute-info` | Test optional Vulkan texture encoding on this machine |
 
