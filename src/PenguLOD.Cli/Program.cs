@@ -208,7 +208,7 @@ public static partial class Program
           --pbr-lod-brightness <pct> Brightness of the converted copies, 10-150 (default 100 = DynDOLOD's PBR scale 0.65)
           --pbr-lod-size <px>    Largest side of a converted copy: 256, 512 (default), 1024 or 2048
           --underside            Build the terrain underside for volumetric lighting mods (DVLaSS, EVLaS, Community
-                                 Shaders sky sync): meshes\Terrain\<ws>\<ws>_Underside.nif plus PenguLOD.esp
+                                 Shaders sky sync): meshes\terrain\<ws>\<ws>_Underside.nif plus PenguLOD.esp
                                  (flagged ESL, no plugin slot). Enable the ESM; load it after plugins that edit worldspaces
           --underside-detail <n> LAND vertices per underside quad: 8, 16 (default), 32, 64 or 128. Smaller is finer and heavier
           --no-enable-parented   Exclude every reference with an enable parent (by default only

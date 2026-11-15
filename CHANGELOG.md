@@ -56,6 +56,17 @@ Seasonal LOD
   are not read. On the command line: `--seasons --only-seasons winter`. The grass cache
   stage still writes every season. Existing output is not rebuilt while all four are on.
 
+Output
+
+- On Linux, an object LOD output no longer has folders that differ only in case. The
+  terrain underside mesh was written under `meshes/Terrain` beside the blocks in
+  `meshes/terrain`, and stand-ins for missing textures took the spelling the mesh used
+  (`Textures/...`, `textures/Enderal/LOD/...`). The game reads such folders as one, and a
+  mod manager or Wine may show it only one of them, so the underside mesh or the stand-ins
+  could be missing in game. Both are now written in lower case. Every stage also merges
+  such folders before it records its output, which repairs an existing output on the next
+  run, and **Verify output set** reports them. Windows output was not affected.
+
 ## [0.6.0-beta.2] - 2026-11-14
 
 A run no longer stops because one model or recipe cannot be generated, and Skyrim 1.6.1179

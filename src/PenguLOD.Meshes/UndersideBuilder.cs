@@ -5,7 +5,7 @@ using PenguLOD.Meshes.Nif;
 namespace PenguLOD.Meshes;
 
 /// <summary>
-/// Writes <c>meshes\Terrain\&lt;ws&gt;\&lt;ws&gt;_Underside.nif</c>, laid out like DynDOLOD's:
+/// Writes <c>meshes\terrain\&lt;ws&gt;\&lt;ws&gt;_Underside.nif</c>, laid out like DynDOLOD's:
 /// <code>
 /// BSFadeNode
 ///  └─ BSMultiBoundNode × one per LOD32 block
@@ -23,7 +23,7 @@ public static class UndersideBuilder
     /// <summary>The path the engine-side placement points at, e.g. <c>Terrain\Tamriel\Tamriel_Underside.nif</c> (relative to meshes).</summary>
     public static string ModelPath(string worldspace) => $"Terrain\\{worldspace}\\{worldspace}_Underside.nif";
 
-    public static string RelativePath(string worldspace) => GamePath.Join("meshes", "Terrain", worldspace, $"{worldspace}_Underside.nif");
+    public static string RelativePath(string worldspace) => GamePath.Join("meshes", "terrain", worldspace, $"{worldspace}_Underside.nif");
 
     public static string DiffusePath(string worldspace, int blockX, int blockY) =>
         $"Textures\\Terrain\\{worldspace}\\{worldspace}.32.{blockX}.{blockY}.dds";

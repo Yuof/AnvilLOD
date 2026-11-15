@@ -33,8 +33,15 @@ public sealed class OutputSnapshot
         return Convert.ToHexString(hash.GetHashAndReset());
     }
 
+    /// <summary>
+    /// Records the hash of every file of a finished stage output. Before that, entries whose names differ only in case are merged
+    /// (<see cref="OutputCase.Unify"/>): the game reads them as one path, so the record must have one spelling for each.
+    /// </summary>
     public static OutputSnapshot Capture(string root, IProgress<string>? progress = null, CancellationToken ct = default)
     {
+        var merged = OutputCase.Unify(root);
+        if (merged.Count > 0)
+            progress?.Report($"Output paths: merged {merged.Count:N0} folders or files whose names differed only in case (first: {merged[0]}).");
         var result = new OutputSnapshot();
         int recorded = 0, read = 0;
         var watch = Stopwatch.StartNew();

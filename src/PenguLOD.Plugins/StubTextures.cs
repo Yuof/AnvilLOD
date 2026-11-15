@@ -13,7 +13,9 @@ public static class StubTextures
     /// <summary>Writes the stand-in; returns the colour used (RGB), or null for a normal map.</summary>
     public static (byte R, byte G, byte B)? Write(string outputFolder, string texturePath)
     {
-        var rel = GamePath.NormalizeTexture(texturePath);
+        // Lower case: the mesh's own spelling ("Textures\Enderal\LOD") would make a second folder beside "textures\enderal\lod" on a
+        // case-sensitive file system, and the game does not tell them apart.
+        var rel = GamePath.NormalizeTexture(texturePath).ToLowerInvariant();
         var full = GamePath.ToFileSystemPath(outputFolder, rel);
         bool normal = rel.EndsWith("_n.dds", StringComparison.OrdinalIgnoreCase);
         var color = normal ? (R: (byte)128, G: (byte)128, B: (byte)255) : ColorFor(rel);
