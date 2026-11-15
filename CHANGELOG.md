@@ -27,6 +27,21 @@ Textures
   units per pixel** and works as before. Run textures and then object LOD again to get
   the sharper grass.
 
+- Hybrid tree trunk textures are no longer dark and blurry. They were lit with 70% ambient
+  light and a weak side light, and sized with the tree setting, so a trunk came out at
+  about half the brightness and an eighth of the pixels of TexGen's. Trees and trunks are
+  now lit the way TexGen lights them, from straight above: trees with 60% ambient and 135%
+  direct light, trunks with 150% and 50%. Tree billboards gain the bright crown tops and
+  the contrast they lacked. Grass keeps its light, which already matched. On a 2,044-plugin load order the
+  brightness and contrast of trunks and tree billboards are within 2% of TexGen's output,
+  and 846 of 880 trunk images have the height of TexGen's.
+- New settings on the Textures page: **Trunk world units per pixel** (default `4`), and
+  under **Material calibration** an ambient and a direct light value each for trees, grass
+  and trunks. They replace **Ambient light** and **Directional light**; saved values of
+  those two are ignored. Run textures and then object LOD again.
+- Trunk textures that object LOD makes itself for native hybrid trees and tree billboards
+  it makes for trees without one use the same light.
+
 Seasonal LOD
 
 - Seasonal LOD can be limited to the seasons you play. Four new boxes, **Seasonal LOD:

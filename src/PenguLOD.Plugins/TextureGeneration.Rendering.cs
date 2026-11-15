@@ -130,7 +130,7 @@ public static partial class TextureGeneration
                 BillboardImage? Render(BillboardView view) => BillboardRenderer.Render(mesh, isGrass ? grassLoader : loader, request.BillboardMaxSize, vertexColors: !isGrass,
                     unitsPerPixel: (isGrass ? request.GrassUnitsPerPixel : request.UnitsPerPixel) / scale, brightness: request.Brightness, materials: request.Materials,
                     view: view, originCentered: true, grassTextures: isGrass ? quality.GrassTextures : GrassTextureMode.Basic,
-                    complexGrassThreshold: quality.ComplexGrassThreshold);
+                    complexGrassThreshold: quality.ComplexGrassThreshold, light: isGrass ? quality.Grass : quality.Trees);
                 var img = Render(BillboardView.Front)
                     ?? throw new InvalidDataException("The model rendered no visible pixels.");
                 var side = quality.HdViews ? Render(BillboardView.Side) : null;

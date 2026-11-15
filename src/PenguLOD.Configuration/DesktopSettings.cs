@@ -173,6 +173,8 @@ public sealed class DesktopSettings : ObservableObject
     public decimal TextureGenUnitsPerPixel { get => _textureGenUnitsPerPixel; set => Set(ref _textureGenUnitsPerPixel, value); }
     private decimal _textureGenGrassUnitsPerPixel = 2m;
     public decimal TextureGenGrassUnitsPerPixel { get => _textureGenGrassUnitsPerPixel; set => Set(ref _textureGenGrassUnitsPerPixel, value); }
+    private decimal _textureGenTrunkUnitsPerPixel = 4m;
+    public decimal TextureGenTrunkUnitsPerPixel { get => _textureGenTrunkUnitsPerPixel; set => Set(ref _textureGenTrunkUnitsPerPixel, value); }
     private bool _textureGenHdViews = true, _textureGenReferenceScale = true;
     private decimal _textureGenUnplacedTreeScale = 1, _textureGenComplexThreshold = .1m;
     private string _textureGenGrassTextures = "Auto";
@@ -183,14 +185,20 @@ public sealed class DesktopSettings : ObservableObject
     public string TextureGenGrassTextures { get => _textureGenGrassTextures; set => Set(ref _textureGenGrassTextures, value ?? "Auto"); }
     private decimal _textureGenBrightness = 1m;
     private bool _bakeSourceNormals = true, _bakePbr = true;
-    private decimal _bakePbrScale = .65m, _bakePbrGamma = 1.15m, _bakeAo = .5m, _bakeAmbient = .7m, _bakeDirectional = .3m;
+    private decimal _bakePbrScale = .65m, _bakePbrGamma = 1.15m, _bakeAo = .5m;
     public bool BakeSourceNormals { get => _bakeSourceNormals; set => Set(ref _bakeSourceNormals, value); }
     public bool BakePbr { get => _bakePbr; set => Set(ref _bakePbr, value); }
     public decimal BakePbrScale { get => _bakePbrScale; set => Set(ref _bakePbrScale, value); }
     public decimal BakePbrGamma { get => _bakePbrGamma; set => Set(ref _bakePbrGamma, value); }
     public decimal BakeAo { get => _bakeAo; set => Set(ref _bakeAo, value); }
-    public decimal BakeAmbient { get => _bakeAmbient; set => Set(ref _bakeAmbient, value); }
-    public decimal BakeDirectional { get => _bakeDirectional; set => Set(ref _bakeDirectional, value); }
+    // Billboard light: colour x (ambient + direct x how squarely the surface faces the light). Trees and trunks have TexGen's defaults.
+    private decimal _treeLightAmbient = .6m, _treeLightDirect = 1.35m, _grassLightAmbient = .7m, _grassLightDirect = .3m, _trunkLightAmbient = 1.5m, _trunkLightDirect = .5m;
+    public decimal TextureGenTreeAmbient { get => _treeLightAmbient; set => Set(ref _treeLightAmbient, value); }
+    public decimal TextureGenTreeDirect { get => _treeLightDirect; set => Set(ref _treeLightDirect, value); }
+    public decimal TextureGenGrassAmbient { get => _grassLightAmbient; set => Set(ref _grassLightAmbient, value); }
+    public decimal TextureGenGrassDirect { get => _grassLightDirect; set => Set(ref _grassLightDirect, value); }
+    public decimal TextureGenTrunkAmbient { get => _trunkLightAmbient; set => Set(ref _trunkLightAmbient, value); }
+    public decimal TextureGenTrunkDirect { get => _trunkLightDirect; set => Set(ref _trunkLightDirect, value); }
     public decimal TextureGenBrightness { get => _textureGenBrightness; set => Set(ref _textureGenBrightness, value); }
     private decimal _textureGenMinTreeHeight = 256m;
     public decimal TextureGenMinTreeHeight { get => _textureGenMinTreeHeight; set => Set(ref _textureGenMinTreeHeight, value); }
