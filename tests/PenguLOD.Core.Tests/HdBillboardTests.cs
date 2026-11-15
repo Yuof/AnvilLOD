@@ -98,7 +98,8 @@ public class HdBillboardTests
             placed.Scale = 4;
         });
         using var limits = RunLimits.Enter(2);
-        var request = f.Textures.Request with { Stitched = false, Trees = true, BillboardMaxSize = 1024, Billboards = new(HdViews: false) };
+        Assert.Equal(6f, f.Textures.Request.UnitsPerPixel);   // the default: about the image sizes TexGen makes
+        var request = f.Textures.Request with { Stitched = false, Trees = true, BillboardMaxSize = 1024, UnitsPerPixel = 12, Billboards = new(HdViews: false) };
         var scaled = TextureGeneration.Run(request); Assert.True(scaled.Published);
         var item = Assert.Single(scaled.Items, i => i.Source.EndsWith(@"\testtree.nif"));
         Assert.Equal((512, 256), (item.Width, item.Height));

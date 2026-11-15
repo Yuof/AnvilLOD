@@ -23,7 +23,7 @@ public sealed class TrunkTextureTests
     [Fact]
     public void Trunk_images_are_sized_by_their_own_units_per_pixel_not_the_tree_setting()
     {
-        // Cards of 200 x 400 (front) and 300 x 500 (side) units. At the tree default (12) the front view would be 32 x 64.
+        // Cards of 200 x 400 (front) and 300 x 500 (side) units. They do not follow the tree setting.
         using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
         Setup(f);
         (int, int)[] Sizes(TextureGenerationRequest request) => TextureGeneration.Run(request).Items

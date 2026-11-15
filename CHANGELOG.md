@@ -39,6 +39,10 @@ Textures
   the contrast they lacked. Grass keeps its light, which already matched. On a 2,044-plugin load order the
   brightness and contrast of trunks and tree billboards are within 2% of TexGen's output,
   and 846 of 880 trunk images have the height of TexGen's.
+- Tree billboards are sharper by default: **Tree world units per pixel** now defaults to
+  `6` instead of `12`. At 12 a tree billboard had about a third of the pixels of TexGen's;
+  at 6 it matches or exceeds TexGen for 138 of 160 compared views. A saved value is kept,
+  so set it to 6 on the Textures page to get the new default in an existing setup.
 - New settings on the Textures page: **Trunk world units per pixel** (default `4`), and
   under **Material calibration** an ambient and a direct light value each for trees, grass
   and trunks. They replace **Ambient light** and **Directional light**; saved values of
