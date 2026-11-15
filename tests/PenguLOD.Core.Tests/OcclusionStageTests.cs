@@ -60,4 +60,40 @@ public class OcclusionStageTests
         var cells = written.Worldspaces.SelectMany(w => w.SubCells).SelectMany(b => b.Items).SelectMany(s => s.Items).ToList();
         Assert.Equal("Edited", Assert.Single(cells, c => c.FormKey == edited!.FormKey).Name?.String);
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TheWorldspacesPersistentCellGetsNoOcclusionData(bool flagged)
+    {
+        using var f = new TextureFixture();
+        // 8x8 hilly cells and the persistent cell, which carries the coordinates of cell (0, 0) as the game's own do.
+        var master = new SkyrimMod(ModKey.FromNameAndExtension("Skyrim.esm"), SkyrimRelease.SkyrimSE);
+        var world = World(master, master.GetNextFormKey(), out var sub);
+        world.LandDefaults = new WorldspaceLandDefaults { DefaultLandHeight = -2048, DefaultWaterHeight = -10000 };
+        world.TopCell = new Cell(master.GetNextFormKey(), SkyrimRelease.SkyrimSE) { Grid = new CellGrid { Point = new P2Int(0, 0) }, MajorRecordFlagsRaw = flagged ? 0x400 : 0 };
+        for (int y = 0; y < 8; y++)
+            for (int x = 0; x < 8; x++)
+            {
+                var heights = new Array2d<sbyte>(new P2Int(33, 33), 0);
+                for (int i = 1; i < 33; i++) heights[i, 0] = 4;
+                sub.Items.Add(new Cell(master.GetNextFormKey(), SkyrimRelease.SkyrimSE) { Grid = new CellGrid { Point = new P2Int(x, y) },
+                    Landscape = new Landscape(master.GetNextFormKey(), SkyrimRelease.SkyrimSE) { VertexHeightMap = new LandscapeVertexHeightMap { Offset = 0, HeightMap = heights } } });
+            }
+        master.WriteToBinary(Path.Combine(f.Data, "Skyrim.esm"));
+        File.WriteAllText(f.Plugins, "");
+
+        using var game = GameContext.Open(f.Game);
+        var terrain = TerrainReader.Read(game, ["FixtureWorld"]);
+        var grids = new Dictionary<string, LodGrid> { { "FixtureWorld", new("FixtureWorld", new(-64, -64, 128, 4, 32)) } };
+        var result = OcclusionStage.Run(game, terrain.Heights, grids, [], null, game.BuildAssets(), Path.Combine(f.Root, "occlusion"), new OcclusionSettings(), null, _ => { }, default);
+        Assert.Equal(64, result.Cells);
+        using var written = SkyrimMod.CreateFromBinaryOverlay(result.Path!, SkyrimRelease.SkyrimSE);
+        var worldspace = Assert.Single(written.Worldspaces);
+        Assert.Null(worldspace.TopCell);
+        var cells = worldspace.SubCells.SelectMany(b => b.Items).SelectMany(s => s.Items).ToList();
+        Assert.Equal(64, cells.Count);
+        Assert.DoesNotContain(cells, c => c.FormKey == world.TopCell.FormKey);
+        Assert.All(cells, c => Assert.NotNull(c.OcclusionData));
+    }
 }

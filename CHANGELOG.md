@@ -16,6 +16,10 @@ Occlusion
   it is worked out for each worldspace's LOD grid, so worldspaces with a 128-cell grid
   are right too. **Generate `Occlusion.esp` again**: one from 0.6.0-beta.2 or earlier
   should be disabled until then. No other output is affected.
+- `Occlusion.esp` no longer overrides the persistent cell of each worldspace. That cell
+  holds persistent references and carries the coordinates of cell 0, 0, so it was given
+  that cell's occlusion data, and the plugin showed up as a conflict on a record it has no
+  reason to change.
 
 Textures
 
