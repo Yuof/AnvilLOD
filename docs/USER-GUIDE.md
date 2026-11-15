@@ -1,182 +1,142 @@
-# PenguLOD walkthrough
+# User guide
 
-Use this guide for a normal generation run. The [settings reference](SETTINGS.md)
-explains the controls by page; the [tool reference](TOOLS.md) covers mesh authoring,
-texture repair and custom rules.
+LOD is the simpler scenery Skyrim draws beyond the loaded area around the player. PenguLOD
+generates it in four stages. Each stage writes to its own folder, which you install as a mod.
 
-LOD is the simpler scenery Skyrim draws beyond the nearby, fully loaded area.
-PenguLOD can generate its textures, landscape, objects, trees and grass. Choose the
-stages you need; a usable existing grass cache or terrain output can be reused.
-
-## 1. Prepare the game and output folders
-
-Finish installing and ordering the mods you want to use. Include any LOD models,
-billboards and resource packs supplied for those mods. Disable previous generated
-**object LOD** outputs, including their generated plugins, before a new run. Keep
-the source mods and LOD resource packs enabled.
-
-Give each stage its own folder outside the game and installed mods. For example:
-
-| Stage | Example output folder | What it supplies |
-| --- | --- | --- |
-| Grass cache | `PenguLOD-output/Grass` | Saved grass placements |
-| Textures | `PenguLOD-output/Textures` | Distant textures and images of trees and grass |
-| Terrain | `PenguLOD-output/Terrain` | Distant landscape, water and terrain textures |
-| Object / tree / grass LOD | `PenguLOD-output/LOD` | Distant scenery and any selected generated plugins |
-
-Keep a working generation intact when testing new settings. Use a separate set of
-test folders. Each stage's output must also be separate from the other stages.
-
-Download and extract a package from [Releases](https://github.com/opteron-x86/PenguLOD/releases).
-On Linux, run `linux-x64/run-pengulod.sh`; on Windows, run
-`win-x64/PenguLOD.Desktop.exe`. Keep the extracted folder together. See
-[package instructions](PACKAGING.md) for AppImage and desktop shortcuts.
-
-## 2. Select the correct source
-
-On **Game & resources**, choose your game edition and source:
-
-- **Mod Organizer 2:** select **Mod Organizer 2**, browse to the instance
-  containing `ModOrganizer.ini`, click **Read profiles**, and choose your profile.
-  This is the instance folder, not the manager's executable. Compatible forks use the same source option.
-- **Deployed Data folder or Vortex:** select **Data folder / Vortex**, then choose the
-  game/Data folder and its `plugins.txt`. Only mods deployed there are available.
-
-For a Linux setup whose manager stores Windows paths, use **Advanced source paths →
-Wine / Proton prefix**. Select the game's `pfx` folder or its containing compatdata
-folder. Use the individual path overrides only when the saved locations are wrong.
-
-On **Overview**, set a separate output folder for each stage you plan to run.
-Choose the terrain and object LOD worldspaces:
-`Tamriel` for the main Skyrim world, a comma-separated list for selected worlds,
-or leave it blank (or enter `*`) for every world with LOD settings. **Choose…**
-lists the worldspaces in your load order, so you do not need to know their IDs.
-
-The world selection applies to terrain and object LOD. **Grass cache has its own
-worldspace selection. Texture generation uses the selected load order and is not
-limited by Overview's worldspace selection.**
-
-## 3. Choose a starting point
-
-On **Object LOD**, apply **Balanced preset** for a first comparison. It
-sets Medium mesh rules, grass LOD density to `0.05`, and turns Detailed ships off.
-It also resets the other generation options to their defaults. It keeps source
-paths and the separate texture-generation and grass-cache settings; the shared
-Seasonal LOD switch turns off for both terrain and objects.
-
-Open a settings group, or use the search box to find an option. Hover over a
-control for a short explanation. Then make the choices your setup needs:
-
-- Enable **3D tree LOD** if you want 3D trees in the nearest LOD band. Balanced leaves
-  this off. Leave **3D trees at LOD 8** off for the initial test.
-- Enable **Grass billboard LOD** only when you have a suitable grass cache. This is
-  separate from **Community Shaders grass**, which generates simpler grass models.
-- Leave **Build missing object LOD models** off initially if performance is the
-  priority. It can add objects that previously had no distant model.
-- Enable seasonal, PBR and runtime features only when they match your installed setup.
-
-Leave all four LOD levels selected for a complete object LOD output. Lowering a
-mesh rule preset is a better first quality adjustment than omitting whole levels.
-The levels are distance bands, not direct view-distance sliders.
-
-Use **Preferences → Export settings…** to save the configuration before comparing
-it with another run. Changing several options at once makes an FPS difference
-hard to explain.
-
-## 4. Configure the stages you need
-
-| Stage | Normal setup |
+| Stage | What it produces |
 | --- | --- |
-| Grass cache | Choose its output and worldspaces. Leave the bundled generator selected. Use an existing valid cache if grass placement and the relevant load order have not changed. |
-| Textures | Choose its output. Enable Stitched object textures and Tree billboards; add Grass billboards when using grass LOD. Use Hybrid tree trunk textures for installed hybrid tree models that need them. Leave the model filter blank for a full run. |
-| Terrain | Choose its output. Start with the current size and brightness defaults. Enable seasonal or shader-specific output only when needed. |
-| Object LOD | Review tree, grass and object choices on Object LOD. Keep texture matching and hidden-geometry removal enabled unless diagnosing a specific problem. |
+| Grass cache | Saved grass placements |
+| Textures | LOD textures and the images used for distant trees and grass |
+| Terrain | Distant landscape and water |
+| Object LOD | Distant objects, trees and grass, plus any generated plugins |
 
-Compatible recipes and render resources in enabled mods are found automatically.
-Use **Primary resource folder** or **Additional resource folders** on
-**Game & resources** for resources kept elsewhere. An existing DynDOLOD resource folder is accepted; its executables
-are not required. See [resource packs](RESOURCE-PACKS.md) for supported layouts.
+Run only the stages you need. The stages always run in the order above.
 
-If reusing completed output, enable its **Use generated…** option and check the
-folder path. The combined pipeline passes newly completed stages to later stages
-automatically. Reading a texture folder during generation does not install it into
-the game.
+## 1. Install PenguLOD
 
-## 5. Check and generate
+Download a package from [Releases](https://github.com/opteron-x86/PenguLOD/releases) and
+extract it into a folder of its own. Keep the extracted files together.
 
-On **Overview**, select the required stages. Each stage has a **Settings** button
-for its options. The stages run in this order:
-**grass → textures → terrain → object LOD**. For textures and object LOD only,
-select **Textures** and **Object LOD**.
+- **Windows:** run `win-x64\PenguLOD.Desktop.exe`.
+- **Linux:** run `linux-x64/run-pengulod.sh`. To add a menu entry, run
+  `linux-x64/install-desktop.sh` once the folder is where you want to keep it.
+- **Linux AppImage:** run `chmod +x PenguLOD-*.AppImage`, then start the file. If it cannot
+  mount itself, add `--appimage-extract-and-run`.
 
-Use **Check setup** to review missing inputs and output conflicts.
-**Scan load order** on **Game & resources** or **Object LOD** shows which objects
-and trees can receive LOD.
-For a large setup, both checks can take time.
+To check a download, put `SHA256SUMS` from the release page beside it and run
+`sha256sum --ignore-missing -c SHA256SUMS`. On Windows, compare the output of
+`Get-FileHash <file> -Algorithm SHA256` with the line in `SHA256SUMS`.
 
-Click **Run selected stages**. Leave reuse enabled so completed stages can be
-verified and reused after a restart or a later-stage failure. After a failed run,
-correct the reported problem and repeat the same selection. A cancelled or failed
-LOD stage preserves the previously published output.
+To update, extract the new version into a new folder. Your settings and output folders are
+kept.
 
-Review the results before installing. A warning can mean a model uses a billboard
-fallback or an existing texture; it can also identify missing assets that need
-attention. Use **Open run folder** for the full report.
+## 2. Prepare your load order
 
-## 6. Install the completed outputs
+1. Finish installing and sorting your mods, including any LOD models, billboards and
+   resource packs made for them.
+2. Disable the object LOD mod you generated before, including its plugins. Keep the source
+   mods and resource packs enabled.
+3. Create one empty folder per stage, outside the game and mod folders, for example
+   `PenguLOD-output/Grass`, `Textures`, `Terrain` and `LOD`.
 
-Install each completed stage as a separate mod. Replace the previous output of
-that type instead of merging old and new files. Keep the matching generated texture
-output enabled alongside the object LOD output.
+To try different settings without losing a generation you like, use a second set of folders.
 
-Make generated textures win conflicts with their source textures, and make the
-object LOD output win conflicts with the texture output. Terrain and grass-cache
-outputs should replace older outputs of the same type. Enable generated plugins
-that the report asks you to use; place `Occlusion.esp` last if you generated it.
+## 3. Choose the game source
 
-`PenguLOD.esm`, when present, contains additional large-reference lists.
-`PenguLOD.esp` and any effects plugins support selected placed objects and effects.
-Some configurations need none of these. Read the report before treating an absent
-plugin as a failure.
+Open **Game & resources** and choose the game edition and the source.
 
-Dynamic LOD and the in-game quality controls need the separate **PenguLOD SKSE
-plugin** for your Skyrim runtime. **SKSE DLL installation → None** means you install
-that DLL yourself. See [runtime dependencies](PROVENANCE.md#game-runtime).
+- **Mod Organizer 2:** browse to the instance folder, the one that holds
+  `ModOrganizer.ini`. Click **Read profiles** and choose your profile.
+- **Data folder / Vortex:** choose the game's Data folder and its `plugins.txt`. Only mods
+  deployed to that folder are read.
 
-## 7. Compare in game
+On Linux, if the mod manager stores Windows paths such as `C:\...`, open **Advanced source
+paths** and set **Wine / Proton prefix** to the game's `pfx` folder.
 
-Restart Skyrim after replacing generated files. Compare the same location, camera
-direction, weather and time of day. Check tree silhouettes, building transitions,
-terrain colour, shorelines and grass brightness, then record FPS.
+## 4. Choose stages, folders and worldspaces
 
-Restore any hidden layers in the PenguLOD in-game menu before judging coverage.
-Hiding **3D trees → LOD4** does not substitute tree cards for that band. Saved layer
-settings can remain active when you change generator versions.
+Open **Overview**.
 
-For a **Tamriel-only performance test**, generate into new folders and install the
-result as a separate test mod, with the previous object LOD mod disabled. Test in
-Tamriel, then switch back to the complete output when finished. Do not merge the
-whole test folder into the complete output: generated plugins, runtime data and
-the shared grass atlas may affect worlds outside the test. Texture generation
-still covers the load order even when object LOD is restricted to Tamriel.
+1. Tick the stages to run and set the output folder for each.
+2. Set the worldspaces for terrain and object LOD. Leave the field blank for every
+   worldspace with LOD settings, or click **Choose…** to tick them from a list of your load
+   order.
+
+The grass cache has its own worldspace field. Textures always cover the whole load order.
+
+## 5. Choose settings
+
+Each stage has a **Settings** button. The defaults are a reasonable start. For a first run:
+
+- On **Object LOD**, click **Balanced preset**.
+- Turn on **3D tree LOD** if you want 3D trees in the nearest LOD band. It costs more to draw.
+- Leave **Grass billboard LOD** on only if you have a grass cache, from this run or an
+  earlier one.
+- Leave **Build missing object LOD models** off unless you want objects that have no LOD
+  model to get one. It adds scenery and drawing cost.
+- Turn on seasonal and PBR options only if your setup uses them.
+
+Hover over any control for a short explanation, or look it up in the
+[settings reference](SETTINGS.md). Use **Preferences → Export settings…** to save a
+configuration you want to return to.
+
+## 6. Generate
+
+1. Click **Check setup** and fix anything it reports.
+2. Click **Run selected stages**.
+3. When the run finishes, read the warnings. **Open run folder** shows the full log and
+   reports.
+
+If a run fails or you cancel it, fix the reported problem and run the same selection again.
+Finished stages and finished terrain tiles are reused. The output from your previous run is
+left in place until a stage completes.
+
+## 7. Install the output
+
+1. Add each output folder to your mod manager as a separate mod. Replace the previous
+   output of the same stage; do not merge old and new files.
+2. Order the mods so that the texture output wins conflicts with the source textures, and
+   the object LOD output wins conflicts with the texture output.
+3. Enable the generated plugins. Which plugins are written depends on your settings and
+   load order, and the run summary lists them. Put `Occlusion.esp` last.
+4. For dynamic LOD and the in-game quality controls, install the PenguLOD SKSE plugin from
+   the same release and pick your Skyrim version in its installer.
+
+## 8. Check in game
+
+Restart Skyrim after replacing generated files. To compare two generations, stand in the
+same place, facing the same way, at the same time of day and in the same weather. Look at:
+
+- the boundary where full models change to LOD, and each LOD distance beyond it
+- shorelines and terrain seams
+- tree shapes and trunk alignment
+- grass and ground brightness in sun and under cloud
+
+The SKSE plugin's in-game menu can hide individual layers. Show them all again before
+judging a new generation, because saved layer settings survive an update.
+
+## Running again
+
+With **Reuse completed stages** on, a stage is skipped when its settings, your load order
+and its output files have not changed.
+
+- Enabling, disabling or updating any mod rebuilds every selected stage.
+- Playing the game, or running Pandora, Nemesis or FNIS, does not.
+- Choosing a different output folder starts that run from the beginning.
+
+Each time a stage is replaced, the old folder is kept beside the new one with a
+`.previous-` suffix. **Previous outputs to keep** under **Run options** sets how many are
+kept; the default is 1.
 
 ## What to rerun after a change
 
-| Change | Stages to reconsider |
+| You changed | Rerun |
 | --- | --- |
-| Object/tree LOD detail, brightness, atlases or model selection | Object LOD |
+| Object or tree LOD detail, brightness, atlases or model choices | Object LOD |
 | Billboard size, texture brightness or baked materials | Textures, then object LOD |
-| Terrain texture size, brightness, water or shadow heightmaps | Terrain; also object LOD if its terrain input changes |
-| Grass placement, grass mods, landscape or cache settings | Grass cache, then object LOD; textures too if the grass models or textures changed |
-| Object placement, tree removers or relevant plugin changes | Object LOD; check whether textures, terrain or the cache also depend on the changed mods |
-| New seasonal swaps | The terrain, object/tree/grass and texture stages affected by those swaps |
+| Terrain texture size, brightness, water or heightmaps | Terrain, then object LOD if it uses the generated terrain |
+| Grass mods, landscape or grass cache settings | Grass cache, then object LOD. Textures too if grass models or textures changed |
+| Object placement, tree removers or other plugins | Object LOD, and any other stage that reads the changed mods |
+| Seasonal swaps | Every stage those swaps affect |
 
-See [troubleshooting](TROUBLESHOOTING.md) for failed runs and
-[diagnostics](DIAGNOSTICS.md) for repeatable visual checks.
-
-## Keep and compare a working generation
-
-Use [Reports & outputs](REPORTS-AND-OUTPUTS.md) to measure a saved generation,
-compare a test run and prepare a verified package. Keep the working output in its
-own folder and generate experiments elsewhere. Existing presets are not retuned
-when you upgrade.
+See [troubleshooting](TROUBLESHOOTING.md) if something goes wrong.

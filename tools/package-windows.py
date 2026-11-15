@@ -14,6 +14,8 @@ for name in ['PenguLOD.exe', 'PenguLOD.Desktop.exe', 'coreclr.dll', 'pengulod_co
 for item in package.rglob('*'):
     if item.is_file() and (item.suffix == '.so' or '.so.' in item.name or item.suffix == '.sh'):
         raise SystemExit('Linux file included in Windows package: ' + str(item))
+    if item.is_file() and item.suffix == '.pdb' and not item.name.startswith('PenguLOD'):
+        raise SystemExit('Third-party debug symbols included in Windows package: ' + str(item))
 archive = root / 'dist' / f'PenguLOD-{version}-win-x64.zip'
 with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as target:
     for item in sorted(package.rglob('*')):

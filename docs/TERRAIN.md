@@ -1,89 +1,61 @@
-# Native terrain generation
+# Terrain
 
-The Terrain page builds Skyrim SE BTR meshes, diffuse and model-space normal tiles,
-segmented near-distance water, and optional Community Shaders heightmaps.
-Select it on Generation Overview to generate terrain before object LOD; verified generated terrain
-textures then feed object LOD and underside generation. Use a separate output mod folder.
+The terrain stage builds the distant landscape: meshes, colour and normal textures, water,
+and optionally the heightmaps used by Community Shaders Terrain Shadows.
 
-The generator reads winning LAND heights, quadrant texture layers, alpha weights, vertex
-colours and water levels. LOD settings determine each world's grid origin and supported
-levels. Tiles share world-space height samples, including negative coordinates and the
-outermost LAND edges. Skirts cover fine/coarse boundary interpolation differences.
+## Generate
 
-Unpainted quadrants and null base layers use Skyrim's `textures/landscape/dirt02.dds`
-unless `[Landscape] sDefaultLandDiffuseTexture` overrides it. The selected explicit INI
-takes priority, followed by the profile's local `SkyrimCustom.ini`/`Skyrim.ini` when enabled,
-then available game INIs. Paths in this setting are relative to `textures/landscape`;
-`landscape/` and `textures/landscape/` prefixes are also accepted. The resolved default is
-logged. Fully covered base textures are not loaded. See the
-[Terrain Helper default-texture notes](https://github.com/hakasapl/TerrainHelper#mod-authors)
-for Skyrim's diffuse/normal defaults. `sDefaultLandNormalTexture` follows the same INI
-precedence, defaulting to `textures/landscape/dirt02_n.dds`.
+1. On **Terrain**, set **Terrain output** to an empty folder of its own.
+2. Choose the worldspaces on **Overview**. Terrain and object LOD share this selection.
+3. Click **Generate terrain**, or tick **Terrain** on **Overview** to run it with the other
+   stages.
+4. Install the folder as a mod, replacing any earlier terrain LOD.
 
-Skyrim plugins omit landscape in some distant areas. **Fill missing landscape from existing
-terrain LOD** samples installed BTR meshes, diffuse textures and available model-space normals in these areas.
-The report identifies how many existing tiles were used. It cannot recover full-resolution
-detail that was absent from those files.
+When terrain and object LOD run together, object LOD uses the new terrain automatically.
+Otherwise turn on **Use generated terrain for object LOD**.
 
-A tile can still contain cells with neither landscape records nor existing terrain LOD, for
-example the outer rows of a worldspace once an older terrain LOD mod is disabled. **Fill
-uncovered land at the default height** (on by default) makes those cells flat at the
-worldspace's default land height, with the default landscape texture, and puts the
-worldspace's default water over them when that is higher. A worldspace without land defaults
-uses -2048. Tiles are only planned where landscape or existing terrain LOD exists, so this
-does not extend the terrain. With the setting off, the run stops and lists the affected tiles.
+If a run is interrupted, run it again. Finished tiles are reused.
 
-Landscape textures that are not installed, and landscape texture records that cannot be
-resolved, are handled the same way. **Use the default texture for missing landscape
-textures** (on by default) paints those layers with the default landscape texture; with it
-off, the run stops and lists every missing texture with the number of cells that use it.
+## Main settings
 
-Both are checked for every selected worldspace before the first tile is built, and again in
-the pipeline preflight, so a gap is reported in the first seconds of a run rather than when
-its tile is reached. What was filled or replaced is listed in the warnings and in
-`PenguLOD.terrain.json`. A missing default landscape texture always stops the run, since
-nothing can stand in for it. Missing LOD-water records are reported;
-the affected world's water shapes are omitted rather than referencing an invalid water type.
+| Setting | Default | Notes |
+| --- | --- | --- |
+| Texture size | 512 | A power of two from 64 to 2048. Larger uses more texture memory. |
+| Brightness | 1 | Lower darkens the distant ground. |
+| Generate water LOD | On | |
+| Generate seasonal terrain from Seasons of Skyrim swaps | Off | See [seasons](SEASONS.md). |
+| Look for textures/pbr equivalents | Off | Turn on only if the game itself uses PBR landscape textures. |
 
-The bake combines source normal detail with terrain slope, using the same layer weights
-as diffuse colour. Source normal strength defaults to 1; 0 restores slope-only normals.
-DirectX tangent normals follow east/south texture coordinates and are converted to Skyrim's
-east/up/north model-space texture layout. Missing optional normal maps use the slope and
-produce a warning. Colour mipmaps average in linear light; landscape texture alpha is not
-treated as transparency.
+The [settings reference](SETTINGS.md#terrain) lists the rest.
 
-Explicit `textures/pbr/` materials support static albedo calibration and ambient occlusion
-from the blue RMAOS channel. **Look for textures/pbr equivalents** is off by default; enable
-it only when your runtime uses those replacements. A selected twin uses its own normal/AO
-maps, without mixing in maps from the original material. Missing AO is unoccluded. PBR scale
-(default 0.65) and gamma (1.15) operate on linear albedo, followed by AO strength (0.5).
-Disable calibration to retain the source albedo. This does not reproduce runtime reflections,
-roughness, parallax or changing illumination. `PenguLOD.terrain.json` records selected
-materials and missing optional maps. Malformed maps stop publication.
+## Missing landscape data
 
-[Seasonal terrain](SEASONS.md) applies written Seasons of Skyrim LTEX swaps to colour,
-normal and AO maps together. Brightness scales linear colour; vertex colour strength controls
-the landscape's painted shading. Texture repeats per cell is configurable (24 by default).
-These controls are saved in desktop presets and shared by the CLI `terrain` and `pipeline`
-commands. A change invalidates terrain checkpoints.
+Three settings, all on by default, let a run continue where data is missing. Whatever they
+fill in is listed in the warnings and in `PenguLOD.terrain.json`.
 
-Terrain-shadow exports are loose R16_UNORM DDS files with the bounds and height range in
-the filename. Keep the `Terrain.HeightMap` filename case and keep the files loose. Export
-requires rectangular coverage; disable it for worlds with uncovered holes. The size limit
-reduces the sample density for large worlds, without stretching their bounds.
+| Setting | What it does |
+| --- | --- |
+| Fill missing landscape from existing terrain LOD | Where plugins have no landscape, uses terrain LOD that is already installed. |
+| Fill uncovered land at the default height | Where there is neither landscape nor existing terrain LOD, makes flat land at the worldspace's default height. |
+| Use the default texture for missing landscape textures | Paints a missing texture with the default landscape texture. |
 
-Synthetic tests cover BTR structure at levels 4/8/16/32, UVs, shared edges, water segments,
-negative coordinates, landscape materials, missing coverage, fallback sampling, heightmap
-orientation, output preservation and desktop checkpoint reuse. Compare land/water transitions,
-shorelines, tile seams and the world map when changing source assets or settings. Broader
-modlist and shader compatibility is tracked in the [roadmap](ROADMAP.md).
+Turn a setting off to stop the run instead. The problems are listed before the first tile
+is built.
 
-Format references: [Community Shaders normal and RMAOS decoding](https://github.com/community-shaders/skyrim-community-shaders/blob/dev/package/Shaders/Lighting.hlsl), [NifTools schema](https://github.com/niftools/nifxml/blob/develop/nif.xml),
-[terrain conversion format observations](https://github.com/bryantmh/tes4skyrim/blob/master/docs/commentary/asset_convert_terrain.md),
-[Bottled Shaders heightmap reader](https://github.com/InTheBottle/Bottled-Shaders/blob/f0deaabe1f5d8c675bce06927a5c257f4af4e94d/src/Features/TerrainShadows.cpp).
-No game assets are included in the tests or repository.
+The default landscape texture is `textures/landscape/dirt02.dds`, unless
+`sDefaultLandDiffuseTexture` in your Skyrim INI names another. That texture must be
+installed.
 
-Pipeline and desktop terrain jobs save verified per-tile checkpoints. An interrupted job
-can restore completed default/seasonal tiles while rebuilding the remaining ones. The
-Terrain result shows generated/restored counts and sampling/encoding times. See
-[persistent generation](PIPELINE.md) for cache storage, verification and benchmark commands.
+## Terrain shadow heightmaps
+
+**Export Community Shaders heightmaps** is on by default.
+
+- Install the heightmap files loose, not in an archive, and do not rename them.
+- A worldspace with holes in its terrain cannot be exported. Turn the option off when
+  generating such a worldspace.
+- **Maximum heightmap dimension** caps the resolution for large worldspaces.
+
+## Limits
+
+Terrain textures are a fixed bake of colour, normals and, for PBR textures, ambient
+occlusion. Reflections, parallax and changing light are not reproduced.

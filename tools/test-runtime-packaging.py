@@ -70,7 +70,7 @@ class RuntimeLicenseTests(unittest.TestCase):
 class RuntimePackageTests(unittest.TestCase):
     def fixture(self, root):
         repo = tools.parent
-        for file in ['VERSION', 'LICENSE.txt', 'docs/UPGRADING.md', 'packaging/PenguLOD.ini', 'assets/pengulod-256.png']:
+        for file in ['VERSION', 'LICENSE.txt', 'packaging/README-SKSE.md', 'packaging/PenguLOD.ini', 'assets/pengulod-256.png']:
             (root / file).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(repo / file, root / file)
         shutil.copytree(repo / 'packaging/fomod', root / 'packaging/fomod')

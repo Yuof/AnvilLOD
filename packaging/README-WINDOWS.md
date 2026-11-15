@@ -1,27 +1,28 @@
 # PenguLOD for Windows
 
-Extract the entire ZIP into a new folder, then launch **PenguLOD.Desktop.exe**.
-For the command line, run `PenguLOD.exe --help` from PowerShell or a terminal.
-Keep the accompanying files and `backends` directory together.
+1. Extract the whole ZIP into a new folder and keep the files together.
+2. Run `PenguLOD.Desktop.exe` to start the desktop.
 
-This x64 package includes the .NET runtime and native grass backend. It does not
-require a separate .NET SDK, Python, Wine, or DynDOLOD executable. Optional Vulkan
-texture acceleration uses the graphics driver's Vulkan support; CPU generation
-remains available when Vulkan is unavailable.
+The command-line program is `PenguLOD.exe`. Run `PenguLOD.exe --help` for its commands.
 
-Choose your game, mod-manager instance and profile in the application. Native
-Windows paths work directly. Each generation stage needs its own output folder.
-See [the user guide](docs/USER-GUIDE.md) for configuration and installation of outputs.
+Requirements: Windows 10 22H2 or Windows 11, x64.
 
-Settings are stored in `%APPDATA%\PenguLOD`, and caches in `%LOCALAPPDATA%\PenguLOD`.
-Use `--settings <file>` for a separate settings file. Extract upgrades into a new
-folder; do not overwrite a running copy. Generation outputs remain where you selected.
+If Windows blocks the program, see
+[troubleshooting](docs/TROUBLESHOOTING.md#windows-blocks-pengulod).
 
-Windows 10 22H2 and Windows 11 x64 are the intended desktop targets. Automated
-tests use Windows Server runners; full modlist and physical GPU testing is still
-needed. The optional in-game PenguLOD SKSE plugin is a separate installation.
+To update, extract the new version into a new folder. Do not extract over a copy that is
+running. Settings are kept in `%APPDATA%\PenguLOD` and caches in `%LOCALAPPDATA%\PenguLOD`.
 
-Checksums, platform notes and troubleshooting: [packages](docs/PACKAGING.md),
-[troubleshooting](docs/TROUBLESHOOTING.md), [dependency notices](docs/PROVENANCE.md).
+Dynamic LOD and the in-game quality controls need the PenguLOD SKSE plugin, a separate
+download from the same release.
 
-For output made by earlier versions, read [Upgrading safely](docs/UPGRADING.md) before replacing installed mods.
+## Guides
+
+- [User guide](docs/USER-GUIDE.md): start here
+- [Settings reference](docs/SETTINGS.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Command line](docs/CLI.md)
+- [Upgrading from AnvilLOD output](docs/UPGRADING.md)
+
+Licenses: [LICENSE.txt](LICENSE.txt), [THIRD-PARTY-PACKAGES.txt](THIRD-PARTY-PACKAGES.txt)
+and the `licenses` folder.

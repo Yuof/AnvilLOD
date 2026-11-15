@@ -1,0 +1,108 @@
+name: Upload release to Nexus
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag (for example, v0.6.0-beta.1)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: nexus-upload
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    name: Upload tested release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: nexus
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check publishing configuration
+        env:
+          NEXUSMODS_API_KEY: ${{ secrets.NEXUSMODS_API_KEY }}
+          NEXUSMODS_MOD_ID: ${{ vars.NEXUSMODS_MOD_ID }}
+          NEXUSMODS_FILE_ID_WINDOWS: ${{ vars.NEXUSMODS_FILE_ID_WINDOWS }}
+          NEXUSMODS_FILE_ID_LINUX: ${{ vars.NEXUSMODS_FILE_ID_LINUX }}
+          NEXUSMODS_FILE_ID_SKSE: ${{ vars.NEXUSMODS_FILE_ID_SKSE }}
+        run: |
+          python3 - <<'PY'
+          import os
+          if os.environ['GITHUB_REF'] != 'refs/heads/main':
+              raise SystemExit('Run this workflow from main')
+          required = ('NEXUSMODS_API_KEY', 'NEXUSMODS_MOD_ID', 'NEXUSMODS_FILE_ID_WINDOWS',
+                      'NEXUSMODS_FILE_ID_LINUX', 'NEXUSMODS_FILE_ID_SKSE')
+          missing = [name for name in required if not os.environ.get(name, '').strip()]
+          if missing:
+              raise SystemExit('Configure the nexus environment: ' + ', '.join(missing))
+          PY
+      - name: Download and verify the published build
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: python3 tools/prepare-nexus-upload.py --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --output build/nexus-upload
+      # The generator packages are extracted by hand, so mod managers are not offered them.
+      - name: Upload the Windows package
+        id: windows
+        uses: Nexus-Mods/upload-action@98532f7670c27cbecc78fae03fa3e278147827e2
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ vars.NEXUSMODS_FILE_ID_WINDOWS }}
+          filename: ${{ steps.release.outputs.windows }}
+          version: ${{ steps.release.outputs.version }}
+          display_name: PenguLOD for Windows
+          description: The LOD generator for Windows 10 and 11 (x64). Extract it to its own folder and run PenguLOD.Desktop.exe.
+          category: main
+          archive_existing_version: 'true'
+          primary_mod_manager_download: 'false'
+          allow_mod_manager_download: 'false'
+      - name: Upload the Linux package
+        id: linux
+        uses: Nexus-Mods/upload-action@98532f7670c27cbecc78fae03fa3e278147827e2
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ vars.NEXUSMODS_FILE_ID_LINUX }}
+          filename: ${{ steps.release.outputs.linux }}
+          version: ${{ steps.release.outputs.version }}
+          display_name: PenguLOD for Linux
+          description: The LOD generator for x64 Linux. Extract it to its own folder and run run-pengulod.sh.
+          category: main
+          archive_existing_version: 'true'
+          primary_mod_manager_download: 'false'
+          allow_mod_manager_download: 'false'
+      # Last, so the mod's version and changelog change only once every file is in place.
+      - name: Upload the SKSE plugin
+        id: skse
+        uses: Nexus-Mods/upload-action@98532f7670c27cbecc78fae03fa3e278147827e2
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ vars.NEXUSMODS_FILE_ID_SKSE }}
+          mod_id: ${{ vars.NEXUSMODS_MOD_ID }}
+          filename: ${{ steps.release.outputs.skse }}
+          version: ${{ steps.release.outputs.version }}
+          display_name: PenguLOD SKSE Plugin
+          description: The in-game plugin for dynamic LOD and the quality controls. Install it with your mod manager and choose your Skyrim version.
+          category: main
+          archive_existing_version: 'true'
+          primary_mod_manager_download: 'true'
+          allow_mod_manager_download: 'true'
+          update_mod_version: 'true'
+          changelog: ${{ steps.release.outputs.changelog }}
+      - name: Record uploaded version
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          WINDOWS_VERSION_ID: ${{ steps.windows.outputs.version_id }}
+          LINUX_VERSION_ID: ${{ steps.linux.outputs.version_id }}
+          SKSE_VERSION_ID: ${{ steps.skse.outputs.version_id }}
+        run: |
+          printf 'Uploaded PenguLOD %s to Nexus Mods (version IDs: Windows %s, Linux %s, SKSE %s).\n' \
+            "$RELEASE_VERSION" "$WINDOWS_VERSION_ID" "$LINUX_VERSION_ID" "$SKSE_VERSION_ID" >> "$GITHUB_STEP_SUMMARY"

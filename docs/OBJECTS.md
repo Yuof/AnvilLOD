@@ -1,47 +1,62 @@
-# Automatic object LOD
+# Objects
 
-Enable **Build missing object LOD models** under **Object LOD → Automatic object
-LOD** to create missing source meshes during a scan or LOD job. This is optional and off
-by default. It uses the native mesh maker; no external executable is required.
+The object LOD stage builds distant buildings, rocks and other objects from the LOD models
+and rules supplied by your mods and [resource packs](RESOURCE-PACKS.md). This page covers
+its optional extras. The [settings reference](SETTINGS.md#object-lod) lists every option.
 
-The active rules still decide which objects and levels appear. Installed MNAM and named
-LOD models take precedence. Explicit `None`, billboard and dynamic-only rules do not
-trigger generation. Existing fallback from an installed farther source level is preserved.
-Automatic generation fills only the remaining requested gaps. Deleted, disabled and Base
-Object Swapper reference filtering still applies to the final reference list.
+## Build missing object LOD models
 
-## Quality and cost
+Some objects have no LOD model and so vanish at a distance. PenguLOD can make one from the
+full model.
 
-The default budgets are 2,500 triangles for source level 0, 1,000 for level 1 and 400 for
-level 2. Rules usually select these for LOD 4, 8 and 16; a requested missing source level
-3 reuses the far generated model. Farther generated levels cannot exceed nearer budgets.
-**Minimum object size** defaults to 128 game units, measured along the largest model axis.
+1. On **Object LOD → Automatic object LOD**, turn on **Build missing object LOD models**.
+2. Run object LOD.
 
-**Object reduction multiplier** scales surface simplification and removal of small parts.
-Values below 1 retain more detail; values above 1 remove more. Meeting a triangle budget
-can require further simplification or dropping small parts. These are cost limits, not a
-guarantee of silhouette preservation. Review buildings, rocks, fences and thin shapes in
-game before increasing coverage across a whole load order.
+| Setting | Default | Effect |
+| --- | --- | --- |
+| LOD 4 / LOD 8 / LOD 16 object triangle budget | 2500 / 1000 / 400 | Maximum triangles per generated model. A model that cannot fit is skipped at that level. |
+| Minimum object size | 128 | Objects smaller than this, in game units, are skipped. |
+| Object reduction multiplier | 1 | Lower keeps more detail; higher removes more. |
 
-Generated meshes retain shape names, material boundaries and surviving UVs. Normal texture
-matching applies record overrides and seasonal variants. **Pack object texture atlases**
-can pack compatible materials; tiled UVs and unsupported atlas materials keep their source
-textures. Generation does not reproduce animated or view-dependent materials.
+LOD models installed by your mods are always used first, and the active rules still decide
+which objects appear. Generated models go straight into the object LOD output; there is
+nothing extra to install.
 
-## Reports and recovery
+This option adds scenery and therefore drawing cost. Look at buildings, fences and other
+thin shapes in game before relying on it.
 
-The **Scan results → Automatic object LOD** table, `scan-report.json` and the generated
-`PenguLOD.objects.json` list requested source levels, triangle counts, budgets and fallback
-reasons. Missing source models/textures, unsupported geometry, small models and unmet
-budgets skip the affected level with a warning. Other installed or generated levels remain
-available. This does not bypass errors in required installed LOD or invalid texture recipes.
+**Scan results → Automatic object LOD** and `PenguLOD.objects.json` in the output list what
+was generated and what was skipped, with the reason.
 
-Meshes are stored in the application's private cache and merged into the usual BTO output.
-No source mods are edited and no separate generated mesh mod needs installation. Cache
-entries are keyed by source content and settings and verified before reuse; damaged entries
-are regenerated. Scans may prepare these cache files but do not publish LOD.
+## Reduce texture cost
 
-Saved presets and JSON requests retain all options (`Lod.AutomaticObjects`). Flag-based CLI
-runs can use `--auto-objects`, `--object-near-budget`, `--object-middle-budget`,
-`--object-far-budget`, `--object-min-size` and `--object-detail`. Changing these options
-requires a LOD run; it does not require new grass placement caches or tree billboards.
+Both options are under **Object LOD → Object atlases** and are off by default.
+
+- **Pack object texture atlases** combines compatible object textures into shared sheets,
+  so more surfaces can be drawn together. **Atlas cell size** sets the detail per texture:
+  512 favours quality, 256 saves more memory.
+- **Optimize object LOD textures** writes smaller compressed copies of textures that are
+  not in an atlas. **Maximum standalone LOD texture size** defaults to 1024.
+
+Surfaces that cannot be packed keep their original textures. Your source textures are never
+changed; the new ones are written into the object LOD output.
+
+After changing either option, run object LOD only and replace the installed output.
+Smaller textures do not guarantee a higher frame rate, so compare the same view before and
+after. `PenguLOD.atlas.json` and `PenguLOD.object-textures.json` record what changed.
+
+## Base Object Swapper
+
+Objects removed by a Base Object Swapper `_SWAP.ini` are left out of LOD. Only removals are
+supported, meaning swaps to the invisible XMarker (`0x3B`). Swaps to another model, moved
+objects, conditional rules and random chances are not applied to LOD.
+
+After changing a swap file, run object LOD again and replace the installed output. The scan
+report's `baseObjectSwaps` section lists each removed reference and each unsupported entry.
+
+## Limits
+
+- Animated and glowing effect layers, such as smoke and window glow, are not baked into
+  static LOD.
+- Generated models do not reproduce animated materials or materials that change with the
+  view.

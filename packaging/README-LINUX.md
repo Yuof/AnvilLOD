@@ -1,20 +1,26 @@
 # PenguLOD for Linux
 
-Run `./run-pengulod.sh` for the desktop or `./PenguLOD --help` for the CLI.
-Keep the package folder together. The .NET runtime and native grass backend are bundled.
-Use `./install-desktop.sh` after moving this directory to its permanent location if you want
-a menu entry. Existing settings are imported once; generation outputs stay at their configured paths.
+1. Keep this folder together.
+2. Run `./run-pengulod.sh` to start the desktop.
+3. To add a menu entry, run `./install-desktop.sh` once the folder is where you want to keep
+   it. This needs Python 3.
 
-- [Setup and generation guide](docs/USER-GUIDE.md)
-- [Grass caching](docs/GRASS.md), [textures](docs/TEXTURES.md) and [terrain](docs/TERRAIN.md)
-- [Persistent pipeline](docs/PIPELINE.md) and [CLI commands](docs/CLI.md)
-- [Diagnostics and in-game checks](docs/DIAGNOSTICS.md)
-- [Troubleshooting](docs/TROUBLESHOOTING.md) and [roadmap](docs/ROADMAP.md)
-- [Package compatibility](docs/PACKAGING.md)
-- [Dependencies and compatibility](docs/PROVENANCE.md), [license](LICENSE.txt) and [dependency inventory](THIRD-PARTY-PACKAGES.txt)
+The command-line program is `./PenguLOD`. Run `./PenguLOD --help` for its commands.
 
-Official releases target x64 glibc Linux, built on Ubuntu 24.04. Game-side dynamic features
-require the separately installed PenguLOD SKSE plugin matching your Skyrim runtime.
-The generator and game plugin share a release version; select the DLL build for your Skyrim executable.
+Requirements: x64 Linux with glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 43 or
+later), X11 or XWayland, and the fontconfig, ICE, SM and ICU libraries that desktop
+installs normally have.
 
-For output made by earlier versions, read [Upgrading safely](docs/UPGRADING.md) before replacing installed mods.
+Dynamic LOD and the in-game quality controls need the PenguLOD SKSE plugin, a separate
+download from the same release.
+
+## Guides
+
+- [User guide](docs/USER-GUIDE.md): start here
+- [Settings reference](docs/SETTINGS.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Command line](docs/CLI.md)
+- [Upgrading from AnvilLOD output](docs/UPGRADING.md)
+
+Licenses: [LICENSE.txt](LICENSE.txt), [THIRD-PARTY-PACKAGES.txt](THIRD-PARTY-PACKAGES.txt)
+and the `licenses` folder.

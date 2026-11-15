@@ -5,87 +5,70 @@
 [![Build and release](https://github.com/opteron-x86/PenguLOD/actions/workflows/linux.yml/badge.svg)](https://github.com/opteron-x86/PenguLOD/actions/workflows/linux.yml)
 [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue)](LICENSE.txt)
 
-A native Linux and Windows LOD toolkit for Skyrim, built on [CageTV’s AnvilLOD](https://github.com/CageTV/AnvilLOD).
-PenguLOD combines an Avalonia desktop and CLI with native terrain, object, tree and grass LOD,
-texture generation, and offline grass caching. It reads Mod Organizer 2 profiles directly and runs without Wine.
+PenguLOD generates the distant scenery (LOD) for Skyrim SE, AE and VR: terrain, objects,
+trees and grass, the textures they use, and the grass cache. It is available for Linux and
+Windows and works with Mod Organizer 2 and Vortex.
 
-**Current version: 0.6.0-beta.1**.
-The all-in-one pipeline supports grass → textures → terrain → object/tree/grass LOD, with
-verified resume and safe output publication. A full run over 85 worldspaces of a
-2,044-plugin load order takes about 35 minutes on a 32-thread machine with NVMe storage.
-This beta has been validated in game on few load orders so far; reports from other setups,
-Windows in particular, are welcome.
+**Current version: 0.6.0-beta.1**
 
-## Download and run
+## Install
 
-Download the package for your OS from [Releases](https://github.com/opteron-x86/PenguLOD/releases).
-On Windows, extract the x64 ZIP and launch **`win-x64/PenguLOD.Desktop.exe`**;
-the CLI is `PenguLOD.exe`. Keep all extracted files together. The intended targets are
-Windows 10 22H2 and Windows 11 x64; CI runs tests and package startup checks on Windows Server.
+1. Download the package for your system from
+   [Releases](https://github.com/opteron-x86/PenguLOD/releases).
 
-On Linux, extract the x64 archive and keep the `linux-x64` folder together:
+   | System | File | Start with |
+   | --- | --- | --- |
+   | Windows 10 or 11, x64 | `PenguLOD-<version>-win-x64.zip` | `win-x64\PenguLOD.Desktop.exe` |
+   | Linux x64 | `PenguLOD-<version>-linux-x64.tar.gz` | `linux-x64/run-pengulod.sh` |
+   | Linux x64 | `PenguLOD-<version>-x86_64.AppImage` | `chmod +x` the file, then run it |
 
-```bash
-./linux-x64/run-pengulod.sh
-./linux-x64/PenguLOD --version
-./linux-x64/PenguLOD --help
-```
+2. Extract it into a folder of its own and keep the files together.
+3. For dynamic LOD and the in-game quality controls, also install
+   `PenguLOD-<version>-SKSE.zip` with your mod manager and pick your Skyrim version in its
+   installer.
 
-The .NET runtime and native CPU grass backend are included on both platforms.
-Linux release builds target **Ubuntu 24.04
-or a compatible newer glibc-based x64 desktop**. X11, fontconfig, ICE/SM and ICU are required;
-Wayland sessions need XWayland. CI checks Ubuntu 24.04, Debian 13 and Fedora 43.
-Once the folder is in its permanent location, `./linux-x64/install-desktop.sh` adds a menu entry
-(requires Python 3). No root installation is needed. An AppImage is also available; see
-[packages and compatibility](docs/PACKAGING.md), including the `--cli` entry point.
+Linux needs glibc 2.39 or newer (Ubuntu 24.04, Debian 13 and Fedora 43 are tested) and X11
+or XWayland. If Windows blocks the program, see
+[troubleshooting](docs/TROUBLESHOOTING.md#windows-blocks-pengulod).
 
-On first launch, PenguLOD imports an existing `~/.config/AnvilLOD/settings.json` into
-`~/.config/PenguLOD/settings.json`, respecting XDG overrides. The original is preserved, along
-with all selected output paths, preferences and the old cache location. An existing PenguLOD
-configuration takes precedence. Windows uses `%APPDATA%\PenguLOD` for settings and
-`%LOCALAPPDATA%\PenguLOD` for caches. `--settings /path/to/settings.json` selects an isolated configuration.
+## Set up and generate
 
-Follow the [walkthrough](docs/USER-GUIDE.md) for setup, generation and installation.
-Use the [settings reference](docs/SETTINGS.md) to look up an option, or the
-[tool reference](docs/TOOLS.md) for mesh authoring, texture repair and custom rules.
-[Reports & outputs](docs/REPORTS-AND-OUTPUTS.md) explains cost comparisons and verified output packages.
+1. Open **Game & resources**. Choose **Mod Organizer 2**, browse to the folder that holds
+   `ModOrganizer.ini`, click **Read profiles** and pick your profile. For Vortex or a plain
+   install, choose **Data folder / Vortex** and select the Data folder and `plugins.txt`.
+2. In your mod manager, disable any object LOD you generated before, including its plugins.
+3. Open **Overview**. Tick the stages you want and give each one its own empty output
+   folder, outside the game and mod folders.
+4. Click **Choose…** to pick worldspaces, or leave the field blank for all of them.
+5. Click **Check setup**, then **Run selected stages**.
+6. Install each output folder as a separate mod. Let the object LOD output win conflicts
+   with the texture output, enable the generated plugins, and put `Occlusion.esp` last if
+   you generated it.
 
-## Available now
+The [user guide](docs/USER-GUIDE.md) covers each step in more detail.
 
-- Avalonia desktop with progress, cancellation, logs, presets and resource controls.
-- Direct Mod Organizer 2 profile reading, including Wine drive mappings; deployed Data-folder support.
-- Native terrain/water BTR meshes, source normal detail, PBR colour/AO calibration and terrain-shadow heightmaps.
-- Incremental object LOD, billboard trees, 3D/hybrid models and native tree reduction with
-  record texture variants, foliage coverage limits and per-level geometry budgets; grass LOD, occlusion and seasonal terrain/object/tree/grass output.
-- Optional automatic missing-object LOD and native hybrid tree authoring, preserving installed models and active rule exclusions.
-- Native texture stitching, front/side tree and packed-grass billboards, hybrid trunk textures, material/normal baking,
-  experimental object rendering and conservative paired object atlases.
-- Deterministic Base Object Swapper marker removals, with per-reference exclusion diagnostics.
-- Compatible [resource packs](docs/RESOURCE-PACKS.md) from enabled mods or ordered standalone folders, without a DynDOLOD executable.
-- Bundled FasterNGIO CPU grass caching without launching Skyrim.
-- Shared desktop/CLI presets, persistent jobs, verified terrain tile resume and measured phase timings.
-- Pipeline preflight, asset precedence and coverage diagnostics, mesh simplification,
-  custom rules and native BC6H-to-BC7 texture repair.
-- Optional Vulkan encoding for large opaque BC7 textures, with quality/speed checks and CPU fallback.
+## Documentation
 
-The [CLI](docs/CLI.md) runs the same persistent generation stages as the desktop, alongside
-scanning and author/repair tools. PenguLOD’s texture generator does **not** yet
-match every TexGen feature. It uses assets from your installed mods and does not bundle game assets,
-DynDOLOD Resources or third-party LOD packs.
+- [User guide](docs/USER-GUIDE.md): a complete run from setup to checking the result in game
+- [Settings reference](docs/SETTINGS.md): every option, page by page
+- Stages: [grass cache](docs/GRASS.md), [textures](docs/TEXTURES.md),
+  [terrain](docs/TERRAIN.md), [trees](docs/TREES.md), [objects](docs/OBJECTS.md),
+  [seasons](docs/SEASONS.md)
+- [Resource packs](docs/RESOURCE-PACKS.md): using LOD rules, recipes and models from mods
+- [Reports and outputs](docs/REPORTS-AND-OUTPUTS.md): measuring, comparing and packaging a
+  generation
+- [Tools](docs/TOOLS.md): mesh maker, mod author, texture repair and custom rules
+- [Command line](docs/CLI.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Upgrading from AnvilLOD output](docs/UPGRADING.md)
 
-**Game runtime:** Dynamic LOD and in-game quality controls use the separate **PenguLOD SKSE
-package** from the same [release page](https://github.com/opteron-x86/PenguLOD/releases).
-Choose the DLL for your Skyrim version. It runs inside Skyrim on Windows or under Proton/Wine;
-the generator itself runs natively on Linux and Windows.
+Report problems and request features in
+[GitHub issues](https://github.com/opteron-x86/PenguLOD/issues).
 
-Upgrading from output with AnvilLOD filenames? Read [upgrading safely](docs/UPGRADING.md).
-New plugins, runtime data, manifests and product-owned asset folders use PenguLOD names.
-Existing settings are preserved; a fresh output folder keeps your working generation available.
+## Build from source
 
-## Build and contribute
-
-Requires .NET 10 SDK, CMake 3.28+, Ninja, a C++23 compiler and the native development libraries
-listed in [CONTRIBUTING.md](CONTRIBUTING.md).
+You need the .NET 10 SDK, CMake 3.28 or newer, Ninja and a C++23 compiler.
+[CONTRIBUTING.md](CONTRIBUTING.md) lists the remaining packages and the Windows steps.
 
 ```bash
 git clone https://github.com/opteron-x86/PenguLOD.git
@@ -95,24 +78,13 @@ bash tools/build.sh
 ./dist/linux-x64/run-pengulod.sh
 ```
 
-For Windows builds, use `tools/build-windows.ps1` and `tools/test-windows.ps1` with the
-prerequisites in the [contributor guide](CONTRIBUTING.md#windows-development).
-
-`main` is the integration branch. Every push and pull request runs Linux and Windows tests,
-packages both platforms and checks native startup. `v*` tags matching `VERSION` publish tested releases with
-checksums and source archives. See [release maintenance](docs/RELEASING.md).
-
-The [roadmap](docs/ROADMAP.md) tracks delivered quality milestones and ongoing compatibility validation.
-Use the [transition checklist](docs/DIAGNOSTICS.md#repeatable-checks) when testing generated output in Skyrim.
-
 ## Credits and license
 
-PenguLOD is maintained by **opteron-x86 and contributors**, based on **AnvilLOD by CageTV**.
-The native grass engine is [FasterNGIO by panthuncia](https://github.com/panthuncia/FasterNGIO),
-with pinned source and local patches. Thanks also to the Avalonia, Mutagen, nifly and other
-dependency authors. See [dependencies and compatibility](docs/PROVENANCE.md) for bundled
-components, source pins and game-runtime requirements.
+PenguLOD is maintained by opteron-x86 and contributors and is based on
+[AnvilLOD by CageTV](https://github.com/CageTV/AnvilLOD). The grass cache is generated by
+[FasterNGIO by panthuncia](https://github.com/panthuncia/FasterNGIO). Thanks also to the
+authors of Avalonia, Mutagen and the other [dependencies](docs/PROVENANCE.md).
 
-[GPL-3.0-only](LICENSE.txt). Existing upstream copyright notices are retained. Packaged dependencies
-include their own notices and licenses; the grass backend includes its corresponding source.
-Generated output may contain assets belonging to your installed mods and is not covered by this repository’s license.
+Licensed under [GPL-3.0-only](LICENSE.txt). PenguLOD bundles no game assets or third-party
+LOD packs. Generated output can contain assets from your installed mods, which this license
+does not cover.
