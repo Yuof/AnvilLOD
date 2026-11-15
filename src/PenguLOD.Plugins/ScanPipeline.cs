@@ -888,7 +888,7 @@ public static class ScanPipeline
             // DynDOLOD's "File Not Found Textures": a LOD mesh naming a texture that exists nowhere draws purple.
             if (gen.MeshesLoaded > 0)
             {
-                var texMissing = generator.AuditTextures(output);
+                var texMissing = generator.AuditTextures(output, tex => StubTextures.IsStandIn(assets, tex));
                 if (texMissing.Count > 0)
                 {
                     foreach (var kv in texMissing.OrderByDescending(k => k.Value.Meshes).Take(25))
