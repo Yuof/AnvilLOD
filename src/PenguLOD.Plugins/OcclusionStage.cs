@@ -25,6 +25,8 @@ public static class OcclusionStage
     /// <summary>Worldspaces whose LOD grid is smaller than this (cells per side) are left alone, like xLODGen does.</summary>
     public const int MinStride = 128;
 
+    private const int PersistentFlag = 0x400;
+
     public static Result Run(GameContext game, TerrainHeights terrain, IReadOnlyDictionary<string, LodGrid> grids, IReadOnlyList<LodReference> refs,
         IReadOnlyList<TreeReference>? trees, IAssetSource assets, string folder, OcclusionSettings settings, IProgress<string>? progress,
         Action<string> warn, CancellationToken ct)
@@ -103,6 +105,9 @@ public static class OcclusionStage
             {
                 if (ctx.Record.Grid is not { } g || !data.TryGetValue((g.Point.X, g.Point.Y), out var tvdt)) continue;
                 if (!ctx.TryGetParentSimpleContext<IWorldspaceGetter>(out var wsCtx) || !string.Equals(wsCtx.Record.EditorID, ws, StringComparison.OrdinalIgnoreCase)) continue;
+                // The worldspace's persistent cell holds persistent references; it is not a place. It carries the coordinates of
+                // cell (0, 0) and would get that cell's data, and the plugin would override a record it has no reason to touch.
+                if ((ctx.Record.MajorRecordFlagsRaw & PersistentFlag) != 0 || wsCtx.Record.TopCell?.FormKey == ctx.Record.FormKey) continue;
                 var cell = ctx.GetOrAddAsOverride(mod);
                 var (offset, steps) = OcclusionCalculator.BuildMaxHeight(heights, g.Point.X, g.Point.Y);
                 var map = new Array2d<byte>(new byte[32, 32]);
