@@ -16,15 +16,24 @@ public sealed class DesktopSettings : ObservableObject
     {
         Options[key] = value;
         OptionChanged?.Invoke(key);
-        if (key == "seasons") Changed(nameof(Seasons));
+        if (OptionProperties.TryGetValue(key, out var property)) Changed(property);
     }
+
+    // Options that pages other than Object LOD bind as ordinary properties.
+    private static readonly Dictionary<string, string> OptionProperties = new(StringComparer.Ordinal)
+    {
+        ["seasons"] = nameof(Seasons), ["seasonWinter"] = nameof(SeasonWinter), ["seasonSpring"] = nameof(SeasonSpring),
+        ["seasonSummer"] = nameof(SeasonSummer), ["seasonAutumn"] = nameof(SeasonAutumn),
+    };
+    private bool Flag(string key) => GenerationOptions.Get<bool>(this, key);
+    private void Flag(string key, bool value) => SetOption(key, JsonSerializer.SerializeToElement(value));
 
     /// <summary>Restores every generation option to its default and notifies bound controls.</summary>
     public void ResetOptions()
     {
         Options.Clear();
         OptionChanged?.Invoke("*");
-        Changed(nameof(Seasons));
+        foreach (var property in OptionProperties.Values) Changed(property);
     }
     private string _sourceMode = "Mod Organizer 2";
     public string SourceMode { get => _sourceMode; set => Set(ref _sourceMode, value ?? ""); }
@@ -105,6 +114,10 @@ public sealed class DesktopSettings : ObservableObject
         get => GenerationOptions.Get<bool>(this, "seasons");
         set => SetOption("seasons", JsonSerializer.SerializeToElement(value));
     }
+    [System.Text.Json.Serialization.JsonIgnore] public bool SeasonWinter { get => Flag("seasonWinter"); set => Flag("seasonWinter", value); }
+    [System.Text.Json.Serialization.JsonIgnore] public bool SeasonSpring { get => Flag("seasonSpring"); set => Flag("seasonSpring", value); }
+    [System.Text.Json.Serialization.JsonIgnore] public bool SeasonSummer { get => Flag("seasonSummer"); set => Flag("seasonSummer", value); }
+    [System.Text.Json.Serialization.JsonIgnore] public bool SeasonAutumn { get => Flag("seasonAutumn"); set => Flag("seasonAutumn", value); }
     public decimal TerrainBrightness { get => _terrainBrightness; set => Set(ref _terrainBrightness, value); }
     private decimal _terrainVertexColor = 1;
     public decimal TerrainVertexColor { get => _terrainVertexColor; set => Set(ref _terrainVertexColor, value); }

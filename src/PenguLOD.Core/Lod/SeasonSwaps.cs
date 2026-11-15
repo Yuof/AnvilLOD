@@ -33,6 +33,37 @@ public static class SeasonSwaps
     public static readonly IReadOnlyList<(string Suffix, string Name)> Seasons =
         [("WIN", "Winter"), ("SPR", "Spring"), ("SUM", "Summer"), ("AUT", "Autumn")];
 
+    private static readonly IReadOnlySet<string> AllSuffixes = Seasons.Select(s => s.Suffix).ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The seasons a run generates, as suffixes. Null or blank selects all four. Otherwise <paramref name="only"/> lists
+    /// suffixes or names separated by commas, semicolons or spaces ("WIN,SUM", "winter summer"), in any case.
+    /// A season left out gets no seasonal files, so the game shows the normal LOD in it.
+    /// </summary>
+    public static IReadOnlySet<string> Selection(string? only)
+    {
+        if (string.IsNullOrWhiteSpace(only)) return AllSuffixes;
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var token in only.Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            string name = token.Equals("fall", StringComparison.OrdinalIgnoreCase) ? "Autumn" : token;
+            var match = Seasons.FirstOrDefault(s => s.Suffix.Equals(name, StringComparison.OrdinalIgnoreCase) || s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (match.Suffix is null) throw new ArgumentException($"Unknown season '{token}'. Use winter, spring, summer or autumn.");
+            set.Add(match.Suffix);
+        }
+        return set.Count == 0 ? throw new ArgumentException("Select at least one season.") : set;
+    }
+
+    /// <summary>
+    /// A selection as a request stores it: the suffixes in the order of <see cref="Seasons"/>, or null when every season
+    /// is selected, so a request that leaves nothing out is the same as one written before seasons could be chosen.
+    /// </summary>
+    public static string? SelectionText(string? only)
+    {
+        var set = Selection(only);
+        return set.Count == Seasons.Count ? null : string.Join(',', Seasons.Where(s => set.Contains(s.Suffix)).Select(s => s.Suffix));
+    }
+
     /// <summary>Record types that can have object LOD (TREE is tree LOD, flora and land textures have none).</summary>
     public static readonly IReadOnlySet<string> ObjectSections =
         new HashSet<string>(["Activators", "Furniture", "MovableStatics", "Statics"], StringComparer.OrdinalIgnoreCase);

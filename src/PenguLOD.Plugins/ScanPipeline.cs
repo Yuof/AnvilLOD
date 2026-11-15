@@ -64,7 +64,10 @@ public sealed record ScanRequest(
     string? GeneratedTerrainFolder = null, bool ObjectAtlas = false, int AtlasCellSize = 256,
     AutomaticObjectSettings? AutomaticObjects = null, IReadOnlyList<string>? ResourcePacks = null,
     bool OptimizeObjectTextures = false, int ObjectTextureSize = 1024,
-    bool SeasonsStrict = false);                   // stop on an unresolved season swap instead of skipping and reporting it
+    bool SeasonsStrict = false,                    // stop on an unresolved season swap instead of skipping and reporting it
+    // With Seasons: the seasons to generate, as SeasonSwaps.SelectionText writes them ("WIN" or "WIN,SUM"); null = all four.
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? OnlySeasons = null);
 
 public sealed record ScanSummary(
     ScanStats Stats,
@@ -126,6 +129,7 @@ public static class ScanPipeline
         ResourceCatalog.ValidateFolders(req.DynDolodFolder, req.ResourcePacks, req.OutputFolder);
         req.Scan.Tree3D?.Validate();
         req.AutomaticObjects?.Validate();
+        SeasonSwaps.Selection(req.OnlySeasons);
         // Checked before the scan so a bad value does not waste a full run. Only generation with the option uses them.
         if (req.Generate && req.ObjectAtlas && (req.AtlasCellSize is < 64 or > 512 || (req.AtlasCellSize & (req.AtlasCellSize - 1)) != 0))
             throw new ArgumentException("Atlas cell size must be a power of two from 64 to 512.");
@@ -206,6 +210,7 @@ public static class ScanPipeline
 
     private static ScanSummary RunLogged(ScanRequest req, IProgress<string>? progress, CancellationToken ct, StagedOutput? staged)
     {
+        var onlySeasons = SeasonSwaps.Selection(req.OnlySeasons);
         using var preparationTiming = WorkTiming.Measure("preparation");
 
         // The same checks the app asks about before it starts; a command-line run (or one the user went ahead with) gets them in the log.
@@ -346,7 +351,7 @@ public static class ScanPipeline
         if (req.GrassLod && scan.Grids.Count > 0 && (req.Levels is not { Count: > 0 } || req.Levels.Contains(LodLevel.Lod4)))
         {
             grass = new GrassLodSource(game, assets, req.GrassDensity, req.GrassSize, req.Generate ? req.OutputFolder : null, req.GrassTop, req.GrassBottom);
-            var grassRefs = grass.Discover(scan.Grids, req.Seasons);
+            var grassRefs = grass.Discover(scan.Grids, req.Seasons, onlySeasons);
             if (req.Generate && grassRefs.Count > 0)
             {
                 progress?.Report("Grass LOD: packing the grass billboards into one atlas...");
@@ -641,9 +646,9 @@ public static class ScanPipeline
             // Seasons of Skyrim: seasonal copies of the object LOD blocks, after the normal ones are up to date.
             if (req.Seasons)
             {
-                progress?.Report("Seasons: building seasonal object LOD from Data\\Seasons\\*_WIN/_SPR/_SUM/_AUT.ini...");
+                progress?.Report("Seasons: building seasonal object LOD from Data\\Seasons\\*_" + string.Join("/_", SeasonSwaps.Seasons.Select(s => s.Suffix).Where(onlySeasons.Contains)) + ".ini...");
                 var seasonal = SeasonalLod.Build(game, assets, assets.EnumeratePaths, resolver, quads, generator, output, progress, ct, grass, sceneTrees, tree3d, req.Scan.Tree3D, seasonalVariants,
-                    req.SeasonsStrict, Warn);
+                    req.SeasonsStrict, Warn, onlySeasons);
                 if (seasonal.Seasons == 0 && seasonal.Messages.Count == 0)
                     progress?.Report("Seasons: no season INI files found in Data\\Seasons; nothing written.");
             }
@@ -651,7 +656,7 @@ public static class ScanPipeline
 
             if (req.Scan.TreeLod && bttTrees is { } treeRefs)
             {
-                var treeSeasons = req.Seasons ? SeasonalAssets.Read(game,assets,"Trees",req.SeasonsStrict,Warn) : new Dictionary<string,Dictionary<Mutagen.Bethesda.Plugins.FormKey,Mutagen.Bethesda.Plugins.FormKey>>();
+                var treeSeasons = req.Seasons ? SeasonalAssets.Read(game,assets,"Trees",req.SeasonsStrict,Warn,onlySeasons) : new Dictionary<string,Dictionary<Mutagen.Bethesda.Plugins.FormKey,Mutagen.Bethesda.Plugins.FormKey>>();
                 TreeLodGenerator.RemoveInactiveSeasons(output,scan.Grids.Keys,treeSeasons.Keys.ToHashSet(),manifest);
                 trees = TreeLodGenerator.Generate(scan.Grids, treeRefs, assets, output, manifest, progress, ct, req.TreeBrightness, objectLodWorlds);
                 foreach (var w in trees.Warnings) Warn(w);

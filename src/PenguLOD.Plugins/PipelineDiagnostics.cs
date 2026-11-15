@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Reflection.PortableExecutable;
 using System.Text.Json;
 using PenguLOD.Core;
+using PenguLOD.Core.Lod;
 using PenguLOD.Core.Paths;
 using PenguLOD.Core.Pipeline;
 using PenguLOD.Core.World;
@@ -99,7 +100,13 @@ public static class PipelineDiagnostics
             bool seasonalGrass=request.Grass?.Seasons=="on" || request.Grass?.Seasons=="auto" && assets.Exists(@"skse\plugins\po3_seasonsofskyrim.dll");
             if(request.Lod?.Seasons==true || request.Terrain?.Seasons==true || seasonalGrass)
             {
-                seasons=SeasonalCoverage.Inspect(game,assets,ct);
+                // Seasons no selected stage generates are left out. The grass cache backend writes every season, so its
+                // categories stay for all of them.
+                var generated=new HashSet<string>(StringComparer.Ordinal);
+                if(request.Lod is {Seasons:true} seasonalLod)generated.UnionWith(SeasonSwaps.Selection(seasonalLod.OnlySeasons));
+                if(request.Terrain is {Seasons:true} seasonalTerrain)generated.UnionWith(SeasonSwaps.Selection(seasonalTerrain.OnlySeasons));
+                seasons=SeasonalCoverage.Inspect(game,assets,ct).Where(row=>generated.Count==0 || generated.Contains(row.Season)
+                    || seasonalGrass && row.Category is "grasses" or "landtextures").ToArray();
                 foreach(var row in seasons)
                 {
                     Add("Info","seasonal-swaps",$"{row.Season} {row.Category}: {row.Resolved}/{row.Entries} entries resolve.","Later INI entries win; identity entries restore the original record.");
@@ -129,7 +136,8 @@ public static class PipelineDiagnostics
                         cells.Add($"{ws.ToLowerInvariant()}:{x}:{y}");
                     }
                     var baseline=cacheCells.GetValueOrDefault("Default")??[];
-                    foreach(string season in seasons.Select(s=>s.Season).Concat(cacheCells.Keys.Where(k=>k!="Default")).Distinct())
+                    var grassSeasons=SeasonSwaps.Selection(request.Lod.OnlySeasons);
+                    foreach(string season in seasons.Select(s=>s.Season).Concat(cacheCells.Keys.Where(k=>k!="Default")).Distinct().Where(grassSeasons.Contains))
                     {
                         var cells=cacheCells.GetValueOrDefault(season)??[];
                         int missing=baseline.Except(cells).Count(),orphan=cells.Except(baseline).Count();

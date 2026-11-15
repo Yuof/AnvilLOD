@@ -93,7 +93,8 @@ public sealed class GrassLodSource : ISyntheticMeshSource
     }
 
     /// <summary>One LOD reference per cached cell inside the worldspaces' LOD grids (non-seasonal caches only).</summary>
-    public List<LodReference> Discover(IReadOnlyDictionary<string, LodGrid> grids, bool includeSeasons = true)
+    /// <param name="onlySeasons">With <paramref name="includeSeasons"/>: the seasons whose caches are used; null uses all.</param>
+    public List<LodReference> Discover(IReadOnlyDictionary<string, LodGrid> grids, bool includeSeasons = true, IReadOnlySet<string>? onlySeasons = null)
     {
         var refs = new List<LodReference>();
         var cells = new HashSet<(string Ws, int X, int Y)>();
@@ -109,7 +110,7 @@ public sealed class GrassLodSource : ISyntheticMeshSource
             if (!grid.IsInsideGrid(cell) || !grid.Settings.Supports(LodLevel.Lod4)) continue;
             if (season is not null)
             {
-                if (includeSeasons) _seasonal[(ws.ToLowerInvariant(), x, y, season)] = path;
+                if (includeSeasons && onlySeasons?.Contains(season) != false) _seasonal[(ws.ToLowerInvariant(), x, y, season)] = path;
                 continue;
             }
             cells.Add((ws.ToLowerInvariant(), x, y)); _atlasCaches.Add(path);

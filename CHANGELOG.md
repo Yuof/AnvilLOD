@@ -27,6 +27,16 @@ Textures
   units per pixel** and works as before. Run textures and then object LOD again to get
   the sharper grass.
 
+Seasonal LOD
+
+- Seasonal LOD can be limited to the seasons you play. Four new boxes, **Seasonal LOD:
+  winter**, **spring**, **summer** and **autumn** under **Object LOD → World & runtime** and
+  on the Terrain page, choose which seasons get seasonal terrain, object, tree and grass
+  LOD; all are on by default. A season left out gets no seasonal files, files from an
+  earlier run are removed, and the game shows the normal LOD in that season. Its swap INIs
+  are not read. On the command line: `--seasons --only-seasons winter`. The grass cache
+  stage still writes every season. Existing output is not rebuilt while all four are on.
+
 ## [0.6.0-beta.2] - 2026-11-14
 
 A run no longer stops because one model or recipe cannot be generated, and Skyrim 1.6.1179

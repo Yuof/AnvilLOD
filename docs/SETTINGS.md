@@ -177,6 +177,7 @@ them; also regenerate object LOD when its terrain input changes.
 | Fill uncovered land at the default height | Where a tile has neither landscape records nor existing terrain LOD, makes the land flat at the worldspace's default height with the default texture. On by default. Off: the run stops before the first tile and lists those tiles. |
 | Use the default texture for missing landscape textures | Paints layers whose texture is not installed, or whose record cannot be resolved, with the default landscape texture and reports them. On by default. Off: the run stops before the first tile and lists every missing texture. |
 | Generate seasonal terrain from Seasons of Skyrim swaps | Builds seasonal variants from installed swaps. Off by default. This is the same switch as **Seasonal LOD** in Object LOD. |
+| Winter / Spring / Summer / Autumn | The seasons to generate, all on by default. The same choice as the **Seasonal LOD** season boxes in Object LOD. |
 | Generate water LOD | Builds distant water surfaces. On by default. |
 | Use generated terrain for object LOD | Makes object LOD use this terrain output, including for hidden-geometry removal. A pipeline that generates both stages passes it on automatically. |
 
@@ -369,6 +370,7 @@ the grass included in this LOD output.
 | Glow effect rules | Loads additional supplied fire and light-glow rules. Off by default; needs the corresponding resources. |
 | Water stand-ins | Includes lit replacement surfaces for supported streams and ponds. Off by default. Separate from Terrain's water LOD. |
 | Seasonal LOD | Builds variants using installed Seasons of Skyrim swaps. Off by default. Shared with Terrain's seasonal switch; grass-cache seasons are selected separately. |
+| Seasonal LOD: winter / spring / summer / autumn | With Seasonal LOD on, the seasons to generate. All on by default. A season left out gets no seasonal terrain, object, tree or grass LOD and shows the normal LOD in game. Shared with the Terrain page; the grass cache stage is not affected. See [seasons](SEASONS.md#generate-only-some-seasons). |
 | Strict seasonal swaps | Stops generation when a seasonal INI names a record that is not in the load order. Off by default: such lines are skipped and reported, as the game does. |
 | Include initially disabled objects | Includes objects initially disabled by plugins. Off by default. Enabling it can bake unwanted removed objects into LOD. |
 | Include enable-parented objects | Includes objects whose visibility is controlled by another reference. On by default. |

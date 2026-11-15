@@ -587,6 +587,28 @@ public sealed class DesktopTests : IDisposable
         Assert.Equal(new[] { "Tamriel", "OtherWorld" }, RequestFactory.Terrain(settings).Worldspaces);
     }
 
+    [Fact]
+    public void TickedSeasonsReachTerrainAndObjectRequestsOnlyWhileSeasonalLodIsOn()
+    {
+        using var f = new TextureFixture();
+        var settings = new DesktopSettings { SourceMode = "Data folder / Vortex", GameFolder = f.Data,
+            PluginsFile = f.Plugins, TerrainOutput = Path.Combine(f.Root, "terrain") };
+        settings.SeasonSpring = settings.SeasonAutumn = false;
+        // Seasonal LOD off: the ticks change nothing, so existing output is not rebuilt.
+        Assert.Null(RequestFactory.Scan(settings, false).OnlySeasons); Assert.Null(RequestFactory.Terrain(settings).OnlySeasons);
+        settings.Seasons = true;
+        Assert.Equal("WIN,SUM", RequestFactory.Scan(settings, false).OnlySeasons); Assert.Equal("WIN,SUM", RequestFactory.Terrain(settings).OnlySeasons);
+        settings.SeasonSpring = settings.SeasonAutumn = true;
+        Assert.Null(RequestFactory.Scan(settings, false).OnlySeasons);
+        // An unselected season leaves the saved request as it was before seasons could be chosen.
+        Assert.DoesNotContain("OnlySeasons", JsonSerializer.Serialize(RequestFactory.Terrain(settings)));
+        settings.SeasonWinter = settings.SeasonSpring = settings.SeasonSummer = settings.SeasonAutumn = false;
+        Assert.Contains("no season is selected", Assert.Throws<ArgumentException>(() => RequestFactory.Scan(settings, false)).Message);
+        Assert.Throws<ArgumentException>(() => RequestFactory.Terrain(settings));
+        settings.ResetOptions();
+        Assert.True(settings.SeasonWinter); Assert.False(settings.Seasons);
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
