@@ -3,7 +3,10 @@
 PenguLOD uses its own semantic version, independent of AnvilLOD’s game plugin version.
 Pre-release versions are marked alpha or beta until the supported workflows have broader validation.
 
-## [Unreleased]
+## [0.6.0-beta.2] - 2026-11-14
+
+A run no longer stops because one model or recipe cannot be generated, and Skyrim 1.6.1179
+(GOG) and Skyrim VR load orders are handled.
 
 Textures
 
@@ -20,9 +23,9 @@ Textures
 - An output folder that cannot be written stops the run with that error. It is no longer
   recorded as a failed item.
 - Grass meshes whose normal-map slot holds Bethesda's "no normal map" marker behind a
-  folder (`textures\<backspace>NOR`, as mesh tools that normalize texture paths write it)
-  are rendered. Only the bare marker was accepted, so these failed with "Expected a safe
-  Data-relative game path".
+  `textures` folder, as mesh tools that normalize texture paths write it, are rendered.
+  Only the bare marker was accepted, so these failed with "Expected a safe Data-relative
+  game path".
 
 Models
 
