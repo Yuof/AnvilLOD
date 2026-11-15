@@ -84,6 +84,20 @@ public class OutputFolderTests : IDisposable
     }
 
     [Fact]
+    public void A_folder_with_only_the_users_own_files_counts_as_empty()
+    {
+        // A stage's work folder starts with the settings file of the output it replaces. With "clear previous output" on, the
+        // run stopped there with "it has files in it that PenguLOD didn't write".
+        var dir = Make("work", "SKSE/Plugins/PenguLOD.ini", "meta.ini");
+        Assert.Null(OutputFolder.WhyNotToClear(dir));
+        Assert.True(OutputFolder.Prepare(dir, clear: true).Cleared);
+
+        var other = Make("mod", "SKSE/Plugins/PenguLOD.ini", "SKSE/Plugins/SomethingElse.dll");
+        Assert.Contains("didn't write", OutputFolder.WhyNotToClear(other));
+        Assert.True(File.Exists(Path.Combine(other, "SKSE", "Plugins", "SomethingElse.dll")));
+    }
+
+    [Fact]
     public void A_drive_root_is_refused()
     {
         Assert.NotNull(OutputFolder.WhyNotToClear(Path.GetPathRoot(_root)!));

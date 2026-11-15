@@ -13,9 +13,11 @@ public sealed record GrassBillboard(string Diffuse, string? Normal, float Width,
 /// <summary>
 /// Turns the grass of one cell (from the grass cache) into LOD geometry: per kept instance two crossed, upright,
 /// double-sided, alpha-tested quads (like DynDOLOD's flat 2x2 grass billboards, so they never vanish edge-on).
-/// Only a sample of the instances is kept: the ground is cut into bins and each occupied bin keeps ONE tuft (placed at
-/// the centre of the bin's grass, as wide as the grass in that bin covers, capped at the bin), so coverage is even and
-/// follows the real grass; random sampling left holes and clumps that read as big blocky patches.
+/// Only a sample of the instances is kept: the ground is cut into bins and each occupied bin keeps ONE tuft, as wide as the
+/// grass in that bin covers (capped at the bin), so coverage is even and follows the real grass; random sampling left holes
+/// and clumps that read as big blocky patches. All grass types of the cell share the bins, and the tuft is one of the bin's
+/// own instances, with its type and place: binning each type on its own and putting the tuft at the middle of the bin's
+/// grass piled every type's tuft onto the same grid points, which showed from afar as rows of dots on bare ground.
 /// Vertex colours darken the bottom to fake the shadow inside the grass.
 /// Each grass type becomes one part (one material), so a block gets one draw call per grass type.
 /// Coordinates are relative to <paramref name="origin"/> (the cell's south-west corner).
@@ -28,8 +30,12 @@ public static class GrassPatchBuilder
     /// <summary>A tuft may be this much wider than its bin (slight overlap hides the seams between bins).</summary>
     private const float BinOverlap = 1.15f;
     private const float MaxTaller = 1.6f;
-    /// <summary>Default vertex-colour brightness (share of white): darker at the roots, slightly dimmed at the top (LOD has no grass shading).</summary>
-    public const float DefaultTop = 0.85f, DefaultBottom = 0.5f;
+    /// <summary>
+    /// Default vertex-colour brightness (share of white): darker at the roots. LOD grass has none of the shading real grass gets from
+    /// its neighbours, so it must be tinted well below white: at 0.85 and 0.5 a field of it was four times as bright as the real grass
+    /// beside it and as bright as bare ground. DynDOLOD's defaults for ordinary grass are 0.40-0.45 and 0.20-0.225.
+    /// </summary>
+    public const float DefaultTop = 0.3f, DefaultBottom = 0.18f;
 
     /// <summary>Opaque grey vertex colour (RGBA little-endian) for a brightness between 0 and about 1.5 (values above 1 clamp to white).</summary>
     internal static uint Grey(float brightness)
@@ -52,10 +58,11 @@ public static class GrassPatchBuilder
 
         // Types that share textures (the atlas: all of them) go into the same parts, so a block needs few draw calls.
         var groups = new Dictionary<string, (LodMaterial Material, List<(GrassBillboard Bb, Tuft T)> Items)>(StringComparer.Ordinal);
-        foreach (var (bb, instances) in types)
+        var all = types.ToList();
+        foreach (var byType in StratifyTypes(all.Select(t => t.Instances).ToList(), origin, density).GroupBy(k => k.Type).OrderBy(g => g.Key))
         {
-            var kept = Stratify(instances, origin, density);
-            if (kept.Count == 0) continue;
+            var bb = all[byType.Key].Billboard;
+            var kept = byType.Select(k => k.Tuft).ToList();
             var key = bb.Diffuse + "|" + bb.Normal;
             if (!groups.TryGetValue(key, out var group))
             {
@@ -72,8 +79,8 @@ public static class GrassPatchBuilder
         }
 
         var parts = new List<LodMeshPart>();
-        foreach (var (material, all) in groups.Values)
-        foreach (var (tier, items) in SplitTiers(all, origin, tiers))
+        foreach (var (material, grouped) in groups.Values)
+        foreach (var (tier, items) in SplitTiers(grouped, origin, tiers))
         {
             // Split so no part exceeds 65,535 vertices (8 per tuft: two crossed quads).
             const int MaxQuads = 8_000;
@@ -169,19 +176,26 @@ public static class GrassPatchBuilder
         return Spread(x) | Spread(y) << 1;
     }
 
-    /// <summary>
-    /// Picks the tufts for one grass type in one cell: bins of the smallest candidate size that yields no more tufts
-    /// than <c>density</c> x instances, one tuft per occupied bin at the centroid of the bin's instances (yaw from the
-    /// instance nearest that centroid). Deterministic, so re-runs keep the same tufts.
-    /// </summary>
+    /// <summary>The tufts for one grass type on its own (see <see cref="StratifyTypes"/>).</summary>
     internal static List<Tuft> Stratify(IReadOnlyList<GrassInstance> instances, Vector3 origin, float density)
+        => StratifyTypes([instances], origin, density).Select(k => k.Tuft).ToList();
+
+    /// <summary>
+    /// Picks the tufts for the grass of one cell: bins of the smallest candidate size that yields no more tufts than
+    /// <c>density</c> x instances (all types together), and from each occupied bin one of its instances, with its type, place,
+    /// size and direction: the one nearest a point chosen for the bin within <see cref="Jitter"/> of its middle. The point comes
+    /// from a hash of the bin, so the tufts do not line up in rows, stay about a bin apart, a type is kept about as often as it
+    /// occurs there, and re-runs keep the same tufts.
+    /// </summary>
+    internal static List<(int Type, Tuft Tuft)> StratifyTypes(IReadOnlyList<IReadOnlyList<GrassInstance>> types, Vector3 origin, float density)
     {
-        var result = new List<Tuft>();
-        int n = instances.Count;
+        var result = new List<(int, Tuft)>();
+        int n = types.Sum(t => t.Count);
         if (n == 0) return result;
         if (density >= 1f)
         {
-            foreach (var g in instances) result.Add(new Tuft(g.Position, g.Scale, g.Yaw, 1, 0f));
+            for (int t = 0; t < types.Count; t++)
+                foreach (var g in types[t]) result.Add((t, new Tuft(g.Position, g.Scale, g.Yaw, 1, 0f)));
             return result;
         }
 
@@ -191,38 +205,51 @@ public static class GrassPatchBuilder
         while (lo < hi)
         {
             int mid = (lo + hi) / 2;
-            if (OccupiedBins(instances, origin, Spacings[mid]) <= target) hi = mid; else lo = mid + 1;
+            if (OccupiedBins(types, origin, Spacings[mid]) <= target) hi = mid; else lo = mid + 1;
         }
         float spacing = Spacings[lo];
 
         var bins = new Dictionary<long, Bin>();
-        foreach (var g in instances)
-        {
-            ref var b = ref System.Runtime.InteropServices.CollectionsMarshal.GetValueRefOrAddDefault(bins, Key(g.Position, origin, spacing), out _);
-            b.Sum += g.Position; b.Scale += g.Scale; b.Count++;
-        }
-        var best = new Dictionary<long, (float Dist, float Yaw)>(bins.Count);
-        foreach (var g in instances)
-        {
-            long key = Key(g.Position, origin, spacing);
-            var c = bins[key].Sum / bins[key].Count;
-            float d = Vector2.DistanceSquared(new Vector2(g.Position.X, g.Position.Y), new Vector2(c.X, c.Y));
-            if (!best.TryGetValue(key, out var cur) || d < cur.Dist) best[key] = (d, g.Yaw);
-        }
-        foreach (var (key, b) in bins.OrderBy(kv => kv.Key))
-            result.Add(new Tuft(b.Sum / b.Count, b.Scale / b.Count, best[key].Yaw, b.Count, spacing));
+        for (int t = 0; t < types.Count; t++)
+            foreach (var g in types[t])
+            {
+                long key = Key(g.Position, origin, spacing);
+                ref var b = ref System.Runtime.InteropServices.CollectionsMarshal.GetValueRefOrAddDefault(bins, key, out bool known);
+                if (!known) b.Aim = Aim(key, origin, spacing);
+                float distance = Vector2.DistanceSquared(new Vector2(g.Position.X, g.Position.Y), b.Aim);
+                if (b.Count == 0 || distance < b.Distance) { b.Distance = distance; b.Type = t; b.Pick = g; }
+                b.Count++;
+            }
+        foreach (var (_, b) in bins.OrderBy(kv => kv.Key))
+            result.Add((b.Type, new Tuft(b.Pick.Position, b.Pick.Scale, b.Pick.Yaw, b.Count, spacing)));
         return result;
     }
 
-    private struct Bin { public Vector3 Sum; public float Scale; public int Count; }
+    /// <summary>How far from the middle of its bin a tuft may be aimed, as a share of the bin's size, each way.</summary>
+    private const float Jitter = 0.3f;
+
+    /// <summary>The point a bin's tuft is aimed at: its middle, moved by up to <see cref="Jitter"/> of its size each way (SplitMix64 of the bin).</summary>
+    private static Vector2 Aim(long key, Vector3 origin, float spacing)
+    {
+        ulong x = (ulong)key + 0x9E3779B97F4A7C15UL;
+        x = (x ^ x >> 30) * 0xBF58476D1CE4E5B9UL;
+        x = (x ^ x >> 27) * 0x94D049BB133111EBUL;
+        x ^= x >> 31;
+        float jx = ((x & 0xFFFF) / 65535f * 2 - 1) * Jitter, jy = ((x >> 16 & 0xFFFF) / 65535f * 2 - 1) * Jitter;
+        long ix = (key >> 32) - 4096, iy = (long)(uint)key - 4096;
+        return new Vector2(origin.X + (ix + 0.5f + jx) * spacing, origin.Y + (iy + 0.5f + jy) * spacing);
+    }
+
+    private struct Bin { public Vector2 Aim; public float Distance; public int Type; public GrassInstance Pick; public int Count; }
 
     private static long Key(Vector3 p, Vector3 origin, float spacing)
         => ((long)MathF.Floor((p.X - origin.X) / spacing) + 4096) << 32 | (uint)((long)MathF.Floor((p.Y - origin.Y) / spacing) + 4096);
 
-    private static int OccupiedBins(IReadOnlyList<GrassInstance> instances, Vector3 origin, float spacing)
+    private static int OccupiedBins(IReadOnlyList<IReadOnlyList<GrassInstance>> types, Vector3 origin, float spacing)
     {
         var seen = new HashSet<long>();
-        foreach (var g in instances) seen.Add(Key(g.Position, origin, spacing));
+        foreach (var instances in types)
+            foreach (var g in instances) seen.Add(Key(g.Position, origin, spacing));
         return seen.Count;
     }
 }

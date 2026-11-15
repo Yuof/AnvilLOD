@@ -11,7 +11,7 @@ namespace PenguLOD.Plugins;
 
 public sealed record TextureGenerationRequest(GameContextOptions Game, string OutputFolder, string? DynDolodFolder = null,
     bool Stitched = true, bool Trees = true, bool Grass = false, bool RenderedObjects = false,
-    int BaseSize = 256, int BillboardMaxSize = 512, float UnitsPerPixel = 12, float Brightness = 1,
+    int BaseSize = 256, int BillboardMaxSize = 512, float UnitsPerPixel = 6, float Brightness = 1,
     float MinTreeHeight = 256, float MinGrassHeight = 16, string ModelFilter = "", bool TreeTrunks = false, Authoring.MaterialBakeSettings? Materials = null,
     Authoring.BillboardSettings? Billboards = null, IReadOnlyList<string>? ResourcePacks = null, float GrassUnitsPerPixel = 2,
     float TrunkUnitsPerPixel = 4);

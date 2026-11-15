@@ -149,7 +149,7 @@ Keep defaults for the first comparison, then adjust one control at a time.
 | Complex grass detection threshold | Sensitivity used by Auto layout detection. Default `0.1`; normally leave it alone and use the layout override for a known mismatch. |
 | Stitch base size | Base texture resolution for recipes and rendered objects. Default `256`; recipes can combine it into a larger sheet. Higher values use more texture memory. |
 | Maximum billboard size | Caps the width and height of rendered billboards. Default `512`. Higher values help large trees but use more texture memory. |
-| Tree world units per pixel | Detail per pixel of tree billboards before the size cap. Default `12`; lower values produce sharper, larger textures. |
+| Tree world units per pixel | Detail per pixel of tree billboards before the size cap. Default `6`, which gives about the image sizes TexGen makes; lower values produce sharper, larger textures. |
 | Trunk world units per pixel | The same for hybrid tree trunk textures. Default `4`, which gives the image sizes TexGen makes. |
 | Grass world units per pixel | The same for grass billboards. Default `2`, which gives a typical tuft a 64 x 32 image; grass is around 100 units wide, so it needs a much lower value than trees. |
 | Brightness multiplier | Overall generated-texture brightness. Default `1`; below `1` darkens, above `1` brightens. |
@@ -349,8 +349,8 @@ output; original source files remain unchanged.
 | Grass billboard LOD | Builds distant grass from a cache and grass billboards. On by default; both inputs must be available. |
 | Grass density | Fraction of cached placements kept for billboard LOD. Default `0.08` means 8%; Balanced uses `0.05`. Lower reduces distant grass density and cost. |
 | Grass size | Scale of retained billboard tufts. Default `1`; larger tufts cover more ground but can overlap more. |
-| Grass tip brightness | Brightness at tuft tips. Default `0.85`; lower darkens the upper grass. |
-| Grass root brightness | Brightness at tuft bases. Default `0.5`; lower darkens the roots. |
+| Grass tip brightness | Brightness at tuft tips. Default `0.3`; lower darkens the upper grass. Distant grass has none of the shading real grass gets from its neighbours, so values near `1` look far too bright. |
+| Grass root brightness | Brightness at tuft bases. Default `0.18`; lower darkens the roots. |
 | Community Shaders grass | Generates simpler grass meshes when the Grass Optimizations feature is installed. On by default. This is separate from billboard grass and the game's shader settings. |
 
 Changing Grass density does not rebuild or thin the source cache. It only changes

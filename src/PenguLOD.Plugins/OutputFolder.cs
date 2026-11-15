@@ -116,6 +116,10 @@ public static class OutputFolder
             return $"it looks like a game, mod manager or mods folder (it contains \"{marker}\").";
         if (names.All(n => Kept.Contains(n, StringComparer.OrdinalIgnoreCase))) return null; // empty (or only MO2's meta.ini)
         if (OwnMarkers.Any(m => names.Contains(m, StringComparer.OrdinalIgnoreCase))) return null;
+        // Nothing but the files a generation keeps for the user (the game plugin's settings): as good as empty. A stage's work
+        // folder starts like that when the output it replaces has them, and it must pass this check too.
+        if (Directory.EnumerateFiles(full, "*", SearchOption.AllDirectories)
+            .All(f => PenguLOD.Core.Pipeline.UserOwnedFiles.Contains(Path.GetRelativePath(full, f)))) return null;
         return "it has files in it that PenguLOD didn't write.";
     }
 

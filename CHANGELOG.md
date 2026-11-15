@@ -39,12 +39,33 @@ Textures
   the contrast they lacked. Grass keeps its light, which already matched. On a 2,044-plugin load order the
   brightness and contrast of trunks and tree billboards are within 2% of TexGen's output,
   and 846 of 880 trunk images have the height of TexGen's.
+- Tree billboards are sharper by default: **Tree world units per pixel** now defaults to
+  `6` instead of `12`. At 12 a tree billboard had about a third of the pixels of TexGen's;
+  at 6 it matches or exceeds TexGen for 138 of 160 compared views. A saved value is kept,
+  so set it to 6 on the Textures page to get the new default in an existing setup.
 - New settings on the Textures page: **Trunk world units per pixel** (default `4`), and
   under **Material calibration** an ambient and a direct light value each for trees, grass
   and trunks. They replace **Ambient light** and **Directional light**; saved values of
   those two are ignored. Run textures and then object LOD again.
 - Trunk textures that object LOD makes itself for native hybrid trees and tree billboards
   it makes for trees without one use the same light.
+
+Grass LOD
+
+- Grass LOD no longer stands in rows of dots on bare ground. Each grass type was thinned
+  on its own over the same grid, and its tuft was put at the middle of the grass in its
+  square, so the tufts of every type in a square landed on nearly the same spot: in a
+  dense cell near Whiterun 46% of the tufts stood within 12 units of another, 96 units
+  from the next pile. All grass types of a cell now share one grid, which makes the
+  squares about a third the size at the same tuft count, and each tuft is one of the real
+  grass instances near a random point in its square, at its own size. Tufts are no longer
+  enlarged to fill large squares. Generate object LOD again; every grass block is rebuilt.
+
+- Grass LOD is darker by default: **Grass tip brightness** `0.3` and **Grass root
+  brightness** `0.18`, instead of `0.85` and `0.5`. At the old values a field of grass LOD
+  measured four times as bright as the real grass beside it and as bright as bare ground.
+  The new values were checked in game on one load order with complex grass; adjust them if
+  your grass or lighting differs. Values you have set yourself are kept.
 
 Seasonal LOD
 
@@ -66,6 +87,13 @@ Output
   could be missing in game. Both are now written in lower case. Every stage also merges
   such folders before it records its output, which repairs an existing output on the next
   run, and **Verify output set** reports them. Windows output was not affected.
+
+- Generating object LOD again into the same output folder no longer stops with "This
+  folder is not an empty or recognized PenguLOD output: it has files in it that PenguLOD
+  didn't write". It happened with **Clear previous PenguLOD output before generation** on
+  when the output had the game plugin's settings file, `SKSE/Plugins/PenguLOD.ini`, which
+  every object LOD run with dynamic LOD writes: the file was carried into the new run's
+  work folder, which then failed the check for an empty folder.
 
 Reports
 
