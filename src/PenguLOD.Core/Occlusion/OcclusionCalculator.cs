@@ -281,8 +281,9 @@ public sealed class OcclusionCalculator
 
     /// <summary>
     /// The cell's MHDT: a base height (a multiple of 128 at or below the lowest point) and a 32 x 32 grid of steps of 128 above it, stored
-    /// with X as the major index (<c>bytes[x * 32 + y]</c>). Rounded up, so the engine's "player above the cell's highest point" test
-    /// never ignores the occlusion data too early.
+    /// with X as the major index (<c>bytes[x * 32 + y]</c>). Built from the bare landscape only, as AnvilLOD 0.2.75 does: objects and
+    /// trees added made a cell's "highest point" stand far above the ground. Occlusion.esp uses it only for a cell that has no MHDT
+    /// of its own. Rounded up to a step.
     /// </summary>
     public static (float Offset, byte[] Steps) BuildMaxHeight(OcclusionGrid grid, int cellX, int cellY)
     {
@@ -291,7 +292,7 @@ public sealed class OcclusionCalculator
         for (int j = 0; j < 32; j++)
             for (int i = 0; i < 32; i++)
             {
-                float h = grid.Top[(gy + j) * grid.Width + gx + i];
+                float h = grid.Terrain[(gy + j) * grid.Width + gx + i];
                 if (h > OcclusionGrid.Unknown && h < min) min = h;
             }
         if (min == float.MaxValue) return (0f, new byte[1024]);
@@ -300,7 +301,7 @@ public sealed class OcclusionCalculator
         for (int i = 0; i < 32; i++)
             for (int j = 0; j < 32; j++)
             {
-                float h = grid.Top[(gy + j) * grid.Width + gx + i];
+                float h = grid.Terrain[(gy + j) * grid.Width + gx + i];
                 float s = h > OcclusionGrid.Unknown ? MathF.Ceiling((h - offset) / OcclusionGrid.SampleSize) : 0f;
                 steps[i * 32 + j] = (byte)Math.Clamp(s, 0f, 255f);
             }

@@ -2,6 +2,11 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
+## [Unreleased]
+
+- Fixed buildings and other statics without object bounds disappearing in loaded cells while `Occlusion.esp` is active. `Occlusion.esp` gives them their model's bounds. Regenerate it.
+- Changed `Occlusion.esp` to keep each cell's own max-height data. Cells without any get the bare landscape.
+
 ## [0.6.0-beta.5] - 2026-11-16
 
 - Changed **Pack object texture atlases** to cut surfaces at texture tile edges, so surfaces that a texture repeats over are packed too. This adds triangles to those surfaces.

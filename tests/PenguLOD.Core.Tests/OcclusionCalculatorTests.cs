@@ -151,14 +151,14 @@ public sealed class OcclusionCalculatorTests
     }
 
     [Fact]
-    public void Max_height_data_is_a_base_and_steps_of_128_rounded_up()
+    public void Max_height_data_is_the_bare_landscape_as_a_base_and_steps_of_128_rounded_up()
     {
         var g = World(5000f);
         g.RaiseTop(0, 0, 100, 100, 6000f);                          // an object on the first sample of cell (0, 0)
         var (offset, steps) = OcclusionCalculator.BuildMaxHeight(g, 0, 0);
         Assert.Equal(4992f, offset);                                // 39 * 128, the multiple of 128 at or below 5000
         Assert.Equal(1, steps[31 * 32 + 31]);                       // ground at 5000: (5000 - 4992) / 128 rounds up to 1
-        Assert.Equal(8, steps[0]);                                  // (6000 - 4992) / 128 = 7.9 -> 8, at x = 0, y = 0
+        Assert.Equal(1, steps[0]);                                  // the object is not in it: the bare landscape only, as in the base game and xLODGen
         Assert.Equal(1024, steps.Length);
     }
 

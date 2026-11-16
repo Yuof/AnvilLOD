@@ -13,14 +13,15 @@ namespace PenguLOD.Plugins;
 /// <summary>
 /// Makes <c>Occlusion.esp</c> itself: for every big worldspace, a height grid (landscape, water, and the tops of the objects and trees that
 /// are in LOD) goes to <see cref="OcclusionCalculator"/>, and the result is written as the TVDT and MHDT of the worldspace's exterior cells
-/// (CELL overrides only, ESL-flagged, load it last). It does what xLODGen's and DynDOLOD's occlusion run does, from data PenguLOD already has.
+/// (CELL overrides, plus bounds for statics that have none, see <see cref="BoundsFixStage"/>; ESL-flagged, load it last). It does what xLODGen's and DynDOLOD's occlusion run does, from data PenguLOD already has.
 /// The bits are numbered for each worldspace's own LOD grid (see <see cref="TvdtData"/>): the game drops object LOD under any node it reads as hidden.
 /// </summary>
 public static class OcclusionStage
 {
     public const string FileName = "Occlusion.esp";
 
-    public sealed record Result(string? Path, int Worldspaces, int Cells, int Objects, int Trees, TimeSpan Elapsed, IReadOnlyList<string> Skipped);
+    public sealed record Result(string? Path, int Worldspaces, int Cells, int Objects, int Trees, TimeSpan Elapsed, IReadOnlyList<string> Skipped,
+        BoundsFixStage.Result? Bounds = null);
 
     /// <summary>Worldspaces whose LOD grid is smaller than this (cells per side) are left alone, like xLODGen does.</summary>
     public const int MinStride = 128;
@@ -29,7 +30,7 @@ public static class OcclusionStage
 
     public static Result Run(GameContext game, TerrainHeights terrain, IReadOnlyDictionary<string, LodGrid> grids, IReadOnlyList<LodReference> refs,
         IReadOnlyList<TreeReference>? trees, IAssetSource assets, string folder, OcclusionSettings settings, IProgress<string>? progress,
-        Action<string> warn, CancellationToken ct)
+        Action<string> warn, CancellationToken ct, IReadOnlySet<FormKey>? outdoorBases = null)
     {
         var sw = Stopwatch.StartNew();
         var skipped = new List<string>();
@@ -109,16 +110,33 @@ public static class OcclusionStage
                 // cell (0, 0) and would get that cell's data, and the plugin would override a record it has no reason to touch.
                 if ((ctx.Record.MajorRecordFlagsRaw & PersistentFlag) != 0 || wsCtx.Record.TopCell?.FormKey == ctx.Record.FormKey) continue;
                 var cell = ctx.GetOrAddAsOverride(mod);
-                var (offset, steps) = OcclusionCalculator.BuildMaxHeight(heights, g.Point.X, g.Point.Y);
-                var map = new Array2d<byte>(new byte[32, 32]);
-                for (int i = 0; i < 32; i++)
-                    for (int j = 0; j < 32; j++) map[j, i] = steps[i * 32 + j];       // Mutagen: [column, row]; the file's rows run along X
-                cell.MaxHeightData = new CellMaxHeightData { Offset = offset, HeightMap = map };
+                // A cell keeps the max-height data it has, as DynDOLOD's Occlusion.esp does. The base game's is not the bare landscape: in
+                // Skyrim.esm it stands on average 1,366 units above it (rock and mountain statics are in it), and objects in loaded cells
+                // are culled against it, so a lower surface computed here is not known to be safe. A cell without any gets the bare landscape.
+                if (cell.MaxHeightData is null)
+                {
+                    var (offset, steps) = OcclusionCalculator.BuildMaxHeight(heights, g.Point.X, g.Point.Y);
+                    var map = new Array2d<byte>(new byte[32, 32]);
+                    for (int i = 0; i < 32; i++)
+                        for (int j = 0; j < 32; j++) map[j, i] = steps[i * 32 + j];   // Mutagen: [column, row]; the file's rows run along X
+                    cell.MaxHeightData = new CellMaxHeightData { Offset = offset, HeightMap = map };
+                }
                 cell.OcclusionData = tvdt.ToBytes();
                 written++;
             }
             progress?.Report($"Occlusion {ws}: {written:N0} cells written");
             worlds++; cellsTotal += written; objectsTotal += objects; treesTotal += treeCount;
+        }
+
+        // Statics with empty bounds are culled by the occlusion data in loaded cells (Base Object Swapper replacements, hand-made statics).
+        BoundsFixStage.Result? bounds = null;
+        if (cellsTotal > 0)
+        {
+            bounds = BoundsFixStage.Run(game, assets, mod, outdoorBases, progress, ct);
+            if (bounds.OverMasterLimit > 0)
+                warn($"Occlusion: {bounds.OverMasterLimit:N0} statics with empty bounds were not given bounds, because their plugins would take {FileName} over "
+                     + $"{BoundsFixStage.MaxMasters} masters. They may not show in loaded cells while {FileName} is active. Plugins: {string.Join(", ", bounds.LeftOutPlugins!.Take(12))}"
+                     + (bounds.LeftOutPlugins!.Count > 12 ? $" and {bounds.LeftOutPlugins.Count - 12} more." : "."));
         }
 
         if (cellsTotal == 0)
@@ -135,7 +153,7 @@ public static class OcclusionStage
             MastersListOrdering = new MastersListOrderingByLoadOrder(order),
             RecordCount = RecordCountOption.Iterate,
         });
-        return new Result(path, worlds, cellsTotal, objectsTotal, treesTotal, sw.Elapsed, skipped);
+        return new Result(path, worlds, cellsTotal, objectsTotal, treesTotal, sw.Elapsed, skipped, bounds);
     }
 
     /// <summary>A LOD mesh's footprint radius and top (local units), cached by path. Null when it can't be read.</summary>

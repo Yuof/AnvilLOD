@@ -366,7 +366,8 @@ public static class ScanPipeline
         // Validate and prepare grass inputs before the potentially long occlusion pass.
         if (req.Generate && req.Occlusion is not null && terrain is not null && (req.OcclusionFolder ?? req.OutputFolder) is { } occlusionFolder)
         {
-            var occ = OcclusionStage.Run(game, terrain.Heights, scan.Grids, scan.References, scan.Trees, assets, occlusionFolder, req.Occlusion, progress, Warn, ct);
+            var occ = OcclusionStage.Run(game, terrain.Heights, scan.Grids, scan.References, scan.Trees, assets, occlusionFolder, req.Occlusion, progress, Warn, ct,
+                scanner.OutdoorBases);
             if (occ.Path is not null)
                 progress?.Report($"Occlusion.esp: {occ.Cells:N0} cells of {occ.Worldspaces} worldspace(s) in {occ.Elapsed.TotalSeconds:F0}s (clearance {req.Occlusion.Clearance:0}), written to {occ.Path}. Put it last in your plugin order.");
             if (occ.Skipped.Count > 0) progress?.Report($"Occlusion: left out (too small, a child world or no landscape): {string.Join(", ", occ.Skipped)}");
