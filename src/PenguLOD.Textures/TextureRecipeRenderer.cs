@@ -22,15 +22,17 @@ public sealed class TextureRecipeRenderer
     private readonly Dictionary<string, byte[]> _built = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _saved = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<string, byte[]?>? _readGenerated;
+    private readonly Func<string, TextureImage, TextureImage>? _prepareSource;
     private readonly HashSet<string> _active = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _normalOwners = new(StringComparer.OrdinalIgnoreCase);
     public IReadOnlyDictionary<string, TextureRecipePlan> Plans => _plans;
 
     public TextureRecipeRenderer(TextureRecipeSet recipes, Func<string, byte[]?> read, Action<RecipeRenderedTexture> write,
         Action<string>? warn = null, IReadOnlyDictionary<string, RecipeTextureReplacement>? replacements = null,
-        Func<string, byte[]?>? readGenerated = null)
+        Func<string, byte[]?>? readGenerated = null, Func<string, TextureImage, TextureImage>? prepareSource = null)
     {
         _recipes = recipes; _plans = recipes.Compile(warn); _read = read; _write = write; _warn = warn ?? (_ => { }); _readGenerated = readGenerated;
+        _prepareSource = prepareSource;
         _replacements = replacements ?? new Dictionary<string, RecipeTextureReplacement>();
         foreach (var p in _plans.Values.Where(p => p.Tiles.Count > 0)) _normalOwners.TryAdd(Normal(p.Destination), p.Destination);
     }
@@ -69,7 +71,10 @@ public sealed class TextureRecipeRenderer
                 foreach (var tile in plan.Tiles)
                 {
                     var source = Resolve(tile.Source, destination); inputs.Add(source.Path);
-                    TextureImages.Blit(image, TextureImages.Decode(source.Bytes), tile, _recipes.BaseSize, false, _recipes.Brightness);
+                    var colour = TextureImages.Decode(source.Bytes);
+                    // The colour texture of a tile, by the path it was read from, before it is placed (a PBR albedo is converted here).
+                    if (_prepareSource is not null) colour = _prepareSource(source.Path, colour);
+                    TextureImages.Blit(image, colour, tile, _recipes.BaseSize, false, _recipes.Brightness);
                     // Explicit normal-only TXST overrides take precedence over the diffuse filename convention.
                     string normalPath = source.NormalOverride ?? Normal(source.Path);
                     var normalBytes = source.NormalOverride is not null ? ReadInput(normalPath, Normal(destination))

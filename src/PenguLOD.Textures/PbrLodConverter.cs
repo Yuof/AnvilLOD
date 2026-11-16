@@ -31,6 +31,20 @@ public static class PbrLodConverter
         var aligned = LodTextureEncoding.BlockAligned(new(rgba, w, h), LodTextureEncoding.Channels.Color);
         (rgba, w, h) = (aligned.Pixels, aligned.Width, aligned.Height);
 
+        ApplyCurve(rgba, brightness);
+
+        var mips = MipChain(rgba, w, h).Select(m => Bc7Encoder.EncodeImage(m.Rgba, m.W, m.H)).ToList();
+        using var ms = new MemoryStream();
+        DdsFile.WriteBc7(ms, w, h, mips);
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// The colour change alone, in place on RGBA pixels: the power curve and the base scale, times <paramref name="brightness"/>.
+    /// Alpha is left as it is. Used where a PBR albedo becomes part of another texture, such as a tile of a stitched LOD atlas.
+    /// </summary>
+    public static void ApplyCurve(byte[] rgba, float brightness)
+    {
         var lut = new byte[256];
         for (int i = 0; i < 256; i++)
             lut[i] = (byte)Math.Clamp(MathF.Round(255f * MathF.Pow(i / 255f, Gamma) * BaseScale * brightness), 0, 255);
@@ -40,11 +54,6 @@ public static class PbrLodConverter
             rgba[i + 1] = lut[rgba[i + 1]];
             rgba[i + 2] = lut[rgba[i + 2]];
         }
-
-        var mips = MipChain(rgba, w, h).Select(m => Bc7Encoder.EncodeImage(m.Rgba, m.W, m.H)).ToList();
-        using var ms = new MemoryStream();
-        DdsFile.WriteBc7(ms, w, h, mips);
-        return ms.ToArray();
     }
 
     /// <summary>
