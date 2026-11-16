@@ -17,6 +17,16 @@ public sealed class StagedOutput : IDisposable
     public bool Exchanged { get; private set; }
     /// <summary>Tests force the two-rename fallback with this.</summary>
     internal static bool DisableExchange;
+
+    /// <summary>
+    /// How long a publication move is tried again when the folder is in use. On Windows a virus scanner or file indexer often holds a
+    /// folder for a while right after thousands of files were written into it; the move is refused then and works a little later.
+    /// </summary>
+    internal static TimeSpan MoveRetry = TimeSpan.FromSeconds(120);
+    /// <summary>Stands in for <see cref="Directory.Move"/> on the calling thread (tests).</summary>
+    [ThreadStatic] internal static Action<string, string>? MoveOverride;
+    /// <summary>In a build workspace: the build finished and could not be published. The sweep of unfinished builds leaves it alone.</summary>
+    public const string UnpublishedMarker = "UNPUBLISHED.txt";
     private readonly string _workspace;
     private readonly Dictionary<string, (long Length, long Modified)> _original;
     private readonly bool _existed;
@@ -148,32 +158,91 @@ public sealed class StagedOutput : IDisposable
             }
             else
             {
+                try { Move(Output, previous, progress, cancellable: true); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { throw Unpublished(e); }
                 PreviousOutput = previous;
-                Directory.Move(Output, PreviousOutput);
-                try { Directory.Move(Payload, Output); }
+                try { Move(Payload, Output, progress, cancellable: false); }
                 catch (Exception publication)
                 {
-                    try { Directory.Move(PreviousOutput, Output); PreviousOutput = null; }
+                    try { Move(PreviousOutput, Output, progress, cancellable: false); PreviousOutput = null; }
                     catch (Exception rollback)
                     {
                         _preserve = true;
                         throw new IOException($"Publication and rollback failed. Previous output: {PreviousOutput}; new output: {Payload}. {rollback.Message}", publication);
                     }
+                    if (publication is IOException or UnauthorizedAccessException) throw Unpublished(publication);
                     throw;
                 }
             }
         }
-        else Directory.Move(Payload, Output);
+        else
+        {
+            try { Move(Payload, Output, progress, cancellable: true); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { throw Unpublished(e); }
+        }
         progress?.Report("Published output: " + Output);
         OutputRetention.Prune(Output, _keepPrevious, progress);
         if (PreviousOutput is not null && !Directory.Exists(PreviousOutput)) PreviousOutput = null;
         if (PreviousOutput is not null) progress?.Report("Previous output retained: " + PreviousOutput);
     }
 
+    /// <summary>
+    /// Moves a folder, trying again for up to <see cref="MoveRetry"/> while another program holds it. A move that cannot succeed by
+    /// waiting (the source is gone, the destination exists) fails at once.
+    /// </summary>
+    /// <param name="cancellable">False once the old output has been moved away: the sequence must then finish or roll back.</param>
+    private void Move(string from, string to, IProgress<string>? progress, bool cancellable)
+    {
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        var delay = TimeSpan.FromMilliseconds(250);
+        bool told = false;
+        while (true)
+        {
+            try { (MoveOverride ?? Directory.Move)(from, to); return; }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                if (!Directory.Exists(from) || Directory.Exists(to) || waited.Elapsed + delay > MoveRetry) throw;
+                if (!told)
+                {
+                    told = true;
+                    progress?.Report($"Publication: {from} cannot be moved yet ({e.Message}). Another program, often a virus scanner or a file indexer, "
+                                     + $"is using it. Trying again for up to {MoveRetry.TotalSeconds:0} seconds.");
+                }
+                if (cancellable) { if (_ct.WaitHandle.WaitOne(delay)) _ct.ThrowIfCancellationRequested(); }
+                else Thread.Sleep(delay);
+                delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 5000));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The build is finished and complete, and the destination is as it was; only the move into place was refused. The build is kept,
+    /// marked so that the next run does not sweep it away, and the error says where it is.
+    /// </summary>
+    private IOException Unpublished(Exception cause)
+    {
+        _preserve = true;
+        string how = _existed
+            ? $"move the old output {Output} away and move {Payload} to that place"
+            : $"move {Payload} to {Output}";
+        try
+        {
+            File.WriteAllText(Path.Combine(_workspace, UnpublishedMarker),
+                $"This build finished but could not be moved into place: {cause.Message}{Environment.NewLine}To use it, {how}.{Environment.NewLine}"
+                + "Delete this folder when it is no longer needed.");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { /* the error below says the same */ }
+        return new IOException($"The build finished but could not be published: {cause.Message} Another program is using the folder. "
+            + $"The finished build is kept. To use it, close programs that may be using these folders, then {how}; or generate again.", cause);
+    }
+
     private static IEnumerable<KeyValuePair<string, (long, long)>> Generated(Dictionary<string, (long Length, long Modified)> inventory) =>
         inventory.Where(k => !UserOwnedFiles.Contains(k.Key)).OrderBy(k => k.Key, StringComparer.Ordinal);
 
-    /// <summary>Removes build workspaces of this output left by a process that stopped. Callers hold the output lock.</summary>
+    /// <summary>
+    /// Removes build workspaces of this output left by a process that stopped. A finished build that could not be published is left
+    /// and reported. Callers hold the output lock.
+    /// </summary>
     private static void SweepOrphans(string output, IProgress<string>? progress)
     {
         string parent = Path.GetDirectoryName(output)!;
@@ -181,6 +250,12 @@ public sealed class StagedOutput : IDisposable
         foreach (var dir in Directory.EnumerateDirectories(parent, WorkspacePrefix(output) + "*"))
         {
             if (new DirectoryInfo(dir).LinkTarget is not null) continue;
+            if (File.Exists(Path.Combine(dir, UnpublishedMarker)))
+            {
+                progress?.Report($"A finished build that could not be published is kept in {Path.Combine(dir, "output")}. Move it into place to use it, "
+                                 + "or delete it (PenguLOD clean --input <output> --apply removes it).");
+                continue;
+            }
             try { Directory.Delete(dir, recursive: true); progress?.Report("Removed an unfinished build workspace: " + dir); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             { progress?.Report("Could not remove unfinished build workspace " + dir + ": " + e.Message); }

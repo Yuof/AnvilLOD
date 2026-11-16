@@ -87,6 +87,7 @@ public static partial class TextureGeneration
         progress?.Report($"Texture generation: {game.PluginsLoaded:N0} plugins, {assets.ArchiveCount:N0} archives.");
         var resources = ResourceCatalog.Load(game, assets, request.DynDolodFolder, request.ResourcePacks, ct);
         var rules = ReadRules(game, resources);
+        foreach (string skipped in rules.Skipped) Warn("Texture rule skipped: " + skipped);
         progress?.Report($"Resources: {resources.Report.Rules} rules, {resources.Report.Configs} configurations, {resources.Report.RenderModels} render models.");
         if (request.Stitched && rules.Program.Entries.Count == 0)
             throw new InvalidOperationException("No texture stitching recipes match this load order. Add a resource pack with recipes for the enabled plugins, or turn off stitched textures.");
@@ -225,12 +226,21 @@ public static partial class TextureGeneration
         return keep;
     }
 
-    internal sealed record Recipes(TextureRecipeSet Program, List<string> Billboards);
+    /// <param name="Skipped">Rules that could not be read, one message each, with the textures left out because of them.</param>
+    internal sealed record Recipes(TextureRecipeSet Program, List<string> Billboards, List<string> Skipped);
+
+    /// <summary>
+    /// Reads the texture rules of the plugins in the load order. A rule that cannot be read does not stop the run: rule files come
+    /// from many authors, and DynDOLOD's own include values this reader does not handle (a negative colour factor in the Majestic
+    /// Mountains file). The texture such a rule builds is left out as a whole, every rule for it, because an atlas with a tile
+    /// missing is wrong; the load order's own copy of that texture is used where there is one. Each case is in <c>Skipped</c>.
+    /// </summary>
     internal static Recipes ReadRules(GameContext game, ResourceCatalog resources)
     {
         var sources = resources.TextFiles("configs");
         var tokens = game.LoadOrder.ListedOrder.Select((p, i) => (Token: TextureRecipe.PluginToken(p.ModKey.FileName.String), Index: i)).ToDictionary(p => p.Token, p => p.Index, StringComparer.OrdinalIgnoreCase);
-        var result = new Recipes(new(), []);
+        var result = new Recipes(new(), [], []);
+        var dropped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);     // destinations with a rule that could not be read
         var matched = sources.Select(s => (s.Key, s.Value, Match: System.Text.RegularExpressions.Regex.Match(s.Key,
             @"^DynDOLOD_(?:SSE|TES5VR)_TexGen_(copy|alpha|noalpha|Billboards)_(.+)\.txt$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)))
             .Where(s => s.Match.Success && tokens.ContainsKey(s.Match.Groups[2].Value))
@@ -255,10 +265,29 @@ public static partial class TextureGeneration
                     }
                 }
                 catch (Exception ex) when (ex is FormatException or ArgumentException or OverflowException)
-                { throw new InvalidDataException($"{name}, rule {row}: {ex.Message}", ex); }
+                {
+                    string? destination = kind == "billboards" ? null : Destination(line, kind);
+                    if (destination is not null) dropped.Add(destination);
+                    result.Skipped.Add($"{name}, rule {row}: {ex.Message}"
+                        + (destination is null ? " The rule is skipped." : $" {destination} is not generated from these rules."));
+                }
             }
         }
+        if (dropped.Count > 0)
+            result.Program.Entries.RemoveAll(e => dropped.Contains((e.Tile?.Destination ?? e.Conversion?.Destination ?? e.Copy?.Destination)!));
         return result;
+
+        // The texture a rule writes, when the line is well enough formed to tell.
+        static string? Destination(string line, string kind)
+        {
+            try
+            {
+                if (kind == "copy") return line.Split(',', StringSplitOptions.TrimEntries) is [_, var target] ? TextureRecipe.AssetPath(target) : null;
+                var columns = line.Split('\t', StringSplitOptions.TrimEntries);
+                return columns.Length == 12 ? TextureRecipe.AssetPath(columns[9]) : null;
+            }
+            catch (Exception ex) when (ex is FormatException or ArgumentException) { return null; }
+        }
     }
 
     private static void Stitch(TextureRecipeSet recipes, Func<string, byte[]?> readSource, Func<string, byte[]?> readGenerated,

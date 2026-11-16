@@ -14,7 +14,11 @@ public sealed class OutputLifecycleTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "pengulod-lifecycle-" + Guid.NewGuid().ToString("N"));
     public OutputLifecycleTests() => Directory.CreateDirectory(_root);
-    public void Dispose() { StagedOutput.DisableExchange = false; if (Directory.Exists(_root)) Directory.Delete(_root, true); }
+    public void Dispose()
+    {
+        StagedOutput.DisableExchange = false; StagedOutput.MoveOverride = null; StagedOutput.MoveRetry = TimeSpan.FromSeconds(120);
+        if (Directory.Exists(_root)) Directory.Delete(_root, true);
+    }
 
     private string Path_(params string[] parts) => Path.Combine([_root, .. parts]);
     private static void Put(string file, string text) { Directory.CreateDirectory(Path.GetDirectoryName(file)!); File.WriteAllText(file, text); }
@@ -235,6 +239,65 @@ public sealed class OutputLifecycleTests : IDisposable
         }
         Assert.Equal("v2", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
         Assert.Empty(Directory.GetDirectories(_root, ".pengulod-build-*"));
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void APublicationMoveRefusedForAMomentIsTriedAgain(bool existing)
+    {
+        // As on Windows, where a scanner holds the freshly written folder for a while: the first two moves are refused.
+        string output = Path_("out");
+        if (existing) Publish(output, "v1");
+        StagedOutput.DisableExchange = true;
+        int refused = 0; var messages = new List<string>();
+        using (var staged = new StagedOutput(output, seedPrevious: false, new Progress(messages)))
+        {
+            Put(Path.Combine(staged.Payload, "PenguLOD.esm"), "v2");
+            StagedOutput.MoveOverride = (from, to) =>
+            {
+                if (refused < 2) { refused++; throw new UnauthorizedAccessException($"Access to the path '{from}' is denied."); }
+                Directory.Move(from, to);
+            };
+            staged.Commit(new Progress(messages));
+        }
+        Assert.Equal(2, refused);
+        Assert.Equal("v2", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
+        Assert.Single(messages, m => m.Contains("Trying again"));
+        Assert.Empty(Directory.GetDirectories(_root, ".pengulod-build-*"));
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void ABuildThatCannotBePublishedIsKeptAndTheOutputIsAsItWas(bool existing)
+    {
+        string output = Path_("out");
+        if (existing) Publish(output, "v1");
+        StagedOutput.DisableExchange = true; StagedOutput.MoveRetry = TimeSpan.FromMilliseconds(300);
+        string payload;
+        using (var staged = new StagedOutput(output, seedPrevious: false))
+        {
+            payload = staged.Payload;
+            Put(Path.Combine(payload, "PenguLOD.esm"), "v2");
+            StagedOutput.MoveOverride = (from, _) => throw new IOException($"Access to the path '{from}' is denied.");
+            var error = Assert.Throws<IOException>(() => staged.Commit());
+            Assert.Contains("finished build is kept", error.Message); Assert.Contains(payload, error.Message);
+        }
+        StagedOutput.MoveOverride = null;
+        // The build survives the failed run, and the destination is untouched.
+        Assert.Equal("v2", File.ReadAllText(Path.Combine(payload, "PenguLOD.esm")));
+        Assert.True(File.Exists(Path.Combine(Path.GetDirectoryName(payload)!, StagedOutput.UnpublishedMarker)));
+        if (existing) Assert.Equal("v1", File.ReadAllText(Path.Combine(output, "PenguLOD.esm"))); else Assert.False(Directory.Exists(output));
+        Assert.Empty(Directory.GetDirectories(_root, "out.previous-*"));
+        // The next run does not sweep it away as an unfinished build, and says where it is. Its own build publishes as usual.
+        var messages = new List<string>();
+        using (var next = new StagedOutput(output, seedPrevious: false, new Progress(messages)))
+        {
+            Put(Path.Combine(next.Payload, "PenguLOD.esm"), "v3");
+            next.Commit();
+        }
+        Assert.Contains(messages, m => m.Contains("could not be published") && m.Contains(payload));
+        Assert.Equal("v2", File.ReadAllText(Path.Combine(payload, "PenguLOD.esm")));
+        Assert.Equal("v3", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
     }
 
     [Fact]

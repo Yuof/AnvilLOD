@@ -37,6 +37,24 @@ Data folder. A drive that disconnects does the same.
 Close the game and run the same selection again. Do not start or close the game until the
 run finishes.
 
+## "The build finished but could not be published"
+
+Another program was using the output folder or the finished build when PenguLOD moved it
+into place. On Windows this is usually a virus scanner or a file indexer going through the
+new files. PenguLOD tries again for two minutes before it gives up.
+
+The finished build is kept in a `.pengulod-build-…` folder beside the output; the message
+gives the path. Move its `output` folder into place as the message says, or generate again.
+Delete the kept folder when you no longer need it, or run `PenguLOD clean --input <output>
+--apply`. Excluding the output's parent folder from real-time scanning prevents it.
+
+## "Texture rule skipped"
+
+A rule in a texture rule file could not be read. The texture it builds is not generated,
+and the game uses the copy from your load order if one is installed. The other textures
+are not affected. If that texture is missing or wrong in game, report the rule file and the
+rule number from the message.
+
 ## Terrain reports missing landscape or textures
 
 By default these are filled in and listed as warnings. See

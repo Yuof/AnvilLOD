@@ -89,8 +89,14 @@ public static class PipelineDiagnostics
                     ResourceCatalog.ValidateFolders(stage.Folder, stage.Packs, stage.Output);
                     var resources = ResourceCatalog.Load(game, assets, stage.Folder, stage.Packs, ct);
                     estimates.Add(new(stage.Name + " resource files", resources.Report.Files.Count, "files", "Winning compatible rules, configurations and render models from resource folders and enabled mods."));
-                    if (stage.Name == "Textures" && request.Textures?.Stitched == true && TextureGeneration.ReadRules(game, resources).Program.Entries.Count == 0)
-                        Add("Error", "missing-texture-recipes", "No stitching recipes match the enabled plugins.", "Add a compatible resource pack or turn off stitched textures.");
+                    if (stage.Name == "Textures" && request.Textures?.Stitched == true)
+                    {
+                        var rules = TextureGeneration.ReadRules(game, resources);
+                        if (rules.Program.Entries.Count == 0)
+                            Add("Error", "missing-texture-recipes", "No stitching recipes match the enabled plugins.", "Add a compatible resource pack or turn off stitched textures.");
+                        foreach (string skipped in rules.Skipped)
+                            Add("Warning", "texture-rule-skipped", "Texture rule skipped: " + skipped, "The texture is taken from the load order if it is installed. Report the rule file if the texture is missing in game.");
+                    }
                     if (stage.Name == "Textures" && request.Textures?.RenderedObjects == true && !resources.RenderModels("objects").Any())
                         Add("Error", "missing-render-models", "No object render models were found.", "Add a compatible resource pack or turn off rendered objects.");
                 }

@@ -78,6 +78,12 @@ public sealed class LodGenerator
     public sealed class TextureMatchStats
     {
         public int Meshes, MeshesChanged, Shapes, ShapesChanged, ShapesStitched, FullModelsRead, FullModelsMissing;
+
+        /// <summary>
+        /// LOD shapes left on their LOD model's own texture because the full model does not say which texture they should take: several
+        /// of its shapes share the name and differ in texture. Keyed by LOD model and shape name, with the reason.
+        /// </summary>
+        public ConcurrentDictionary<string, string> Ambiguous { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private readonly ConcurrentDictionary<string, Lazy<IReadOnlyList<FullShape>?>> _fullShapes = new(StringComparer.OrdinalIgnoreCase);
@@ -249,8 +255,14 @@ public sealed class LodGenerator
             if (shapes.Count > 0 && p.Material.Textures.Count > 0)
             {
                 var inputs = new List<TextureMatchInput>();
+                // A mesh replacer can give several shapes one name. Which of them an alternate texture or the LOD shape belongs to is then
+                // unknown; guessing could put the wrong texture on the LOD, and failing loses the block. The shape keeps the LOD model's own.
                 if (shapes.GroupBy(s => s.Name, StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1 && variant.Alternates.Any(a => ShapeNameMatches(a.ShapeName, g.Key))))
-                    throw new InvalidDataException("Alternate texture is ambiguous because full-model shape names are duplicated: " + p.Name);
+                {
+                    Matching.Ambiguous[path + "|" + p.Name] = "an alternate texture names a shape that occurs more than once in " + variant.FullModel;
+                    parts.Add(p);
+                    continue;
+                }
                 // Mesh replacers can reuse a shape name for unrelated materials. For
                 // an exact name match, the existing LOD material can identify one of
                 // them. Never use this to discard contributors to a merged A - B shape.
@@ -281,7 +293,12 @@ public sealed class LodGenerator
                 else if (!stitched && inputs.Count > 0)
                 {
                     var choices = inputs.Select(i => (i.DesiredDiffuse, i.DesiredNormal)).Distinct().ToArray();
-                    if (choices.Length > 1) throw new InvalidDataException("Merged LOD shape has conflicting full textures: " + p.Name);
+                    if (choices.Length > 1)
+                    {
+                        Matching.Ambiguous[path + "|" + p.Name] = $"{choices.Length} shapes of {variant.FullModel} match it and use different textures";
+                        parts.Add(p);
+                        continue;
+                    }
                     var (diffuse, normal) = choices[0];
                     diffuse = ExistingTexture(diffuse); normal = ExistingTexture(normal);
                     if (diffuse is not null && (!SamePath(diffuse, p.Material.Textures[0])
