@@ -2,6 +2,12 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
+## [0.6.0-beta.6] - 2026-11-16
+
+Regenerate object LOD.
+
+- Changed the trunk cards of hybrid 3D trees to use one shared atlas.
+
 ## [0.6.0-beta.5] - 2026-11-16
 
 - Changed **Pack object texture atlases** to cut surfaces at texture tile edges, so surfaces that a texture repeats over are packed too. This adds triangles to those surfaces.
