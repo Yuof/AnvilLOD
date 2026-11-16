@@ -59,6 +59,46 @@ public class ObjectAtlasTests
 
 public class ExpandedObjectAtlasTests
 {
+    [Fact]
+    public void A_surface_mapped_over_several_tiles_in_pieces_is_folded_triangle_by_triangle()
+    {
+        // Two quads side by side sharing an edge: the first uses tile (0, 0) of the texture, the second tile (1, 0), so the two
+        // shared vertices have u = 1. As a whole the part covers two tiles; each triangle covers one.
+        var card = TextureFixture.Card("wall", "red.dds");
+        var part = new LodMeshPart
+        {
+            Name = "wall", Material = card.Material,
+            Positions = [new(0, 0, 0), new(100, 0, 0), new(200, 0, 0), new(0, 0, 100), new(100, 0, 100), new(200, 0, 100)],
+            UVs = [new(0, 1), new(1, 1), new(2, 1), new(0, 0), new(1, 0), new(2, 0)],
+            Normals = Enumerable.Repeat(-Vector3.UnitY, 6).ToArray(), Tangents = Enumerable.Repeat(-Vector3.UnitZ, 6).ToArray(),
+            Bitangents = Enumerable.Repeat(Vector3.UnitX, 6).ToArray(), Colors = [1u, 2u, 3u, 4u, 5u, 6u],
+            Triangles = [0, 1, 3, 1, 4, 3, 1, 2, 4, 2, 5, 4],
+        };
+        Assert.Null(ObjectAtlasStage.Ineligible(part));
+        var rect = new AtlasRect(.25f, .5f, .5f, .75f);
+        var mapped = ObjectAtlasStage.Remap(new LodMesh { Path = "fixture", Parts = [part] },
+            new Dictionary<string, ObjectAtlasStage.Mapping> { [part.Material.Key] = new("atlas", "atlas_n", rect) }).Parts[0];
+
+        Assert.Equal("atlas", mapped.Material.Textures[0]);
+        Assert.Equal(8, mapped.VertexCount);                                        // the two shared vertices exist once per tile
+        Assert.Equal(part.TriangleCount, mapped.TriangleCount);
+        Assert.All(mapped.UVs, uv => { Assert.InRange(uv.X, .25f, .5f); Assert.InRange(uv.Y, .5f, .75f); });
+        for (int i = 0; i < part.Triangles.Length; i++)                              // the geometry and everything on it is unchanged
+        {
+            Assert.Equal(part.Positions[part.Triangles[i]], mapped.Positions[mapped.Triangles[i]]);
+            Assert.Equal(part.Colors![part.Triangles[i]], mapped.Colors![mapped.Triangles[i]]);
+        }
+        // Each quad spans its whole tile: left edge at the rectangle's left, right edge at its right.
+        Assert.Equal(.25f, mapped.UVs[mapped.Triangles[0]].X); Assert.Equal(.5f, mapped.UVs[mapped.Triangles[1]].X);
+        Assert.Equal(.25f, mapped.UVs[mapped.Triangles[6]].X); Assert.Equal(.5f, mapped.UVs[mapped.Triangles[7]].X);
+
+        // A triangle that crosses a tile edge, or repeats the texture, cannot be folded. Rounding at the edge is allowed for.
+        Assert.NotNull(ObjectAtlasStage.Ineligible(Change(part, uvs: part.UVs.Select(v => v + new Vector2(.5f, 0)).ToArray())));
+        Assert.NotNull(ObjectAtlasStage.Ineligible(Change(part, uvs: part.UVs.Select(v => v * 3).ToArray())));
+        Assert.Null(ObjectAtlasStage.Ineligible(Change(part, uvs: part.UVs.Select(v => v * 1.0005f).ToArray())));
+        Assert.NotNull(ObjectAtlasStage.Ineligible(Change(part, part.Material with { ClampMode = 0 })));   // clamped: tile (1, 0) is not a copy
+    }
+
     private static LodMeshPart Change(LodMeshPart p, LodMaterial? material = null, Vector2[]? uvs = null) => new()
     {
         Name = p.Name, Material = material ?? p.Material, UVs = uvs ?? p.UVs, Positions = p.Positions,

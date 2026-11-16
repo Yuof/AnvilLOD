@@ -14,7 +14,7 @@ namespace PenguLOD.Plugins;
 /// <summary>Packs shader-compatible object surfaces; unsupported materials retain their original sampling.</summary>
 public static class ObjectAtlasStage
 {
-    public const int Version = 2;
+    public const int Version = 3; // surfaces are folded into one tile triangle by triangle
     public sealed record Report(int PackedMaterials, int Pages, int EligibleParts, int SkippedParts,
         IReadOnlyDictionary<string, int> Reasons, int SourceMaterials = 0, int AtlasMaterials = 0, long TextureBytes = 0,
         IReadOnlyList<string>? Warnings = null);
@@ -34,25 +34,86 @@ public static class ObjectAtlasStage
         if ((m.ShaderFlags1 & ((1u << 11) | (1u << 15) | (1u << 16) | (1u << 23) | (1u << 28))) != 0
             || (m.ShaderFlags2 & (1u << 24)) != 0) return "non-affine shader sampling";
         if (m.HasAlpha && ObjectTextureAssets.AlphaCutoff(m) is null) return "unsupported alpha blend/test";
-        if (!TryShift(part, out _)) return "tiling or invalid UVs";
+        if (TriangleShifts(part) is not { } shifts || FoldedVertices(part, shifts) > ushort.MaxValue) return "tiling or invalid UVs";
         return null;
     }
 
-    private static bool TryShift(LodMeshPart part, out Vector2 shift)
+    /// <summary>How far a triangle may reach past its tile, in tiles: the rounding of half-precision texture coordinates near a tile edge.</summary>
+    private const float FoldTolerance = 0.002f;
+
+    /// <summary>
+    /// The whole-tile shift that brings each triangle's texture coordinates into the unit square, or null when some triangle does
+    /// not fit one tile (it crosses a tile edge or repeats the texture) or the coordinates are unusable. Under wrapping, a triangle
+    /// in tile (2, -1) samples exactly what it would in tile (0, 0), so each triangle can be moved on its own; a surface mapped
+    /// across several tiles in separate pieces, as most LOD models of walls and rock are, fits an atlas this way. An axis that
+    /// clamps is never shifted. Triangles are moved whole, never single vertices: that would stretch a triangle across a tile edge.
+    /// </summary>
+    private static Vector2[]? TriangleShifts(LodMeshPart part)
     {
-        shift = Vector2.Zero;
-        if (part.Material.ClampMode > 3 || part.UVs.Length != part.Positions.Length || part.UVs.Length == 0) return false;
-        var min = new Vector2(float.PositiveInfinity); var max = new Vector2(float.NegativeInfinity);
-        foreach (var uv in part.UVs)
+        var uvs = part.UVs; var triangles = part.Triangles;
+        if (part.Material.ClampMode > 3 || uvs.Length != part.Positions.Length || uvs.Length == 0 || triangles.Length % 3 != 0) return null;
+        bool wrapU = (part.Material.ClampMode & 2) != 0, wrapV = (part.Material.ClampMode & 1) != 0;
+        var shifts = new Vector2[triangles.Length / 3];
+        for (int t = 0; t < shifts.Length; t++)
         {
-            if (!float.IsFinite(uv.X) || !float.IsFinite(uv.Y)) return false;
-            min = Vector2.Min(min, uv); max = Vector2.Max(max, uv);
+            int a = triangles[t * 3], b = triangles[t * 3 + 1], c = triangles[t * 3 + 2];
+            if (a >= uvs.Length || b >= uvs.Length || c >= uvs.Length) return null;
+            var min = Vector2.Min(uvs[a], Vector2.Min(uvs[b], uvs[c])); var max = Vector2.Max(uvs[a], Vector2.Max(uvs[b], uvs[c]));
+            if (!float.IsFinite(min.X) || !float.IsFinite(min.Y) || !float.IsFinite(max.X) || !float.IsFinite(max.Y)) return null;
+            var shift = new Vector2(wrapU ? MathF.Floor(min.X + FoldTolerance) : 0, wrapV ? MathF.Floor(min.Y + FoldTolerance) : 0);
+            if (min.X - shift.X < -FoldTolerance || min.Y - shift.Y < -FoldTolerance
+                || max.X - shift.X > 1 + FoldTolerance || max.Y - shift.Y > 1 + FoldTolerance) return null;
+            shifts[t] = shift;
         }
-        // Integer-shifted single tiles are equivalent under wrapping. Never fold vertices individually:
-        // that would stretch triangles crossing a wrap boundary. True tiling keeps its original UVs.
-        shift = new((part.Material.ClampMode & 2) != 0 ? MathF.Floor(min.X) : 0,
-            (part.Material.ClampMode & 1) != 0 ? MathF.Floor(min.Y) : 0);
-        return min.X - shift.X >= 0 && min.Y - shift.Y >= 0 && max.X - shift.X <= 1 && max.Y - shift.Y <= 1;
+        return shifts;
+    }
+
+    /// <summary>Vertices the part has once every vertex used under two different shifts is doubled.</summary>
+    private static int FoldedVertices(LodMeshPart part, Vector2[] shifts)
+    {
+        if (Uniform(shifts)) return part.VertexCount;
+        var seen = new HashSet<(int, float, float)>();
+        for (int i = 0; i < part.Triangles.Length; i++) seen.Add((part.Triangles[i], shifts[i / 3].X, shifts[i / 3].Y));
+        return seen.Count;
+    }
+
+    private static bool Uniform(Vector2[] shifts)
+    {
+        for (int i = 1; i < shifts.Length; i++) if (shifts[i] != shifts[0]) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// The part with its texture coordinates folded into the unit square and passed through <paramref name="place"/>. When every
+    /// triangle has the same shift the vertices are kept as they are; otherwise a vertex shared by triangles of different tiles
+    /// becomes one vertex per tile, with the same position, normal and colour.
+    /// </summary>
+    private static LodMeshPart Fold(LodMeshPart p, LodMaterial material, Vector2[] shifts, Func<Vector2, Vector2> place)
+    {
+        if (Uniform(shifts))
+        {
+            var shift = shifts.Length == 0 ? Vector2.Zero : shifts[0];
+            return ObjectTextureAssets.With(p, material, p.UVs.Select(v => place(v - shift)).ToArray());
+        }
+        var index = new Dictionary<(int, float, float), ushort>();
+        var source = new List<int>(p.VertexCount); var uvs = new List<Vector2>(p.VertexCount);
+        var triangles = new ushort[p.Triangles.Length];
+        for (int i = 0; i < triangles.Length; i++)
+        {
+            int vertex = p.Triangles[i]; var shift = shifts[i / 3];
+            if (!index.TryGetValue((vertex, shift.X, shift.Y), out ushort folded))
+            {
+                index[(vertex, shift.X, shift.Y)] = folded = (ushort)source.Count;
+                source.Add(vertex); uvs.Add(place(p.UVs[vertex] - shift));
+            }
+            triangles[i] = folded;
+        }
+        T[] Pick<T>(T[] values) => source.Select(v => values[v]).ToArray();
+        return p with
+        {
+            Material = material, Positions = Pick(p.Positions), UVs = [.. uvs], Normals = Pick(p.Normals), Tangents = Pick(p.Tangents),
+            Bitangents = Pick(p.Bitangents), Colors = p.Colors is null ? null : Pick(p.Colors), Triangles = triangles,
+        };
     }
 
     public static Result Build(IEnumerable<LodMesh> meshes, AssetIndex assets, string output, int cellSize = 256,
@@ -162,11 +223,11 @@ public static class ObjectAtlasStage
         Path = mesh.Path, Warnings = mesh.Warnings, NoShapesInFile = mesh.NoShapesInFile,
         Parts = mesh.Parts.Select(p =>
         {
-            if (Ineligible(p) is not null || !mappings.TryGetValue(p.Material.Key, out var map) || !TryShift(p, out var shift)) return p;
+            if (Ineligible(p) is not null || !mappings.TryGetValue(p.Material.Key, out var map) || TriangleShifts(p) is not { } shifts) return p;
             var textures = ShaderGuard.TextureSlots(p.Material.Textures); textures[0] = map.Diffuse; textures[1] = map.Normal;
             if (map.Extra is not null) foreach (var (slot, path) in map.Extra) textures[slot] = path;
-            return ObjectTextureAssets.With(p, p.Material with { Textures = textures, ClampMode = 0 },
-                p.UVs.Select(v => new Vector2(map.Rect.U0 + (v.X - shift.X) * (map.Rect.U1 - map.Rect.U0), map.Rect.V0 + (v.Y - shift.Y) * (map.Rect.V1 - map.Rect.V0))).ToArray());
+            return Fold(p, p.Material with { Textures = textures, ClampMode = 0 }, shifts,
+                v => new Vector2(map.Rect.U0 + v.X * (map.Rect.U1 - map.Rect.U0), map.Rect.V0 + v.Y * (map.Rect.V1 - map.Rect.V0)));
         }).ToArray()
     };
 }
