@@ -1,791 +1,298 @@
 # Changelog
 
-PenguLOD uses its own semantic version, independent of AnvilLOD’s game plugin version.
-Pre-release versions are marked alpha or beta until the supported workflows have broader validation.
+Versions follow SemVer. Alpha and beta versions are pre-releases.
 
 ## [0.6.0-beta.4] - 2026-11-15
 
-A seasonal generation no longer stops at the end of object LOD on a swap target whose
-alternate texture names no texture set, and the object atlas option packs more surfaces.
-Nothing needs to be generated again for this update.
-
-Object atlases
-
-- **Pack object texture atlases** packs more surfaces and onto fewer pages. A surface is
-  now fitted into its texture tile triangle by triangle, so a wall or rock face mapped
-  over several tiles in separate pieces can be packed; before, the whole surface had to
-  sit in one tile. Pages hold up to 256 materials instead of 64, and a page that is half
-  empty is written half as tall. On a 2,047-plugin load order, object shapes per block
-  with the option on fell from 32.7 to 25.3 at LOD8 and from 51.3 to 37.8 at LOD16. The
-  option is still off by default.
-
-Seasonal LOD
-
-- Seasonal object LOD no longer stops with "Unresolved seasonal alternate texture on ..."
-  at the end of the object LOD stage. A seasonal swap target whose alternate texture has
-  no texture set, or one from a plugin that is not loaded, now keeps its model's own
-  texture, as it does in game and as the same object does when it is placed normally. A
-  warning names the object. With **Strict seasonal swaps** on it still stops.
+- Fixed seasonal object LOD stopping with "Unresolved seasonal alternate texture". The object keeps its model's texture and a warning names it.
+- Changed **Pack object texture atlases** to pack surfaces mapped over several texture tiles, on pages of up to 256 materials. Still off by default.
 
 ## [0.6.0-beta.3] - 2026-11-15
 
-A generated `Occlusion.esp` no longer hides distant objects and trees, and tree, trunk and
-grass LOD are much closer to what TexGen and DynDOLOD make. After updating, generate
-textures and object LOD again, including `Occlusion.esp`; a plugin from 0.6.0-beta.2 or
-earlier should be disabled until then.
+Regenerate textures and object LOD, including `Occlusion.esp`.
 
-Occlusion
-
-- A generated `Occlusion.esp` no longer hides distant objects and trees that are in view.
-  The game numbers the nodes of its LOD quadtree parent first; the plugin was written
-  children first, so only the 4-cell blocks were in the right place and the game read the
-  8-cell and larger nodes from the wrong bits. Whole areas of object and tree LOD, up to
-  32 by 32 cells, disappeared while their terrain stayed. The order now follows the
-  game's own (checked against the game's code, its own cell data and xLODGen output), and
-  it is worked out for each worldspace's LOD grid, so worldspaces with a 128-cell grid
-  are right too. **Generate `Occlusion.esp` again**: one from 0.6.0-beta.2 or earlier
-  should be disabled until then. No other output is affected.
-- `Occlusion.esp` no longer overrides the persistent cell of each worldspace. That cell
-  holds persistent references and carries the coordinates of cell 0, 0, so it was given
-  that cell's occlusion data, and the plugin showed up as a conflict on a record it has no
-  reason to change.
-
-Textures
-
-- Grass billboards from the texture stage are no longer 16 x 16 pixels. They were sized
-  with the tree setting (12 world units per pixel), which left nearly every grass type at
-  the smallest size and made distant grass look blocky. Grass now has its own setting,
-  **Grass world units per pixel** on the Textures page, default `2`: a typical tuft gets a
-  64 x 32 image, about what TexGen makes. **World units per pixel** is now **Tree world
-  units per pixel** and works as before. Run textures and then object LOD again to get
-  the sharper grass.
-
-- Hybrid tree trunk textures are no longer dark and blurry. They were lit with 70% ambient
-  light and a weak side light, and sized with the tree setting, so a trunk came out at
-  about half the brightness and an eighth of the pixels of TexGen's. Trees and trunks are
-  now lit the way TexGen lights them, from straight above: trees with 60% ambient and 135%
-  direct light, trunks with 150% and 50%. Tree billboards gain the bright crown tops and
-  the contrast they lacked. Grass keeps its light, which already matched. On a 2,044-plugin load order the
-  brightness and contrast of trunks and tree billboards are within 2% of TexGen's output,
-  and 846 of 880 trunk images have the height of TexGen's.
-- Tree billboards are sharper by default: **Tree world units per pixel** now defaults to
-  `6` instead of `12`. At 12 a tree billboard had about a third of the pixels of TexGen's;
-  at 6 it matches or exceeds TexGen for 138 of 160 compared views. A saved value is kept,
-  so set it to 6 on the Textures page to get the new default in an existing setup.
-- New settings on the Textures page: **Trunk world units per pixel** (default `4`), and
-  under **Material calibration** an ambient and a direct light value each for trees, grass
-  and trunks. They replace **Ambient light** and **Directional light**; saved values of
-  those two are ignored. Run textures and then object LOD again.
-- Trunk textures that object LOD makes itself for native hybrid trees and tree billboards
-  it makes for trees without one use the same light.
-
-Grass LOD
-
-- Grass LOD no longer stands in rows of dots on bare ground. Each grass type was thinned
-  on its own over the same grid, and its tuft was put at the middle of the grass in its
-  square, so the tufts of every type in a square landed on nearly the same spot: in a
-  dense cell near Whiterun 46% of the tufts stood within 12 units of another, 96 units
-  from the next pile. All grass types of a cell now share one grid, which makes the
-  squares about a third the size at the same tuft count, and each tuft is one of the real
-  grass instances near a random point in its square, at its own size. Tufts are no longer
-  enlarged to fill large squares. Generate object LOD again; every grass block is rebuilt.
-
-- Grass LOD is darker by default: **Grass tip brightness** `0.3` and **Grass root
-  brightness** `0.18`, instead of `0.85` and `0.5`. At the old values a field of grass LOD
-  measured four times as bright as the real grass beside it and as bright as bare ground.
-  The new values were checked in game on one load order with complex grass; adjust them if
-  your grass or lighting differs. Values you have set yourself are kept.
-
-Trees
-
-- Tree cards from LOD8 on are drawn from one atlas of all tree billboards
-  (`textures\pengulod\trees\cards.dds`), so a block draws all of them in one shape. With
-  every tree type on its own texture, a LOD8 block had about 30 tree card shapes and a
-  LOD16 block about 60, each a draw call. Billboards are at most 128 pixels in the atlas,
-  which is more than a tree covers on screen at those distances. Cards at LOD4 keep their
-  own full-size textures.
-
-Seasonal LOD
-
-- Seasonal LOD can be limited to the seasons you play. Four new boxes, **Seasonal LOD:
-  winter**, **spring**, **summer** and **autumn** under **Object LOD → World & runtime** and
-  on the Terrain page, choose which seasons get seasonal terrain, object, tree and grass
-  LOD; all are on by default. A season left out gets no seasonal files, files from an
-  earlier run are removed, and the game shows the normal LOD in that season. Its swap INIs
-  are not read. On the command line: `--seasons --only-seasons winter`. The grass cache
-  stage still writes every season. Existing output is not rebuilt while all four are on.
-
-Output
-
-- On Linux, an object LOD output no longer has folders that differ only in case. The
-  terrain underside mesh was written under `meshes/Terrain` beside the blocks in
-  `meshes/terrain`, and stand-ins for missing textures took the spelling the mesh used
-  (`Textures/...`, `textures/Enderal/LOD/...`). The game reads such folders as one, and a
-  mod manager or Wine may show it only one of them, so the underside mesh or the stand-ins
-  could be missing in game. Both are now written in lower case. Every stage also merges
-  such folders before it records its output, which repairs an existing output on the next
-  run, and **Verify output set** reports them. Windows output was not affected.
-
-- Generating object LOD again into the same output folder no longer stops with "This
-  folder is not an empty or recognized PenguLOD output: it has files in it that PenguLOD
-  didn't write". It happened with **Clear previous PenguLOD output before generation** on
-  when the output had the game plugin's settings file, `SKSE/Plugins/PenguLOD.ini`, which
-  every object LOD run with dynamic LOD writes: the file was carried into the new run's
-  work folder, which then failed the check for an empty folder.
-- Stand-ins for textures that are not installed are written on every run. An installed
-  PenguLOD output is part of the load order of the next run, and its stand-ins passed for
-  the real textures, so the next output had none: on a test load order one run wrote 61
-  stand-ins, the next 1, the one after 55. With such an output installed the textures were
-  missing in game, which draws purple and can crash. A stand-in is now recognised by its
-  exact content and still counts as missing.
-
-Reports
-
-- New command `compare-reference` measures a PenguLOD output against output of DynDOLOD,
-  TexGen or xLODGen for the same game: triangles, shapes, textures and shader flags of the
-  blocks both sides have, size, brightness and contrast of textures under the same path,
-  plugin record counts, and output names that differ only in case. It reads files only
-  and takes about 20 seconds for a large load order. See
-  [Reports and outputs](docs/REPORTS-AND-OUTPUTS.md#compare-with-another-tools-output).
+- Fixed `Occlusion.esp` hiding distant objects and trees that are in view.
+- Fixed `Occlusion.esp` overriding the persistent cell of each worldspace.
+- Fixed blocky grass billboards. Added **Grass world units per pixel** (default 2).
+- Changed **World units per pixel** to **Tree world units per pixel**, default 6 (was 12). Saved values are kept.
+- Fixed dark, blurry hybrid tree trunk textures. Trees and trunks are lit the way TexGen lights them.
+- Added **Trunk world units per pixel** (default 4) and ambient and direct light settings for trees, grass and trunks.
+- Removed **Ambient light** and **Directional light**.
+- Fixed grass LOD standing in rows of dots.
+- Changed the grass LOD brightness defaults to tip 0.3 and root 0.18 (were 0.85 and 0.5). Saved values are kept.
+- Changed tree cards from LOD8 on to use one shared atlas.
+- Added **Seasonal LOD: winter**, **spring**, **summer** and **autumn** to choose which seasons get seasonal LOD (`--only-seasons`).
+- Fixed output folders that differ only in case on Linux. **Verify output set** reports them.
+- Fixed "This folder is not an empty or recognized PenguLOD output" when generating object LOD again into the same folder.
+- Fixed stand-ins for missing textures not being written while a previous PenguLOD output is installed.
+- Added the `compare-reference` command, which measures an output against DynDOLOD, TexGen or xLODGen output.
 
 ## [0.6.0-beta.2] - 2026-11-14
 
-A run no longer stops because one model or recipe cannot be generated, and Skyrim 1.6.1179
-(GOG) and Skyrim VR load orders are handled.
-
-Textures
-
-- One model or recipe that cannot be generated no longer stops the texture stage and
-  everything after it. A complete run now publishes what it could generate. Each failed
-  item is still logged as an error, counted in the summary and listed as `Failed` in the
-  report, and the run ends with a warning giving their number. Before, a single tree with
-  unusual skin data, a grass mesh with a missing texture or a recipe naming a texture that
-  is not installed left the whole load order without textures, terrain or LOD. A failed
-  item is left out with no partial files: a tree without a billboard has no tree LOD unless
-  the load order supplies one, grass is drawn with its own model texture, and a stitched
-  texture is read from the load order. A filtered preview still publishes only when every
-  selected model renders.
-- An output folder that cannot be written stops the run with that error. It is no longer
-  recorded as a failed item.
-- Grass meshes whose normal-map slot holds Bethesda's "no normal map" marker behind a
-  `textures` folder, as mesh tools that normalize texture paths write it, are rendered.
-  Only the bare marker was accepted, so these failed with "Expected a safe Data-relative
-  game path".
-
-Models
-
-- Skinned models are no longer rejected for data the game never reads: the leftover
-  `NiSkinData` weight list of a shape whose vertex buffer has weights ("Invalid skin weight
-  or vertex index"), a different number of bones in the skin instance and the skin data
-  when no vertex uses the extra ones ("Skin instance and skin data bone counts differ"),
-  and missing weights on a vertex no triangle uses ("Skin weights at vertex N sum to 0").
-  A drawn vertex with unusable weights is still an error.
-- A geometry, skin or animation data block listed in the scene without an owning shape is
-  ignored. It was reported as an unsupported scene child, which failed the model.
-
-Grass LOD
-
-- A grass type in the grass cache that has no billboard and cannot be rendered from its
-  model, because a shape is unreadable or its texture is not installed, is left out of
-  grass LOD and named in a warning. It stopped LOD generation before.
-
-Seasons
-
-- A seasonal tree swap to a tree that has no billboard is a warning, and those trees keep
-  their base LOD in that season. It stopped LOD generation before. **Strict seasonal
-  swaps** still stops.
-
-Skyrim VR
-
-- A Data folder and `plugins.txt` source no longer warns "Could not read Skyrim.ccc" at
-  every stage when the game folder has no `Skyrim.ccc`. Skyrim VR has no Creation Club and
-  never has that file, so it is not read there; on Skyrim SE a missing file means there
-  are no Creation Club plugins to add. A file that is present and unreadable still warns.
-
-Game plugin
-
-- Skyrim 1.6.1179, the GOG version, is supported. The build for SE 1.5.97 to AE 1.6.1170
-  refused to load on it, and automatic installation picked the build for Skyrim 1.7, which
-  cannot run there. Every 1.5 and 1.6 version now uses the first build; the second is for
-  Skyrim 1.7 and newer. The installer options name the GOG version.
-
-Packages and documentation
-
-- The Windows package no longer includes debug symbols for third-party libraries. The ZIP
-  is about 25 MB smaller and the extracted folder about 105 MB smaller.
-- The documentation is shorter and organised around what to do. The pipeline, diagnostics,
-  texture compute, materials, atlases, model support, packaging and roadmap pages are gone;
-  their instructions are in the user guide, the stage guides and troubleshooting.
-- The SKSE package's README now explains how to install the plugin.
+- Fixed the texture stage stopping when one model or recipe cannot be generated. Failed items are logged, listed in the report and left out.
+- Changed an output folder that cannot be written to stop the run.
+- Fixed grass meshes failing with "Expected a safe Data-relative game path".
+- Fixed skinned models being rejected for skin data the game does not read.
+- Fixed models failing on a data block that has no owning shape.
+- Fixed LOD generation stopping on a grass type that cannot be rendered. It is left out with a warning.
+- Fixed LOD generation stopping on a seasonal swap to a tree without a billboard. It is a warning unless **Strict seasonal swaps** is on.
+- Fixed the "Could not read Skyrim.ccc" warning on Skyrim VR and on installs without that file.
+- Added Skyrim 1.6.1179 (GOG) support to the game plugin.
+- Removed third-party debug symbols from the Windows package.
+- Changed the documentation to be shorter and organised by task.
+- Added install instructions to the SKSE package README.
 
 ## [0.6.0-beta.1] - 2026-11-13
 
-The first beta. Terrain is now built on every worker thread and is several times faster on
-multi-core machines.
+Regenerate terrain, textures, tree LOD and object LOD.
 
-Terrain
-
-- Land with neither landscape records nor existing terrain LOD no longer stops terrain
-  generation. New **Fill uncovered land at the default height** setting (on by default):
-  those cells are flat at the worldspace's default land height with the default landscape
-  texture, under the worldspace's default water where that is higher. Before, a full
-  Tamriel run needed an older terrain LOD mod enabled to cover its outer rows.
-- A landscape texture that is not installed, or a landscape texture record that cannot be
-  resolved, no longer stops terrain generation. New **Use the default texture for missing
-  landscape textures** setting (on by default) paints those layers with the default texture.
-- Both are checked for every selected worldspace before the first tile and in the pipeline
-  preflight. Each is reported once with its worldspace, the number of cells and the first
-  cell. With a setting off, the run stops there with the complete list, not at the first
-  affected tile.
-- Landscape texture records are resolved once per worldspace rather than once per layer.
-- LOD16 and LOD32 terrain tiles that cover many different landscape textures no longer take
-  minutes each. The texture cache kept every texture at 512 pixels although a tile reads a
-  much smaller level, so a large tile filled it, emptied it and decoded the same files
-  again many times. It now keeps only the levels a tile reads. Output is byte-identical.
-- Terrain uses every worker thread. Tiles were built one at a time on one thread, and the
-  terrain-shadow heightmap likewise; both now run on all workers (**Preferences → Worker
-  threads**). Landscape and cell records are found once for the run, not once per
-  worldspace and season, and decoded landscape textures are shared between worldspaces.
-  Output is byte-identical for any worker count.
-- The heightmap export no longer re-reads existing terrain meshes for every row. It kept 16
-  of them, fewer than one row of a large worldspace crosses.
-- 16-bit DDS textures are read: R5G6B5, which the Creation Kit writes for terrain LOD normal
-  maps, plus X1R5G5B5, A1R5G5B5 and A4R4G4B4 and their DXGI equivalents. A worldspace whose
-  existing terrain LOD used one stopped terrain generation with "DDS pixel format (16-bit,
-  flags 0x40) is not supported".
-
-Terrain is rebuilt once after updating, because the two settings are part of its inputs.
-Output is unchanged where nothing was missing.
-
-Running alongside the game
-
-- The preflight warns when the game is running, and on Linux when the game's `Data` folder
-  is a mod manager's virtual file system at that moment. Starting or closing the game from
-  such a mod manager during a run changes `Data` underneath PenguLOD.
-- A read that fails because its storage changed or went away now stops the pipeline with a
-  plain explanation and what to do, in place of a stack trace ending in "Input/output error".
-
-Visual correctness
-
-- Generated tangents follow the convention of Skyrim meshes and nifly: the NIF tangent
-  runs along V and the bitangent along U. Shapes without stored tangents (most Skyrim LE
-  meshes and some SE ones), tree and hybrid trunk cards, water stand-ins and rendered
-  billboards used the opposite, which mirrored normal-map lighting.
-- Simplified parts keep their shape name, tier and TexGen scale, so automatic object LOD
-  again matches alternate textures and recipes.
-- Seasons of Skyrim INIs are applied in the game's order: `MainFormSwap_<SEASON>.ini`
-  first, then the others in case-sensitive name order. A line for a record that is not in
-  the load order is skipped and reported, as in game; **Strict seasonal swaps**
-  (`--seasons-strict`) restores the stop. Seasons that change nothing get no seasonal files.
-- BC7: blocks whose texels share the same channel sum (red beside green) no longer encode
-  as one flat colour, and opaque blocks decode to alpha 255. The Vulkan encoder matches.
-- Block-compressed output always has a top level that is a multiple of four, which
-  Direct3D 11 requires; authored mips that are not are left unsliced. Recipe tiles of
-  another aspect keep the resolution of their long axis. Opaque copies of sRGB textures
-  stay sRGB.
-
-Regenerate object LOD, tree LOD and textures to pick up these changes: block hashes,
-billboard, hybrid trunk, automatic object, PBR and opaque-copy caches rebuild once. The
-result has had a general in-game look on one large load order; normal-mapped billboards and
-converted Skyrim LE meshes were not checked one by one.
-
-Reusing finished work
-
-- Playing the game or running an animation tool between runs no longer rebuilds every
-  stage. The check for changed inputs counted files no stage reads: `ModOrganizer.ini`,
-  each mod's `meta.ini`, `SkyrimPrefs.ini`, animation files, logs, and the settings, caches
-  and menu state SKSE plugins write under `SKSE/Plugins`. Those are now left out; the
-  grass, season and po3 Tweaks settings there still count. Enabling, disabling or updating
-  a mod still rebuilds. The first run with this version rebuilds once.
-
-Choosing worldspaces
-
-- **Choose…** beside every worldspace field lists the worldspaces in the load order with
-  their ID, in-game name, plugin, parent worldspace and LOD grid size, to tick instead of
-  typing IDs. A filter narrows the list by any of those; **Select shown** takes what is
-  left, which picks all worldspaces of one mod. Worldspaces without LOD settings, which
-  terrain and object LOD skip, cannot be ticked there.
-- New `PenguLOD worldspaces` command prints the same list.
+- Changed terrain generation to use every worker thread.
+- Added **Fill uncovered land at the default height** (on by default). Land without landscape records or terrain LOD no longer stops terrain generation.
+- Added **Use the default texture for missing landscape textures** (on by default).
+- Changed missing land and landscape textures to be reported for every selected worldspace before the first tile and in the preflight.
+- Fixed slow LOD16 and LOD32 terrain tiles that cover many landscape textures.
+- Fixed the heightmap export re-reading terrain meshes for every row.
+- Fixed "DDS pixel format (16-bit, flags 0x40) is not supported". 16-bit DDS textures are read.
+- Added a preflight warning when the game is running or `Data` is a mod manager's virtual file system.
+- Changed a read that fails because its storage went away to stop with an explanation, not a stack trace.
+- Fixed mirrored normal-map lighting on shapes without stored tangents, tree and trunk cards, water stand-ins and billboards.
+- Fixed simplified parts losing their shape name, tier and TexGen scale.
+- Fixed the order Seasons of Skyrim INIs are applied in. A line for a record that is not in the load order is skipped and reported.
+- Added **Strict seasonal swaps** (`--seasons-strict`).
+- Fixed BC7 blocks encoding as one flat colour, and opaque blocks decoding with alpha below 255.
+- Fixed block-compressed textures whose top level is not a multiple of four.
+- Fixed every stage rebuilding after playing the game or running an animation tool.
+- Added **Choose…** beside every worldspace field, and the `worldspaces` command.
 
 ## [0.6.0-alpha.5] - 2026-11-12
 
-Output management and the command line
+Regenerate if you used underside step 4 or have textures in legacy X8 format.
 
-- Fix output folders becoming unusable after tree LOD was generated without LOD4
-  selected. Tree blocks are always LOD4; their band is now recorded, and folders from
-  earlier versions are read with it added.
-- Allow output folders below a symbolic link, such as `~/.steam/steam`. The output
-  folder itself must still be a real folder.
-- The CLI accepts every option listed in `--help`, including `--esl-range`,
-  `--ice-inset`, `--mountain-inset`, `--object-inset`, `--map-objects`, `--snow-cover`,
-  `--snow-shader`, `--optimize-object-textures` and `--object-texture-size`.
-- The CLI refuses generation options next to `--settings` or `--request` instead of
-  ignoring them. Malformed or out-of-range numbers are errors instead of silently using
-  the default. The no-op `--tree-3d-by-name` and `--tree-3d-own-lod` were removed.
-- Without `--report`, `scan` writes its report to the current folder (the AppImage
-  folder is read-only), and `generate` points to the report in its job folder.
-
-Desktop
-
-- Stage pages use the same run settings as **Run selected stages**: setup check,
-  texture compute and scope expansion were ignored by the per-page buttons.
-- Whole-number options step by one. Presets saved with fractional values load rounded.
-- The seasonal checkboxes on Terrain and Object LOD stay in sync, also after a preset.
-- The MO2 game-folder override is a separate setting. **Detect Steam installation**
-  no longer replaces it or an existing Wine prefix. Older MO2 presets keep their override.
-
-Robustness
-
-- A malformed NIF, DDS or grass cache in a mod is reported for that file instead of
-  stopping texture repair, tree LOD, the mesh maker or conversion.
-- Mod folders that differ only in case (`meshes` and `Meshes`) are merged, with a
-  warning, instead of hiding one of them or stopping the scan. The same applies to
-  Data folders and duplicate archive names.
-- Tree LOD blocks use the worldspace's EditorID spelling, so a rerun on Linux no longer
-  leaves a second, differently cased copy of a block.
-- A previous `Occlusion.esp` is no longer used as the source of cell data, so later cell
-  edits by other mods are kept.
-- Large references treat `.esm` and `.esl` files as masters, as the game does, even
-  without the ESM header flag.
-- 24-bit and legacy X8 textures are read as opaque. A worldspace with an unusual EditorID
-  is skipped with a warning when all worldspaces are selected. Cells with a placeholder
-  water height use the worldspace default.
-- Underside step 4 is no longer offered: it exceeded the mesh format's 65,535-vertex
-  limit and produced damaged files. Presets saved with it use step 8.
-- Changes to a file inside an archive are detected even when its size is unchanged.
-
-Incremental LOD output is rebuilt once, because archive contents are now identified by
-the archive's size and date. Regenerate if you used underside step 4 or have textures
-in legacy X8 format; other settings and output are unchanged.
-
-Pipeline state and output ownership
-
-- Grass, textures and terrain publish the same way as object LOD: the output receipt is
-  written with the files and the folder is replaced in one step. An interruption between
-  the two can no longer leave a receipt that blocks the next run.
-- On Linux, publication swaps the old and new folders atomically. Elsewhere, a run that
-  finds only a leftover `.previous-` copy reports how to restore it.
-- `meta.ini` and `SKSE/Plugins/PenguLOD.ini` belong to your installation. Editing them, or
-  the mod manager rewriting them during a run, no longer fails verification, resume or
-  publication, and the installed copies are kept.
-- Separate jobs on one LOD folder (the desktop's stage buttons) no longer treat each other's
-  blocks as damaged. Incremental checks use the hashes the folder's receipt records.
-- A stage that finished publishing is recorded as complete even if you cancel just afterwards.
-- New **Previous outputs to keep** setting and `--keep-previous` option (default 1); older
-  `.previous-` copies are removed after publication. New `PenguLOD clean` command lists and,
-  with `--apply`, removes previous copies and unfinished build folders.
-- Unfinished build folders of an output, outdated terrain tile caches, and old desktop run
-  and analysis folders are removed automatically.
-- Relative paths in a CLI preset resolve against the preset's folder.
-- Texture generation no longer creates an empty output folder when nothing is published.
-
-Existing output is read as before. The first publication after updating may remove
-`.previous-` copies beyond the newest one; set a higher number first to keep more.
-
-Game runtime (SKSE plugin)
-
-- Entering a worldspace no longer loads every dynamic LOD model in one frame. At most
-  `iMaxShowPerUpdate` (default 200) are loaded per update; the nearest come first.
-- At `iMaxShown`, a nearer object replaces the farthest one drawn, so objects next to the
-  player are never the ones missing. Lowering the cap in the menu takes effect at once.
-- Native grid objects in `PenguLOD.esp` are kept in step even when there is no other
-  dynamic LOD to draw.
-- Saving one menu page no longer reloads `PenguLOD.ini` over values changed live on another.
-  External edits are still picked up, and are now read on the game's main thread.
-- Adaptive quality recognises a frame cap (V-sync, a limiter): at the cap counts as
-  headroom, and a target at or above the cap is used just below it. Before, it could step
-  down to the lowest preset and never come back. The menu shows the detected cap.
-- Adaptive quality keeps its preset when the layer settings are reloaded from the file.
-- The quality layer checkboxes appear once LOD blocks load, also after starting from the main
-  menu or an interior, and blocks are rescanned after a worldspace change.
-- Water opacity works with water animation turned off.
-- One settings parser for every section. `no`, `off` and inline comments (`0 ; off`) are
-  read correctly, numbers do not depend on the system locale, and a malformed value is
-  logged and ignored instead of being treated as on.
-- A damaged data file is refused instead of crashing the game while it loads.
-- DynDOLOD.dll counts as present only when it is actually loaded. The About page shows the
-  real log location, and the Dynamic LOD page counts switchable references, grid objects
-  and window glow separately.
-
-The data file format is unchanged: this runtime reads output from earlier generator versions,
-and earlier runtimes read output from this one. New settings files include `iMaxShowPerUpdate`;
-an existing `PenguLOD.ini` uses the default until the key is added.
-
-Game runtime package
-
-- The SKSE plugin archive contains the installer, the three DLLs and license notices only,
-  about 1 MB instead of 107 MB. It no longer bundles source archives, which mod sites
-  reject; the source is the release tag in the repository.
-- Shorter wording in the installer's game version step.
+- Fixed output folders becoming unusable after tree LOD was generated without LOD4 selected.
+- Added support for output folders below a symbolic link.
+- Fixed the CLI rejecting options listed in `--help`.
+- Changed the CLI to refuse generation options next to `--settings` or `--request`, and malformed or out-of-range numbers.
+- Removed `--tree-3d-by-name` and `--tree-3d-own-lod`.
+- Changed `scan` to write its report to the current folder when `--report` is not given.
+- Fixed the stage page buttons ignoring the setup check, texture compute and scope expansion settings.
+- Changed whole-number options to step by one.
+- Fixed the seasonal checkboxes on Terrain and Object LOD getting out of sync.
+- Changed the MO2 game-folder override to a separate setting. **Detect Steam installation** no longer replaces it.
+- Fixed a malformed NIF, DDS or grass cache stopping texture repair, tree LOD, the mesh maker or conversion.
+- Fixed mod folders that differ only in case hiding one another or stopping the scan.
+- Fixed duplicate tree LOD blocks with different case on Linux.
+- Fixed a previous `Occlusion.esp` being used as the source of cell data.
+- Fixed large references not treating `.esm` and `.esl` files without the ESM flag as masters.
+- Fixed reading of 24-bit and legacy X8 textures, worldspaces with unusual EditorIDs and cells with a placeholder water height.
+- Removed underside step 4. Presets saved with it use step 8.
+- Fixed changes to a file inside an archive going undetected when its size is unchanged.
+- Changed grass, textures and terrain to publish the way object LOD does, receipt and files in one step.
+- Changed publication on Linux to swap the old and new folders atomically.
+- Fixed edits to `meta.ini` and `SKSE/Plugins/PenguLOD.ini` failing verification, resume or publication.
+- Fixed separate jobs on one LOD folder treating each other's blocks as damaged.
+- Fixed a stage that finished publishing not being recorded as complete when cancelled just afterwards.
+- Added **Previous outputs to keep** (`--keep-previous`, default 1) and the `clean` command.
+- Changed unfinished build folders, outdated terrain tile caches and old desktop run folders to be removed automatically.
+- Changed relative paths in a CLI preset to resolve against the preset's folder.
+- Fixed texture generation creating an empty output folder when nothing is published.
+- Changed the game plugin to load at most `iMaxShowPerUpdate` (default 200) dynamic LOD models per update, nearest first.
+- Changed the game plugin at `iMaxShown` to replace the farthest object drawn with a nearer one.
+- Fixed native grid objects in `PenguLOD.esp` falling out of step when there is no other dynamic LOD.
+- Fixed saving one menu page reloading `PenguLOD.ini` over values changed on another.
+- Fixed adaptive quality stepping down to the lowest preset under a frame cap, and losing its preset on a settings reload.
+- Fixed the quality layer checkboxes not appearing after starting from the main menu or an interior.
+- Fixed water opacity with water animation turned off.
+- Fixed the game plugin's settings parser misreading `no`, `off`, inline comments and locale-dependent numbers.
+- Fixed a crash on a damaged data file.
+- Fixed DynDOLOD.dll counting as present when it is not loaded.
+- Changed the SKSE archive to hold only the installer, the three DLLs and licence notices.
+- Removed the source archives from the SKSE archive.
 
 ## [0.6.0-alpha.4] - 2026-11-10
 
-- Fix Review output scope rejecting older AnvilLOD output before inspecting it.
-  Reviews now read output paths and coverage independently of generation setup.
-- Report old output by stage, folder and identifying files. Generation still
-  requires an empty or compatible PenguLOD output folder.
-- Apply the same read-only review to CLI presets, and prevent scope reports from
-  being saved inside the output folders being inspected.
-
-Scope review does not clear output folders or change saved settings.
+- Fixed **Review output scope** rejecting older AnvilLOD output before inspecting it.
+- Changed old output to be reported by stage, folder and identifying files.
+- Added the read-only scope review to CLI presets.
+- Fixed scope reports being saved inside the output folders being inspected.
 
 ## [0.6.0-alpha.3] - 2026-11-10
 
-- Use Mod Organizer 2 and Community Shaders names in app labels, diagnostics,
-  setup instructions and package descriptions, without naming specific forks.
-- Remove the additional attribution line from the About panel.
-
-This is a text-only update. Settings, generation behavior and existing output are unchanged.
+- Changed app labels, diagnostics, setup instructions and package descriptions to name Mod Organizer 2 and Community Shaders without naming forks.
+- Removed the additional attribution line from the About panel.
 
 ## [0.6.0-alpha.2] - 2026-11-10
 
-- Replaced the separate Overview and Pipeline screens with Generation Overview:
-  choose stages, set their output folders and run them in order.
-- Moved shared inputs to Game & resources, object/tree/grass LOD options to
-  Object LOD, and scan coverage to Scan results. Stage pages have their own
-  generation action, kept visible at the bottom of the window.
-- Removed slogans and implementation-focused paragraphs. Setting explanations
-  are available as tooltips; object LOD groups can be expanded or searched.
-- Updated the walkthrough and settings reference for the new layout.
-
-Saved settings, quality defaults and generated output remain unchanged. This UI
-update does not require regenerating existing output.
+- Changed the Overview and Pipeline screens into one **Generation Overview**.
+- Changed shared inputs to **Game & resources**, object, tree and grass LOD options to **Object LOD**, and scan coverage to **Scan results**.
+- Added a generate button to each stage page.
+- Changed setting explanations to tooltips. Object LOD groups can be expanded or searched.
+- Removed slogans and implementation paragraphs from the app.
+- Changed the walkthrough and settings reference for the new layout.
 
 ## [0.6.0-alpha.1] - 2026-11-09
 
-- PenguLOD now owns the complete product identity: desktop and CLI projects, generated plugins,
-  runtime data, asset folders, manifests, logs and in-game menus use PenguLOD names.
-- Added a matching PenguLOD SKSE package with separate builds for supported Skyrim runtimes.
-  Generator and runtime share one release version; AnvilLOD credits and source history remain.
-- Preserved settings import, old grass/texture manifest readers and legacy mesh cost reports.
-  The new runtime reads an older output set when no new runtime data is installed.
-- Added upgrade checks that prevent new generation or publication over an AnvilLOD-named output
-  set, detect the old runtime and exclude both generations of generated plugins from source scans.
-- Added an upgrade walkthrough. Existing settings and generated output are not renamed or installed
-  automatically. Use a fresh output set and the matching runtime for the first switch.
+Use a fresh output set and the matching game plugin for the first switch from AnvilLOD.
+
+- Changed all product names to PenguLOD: projects, generated plugins, runtime data, asset folders, manifests, logs and in-game menus.
+- Added the PenguLOD SKSE package, with a build for each supported Skyrim runtime.
+- Added upgrade checks that stop generation or publication over an AnvilLOD-named output set and detect the old game plugin.
+- Added an upgrade walkthrough.
 
 ## [0.5.0-alpha.1] - 2026-11-09
 
-- Add saved-output cost reports and comparisons in the desktop and CLI. Count
-  finished blocks, triangles, mesh groups and local texture storage, including
-  reused blocks. Compare matching worlds, levels and seasons, show changed
-  settings, and identify measurements that are unavailable.
-- Record completed stages, file ownership and generated dependencies. Verify a
-  selected output set, preview a combined package update, and publish it with a
-  backup. Block mismatched textures, unowned files and incomplete replacements.
-- Review existing generation scope and optionally expand a run to retain its
-  worlds and levels. Shared masters and atlases are never merged from partial sets.
-- Make terrain and object worldspace wildcards consistent, honor PBR waterfalls
-  independently, and label unsupported imported rule actions as read-only.
-- Include the settings reference, walkthrough and output-management guide in Linux
-  and Windows packages. Correct guidance for separately installed SKSE plugins.
-- Consolidate the large-reference regeneration fix and optional material/texture
-  optimizations from the alpha-14 candidate. Quality defaults remain unchanged.
-
-Existing settings and output remain usable. Keep a working generation separate
-while testing. Older output can be measured without conversion; managed updates
-require receipts from a new generation. Install matching texture and object
-outputs together. Runtime filenames remain compatible with the AnvilLOD plugin.
+- Added saved-output cost reports and comparisons to the desktop and CLI.
+- Added output set management: recorded stages and file ownership, **Verify output set**, and a combined package update with preview and backup.
+- Added a review of existing generation scope, and an option to expand a run to keep its worlds and levels.
+- Fixed inconsistent terrain and object worldspace wildcards.
+- Fixed **PBR waterfalls** depending on PBR object LOD.
+- Changed unsupported imported rule actions to be labelled read-only.
+- Added the settings reference, walkthrough and output-management guide to the packages.
+- Added the large-reference fix and the optional material and texture optimizations from 0.4.0-alpha.14.
 
 ## [0.4.0-alpha.14] - 2026-10-30
 
-- Consolidate shader-compatible object materials with matching auxiliary texture pages,
-  nonstandard cutout thresholds and integer-shifted wrapping UVs. Preserve normal gloss
-  alpha, color-space metadata, cubemaps, emittance and HD/plain snow-shader selection.
-- Add optional private object LOD texture sizing and compression in desktop, presets,
-  pipeline JSON and CLI. Reuse authored compressed mip levels without recompression;
-  supported uncompressed textures receive smaller BC7 copies. Full-detail assets and
-  geometry stay unchanged. The standalone texture limit defaults to 1024 pixels.
-- Keep unsupported texture inputs local to the affected material, report fallback reasons
-  and audit the final remapped texture paths. Retain previous content-addressed textures
-  needed by blocks outside the rebuild scope. Repair damaged generated texture copies.
-- Report material consolidation and encoded texture byte counts. These are generation
-  diagnostics, not estimates of in-game FPS or resident VRAM.
+Regenerate object LOD to use the new options.
 
-Regenerate object LOD with the desired optimization options and replace the complete
-installed object output, including its textures. Texture generation, terrain and grass
-caches do not need regeneration solely for these changes.
-
-- Rebuild large-reference lists from source plugins even when previous generated output
-  remains enabled. An installed `AnvilLOD.esm` or `PenguLOD.esm` no longer causes the
-  replacement master to be omitted. Current source overrides and other mods' lists
-  still determine which references qualify.
+- Added consolidation of shader-compatible object materials, including auxiliary texture pages, cutout thresholds and shifted wrapping UVs.
+- Added optional object LOD texture sizing and compression. The standalone texture limit defaults to 1024 pixels.
+- Changed an unsupported texture input to affect only its own material. The fallback reason is reported.
+- Added material consolidation and texture byte counts to reports.
+- Fixed large-reference lists not being rebuilt while previous generated output is enabled.
 
 ## [0.4.0-alpha.13] - 2026-10-30
 
-- Prevent previous output from feeding back into object LOD. Generated plugin references,
-  terrain undersides and generated object models are excluded as sources. Preflight detects
-  installed output plugins even when generation writes to a different folder. Regenerate
-  object LOD if an earlier automatic-object run included previous output.
-- Keep static architecture when separate glow, smoke, animated effects or shaderless layers
-  cannot be drawn as static LOD. Report each omission; opaque unsupported materials and
-  damaged geometry still reject the model. Empty legacy geometry links no longer reject
-  otherwise valid structures. Texture and tree rendering retain their stricter checks.
-- Reduce redundant foliage on installed trees below their hard triangle budgets. The new
-  geometry target defaults to 65%; sampled silhouette, coverage and material constraints
-  may retain more. Desktop, saved settings and CLI expose the target.
-- Stage only retained object blocks instead of copying blocks scheduled for rebuild or
-  deletion. Record output hashes during block writes and retained-file copies, avoiding
-  another full read of those files before publication. Resume still verifies published
-  contents; changed retained blocks with saved hashes are rebuilt.
-
-Install the matching texture output alongside object LOD. Generating textures does not
-automatically update an installed copy in a mod manager. Terrain and grass caches do not
-need regeneration for these fixes.
+- Fixed previous output feeding back into object LOD. Regenerate object LOD if an earlier automatic-object run included it.
+- Changed static architecture to be kept when its glow, smoke, animated effects or shaderless layers cannot be drawn. Each omission is reported.
+- Added foliage reduction for installed trees below their triangle budgets. The geometry target defaults to 65%.
+- Changed staging to copy only retained object blocks and to record hashes while writing.
 
 ## [0.4.0-alpha.12] - 2026-10-30
 
-- Discover compatible rules, recipes, mesh lookups, world exclusions, child-world settings
-  and render models in enabled mods and resource-only folders. Structured Data/DynDOLOD
-  folders and legacy layouts work without any executable requirement.
-- Scan-only requests no longer start occlusion generation or terrain preparation for
-  an enabled underside/occlusion option. These operations require generation.
-- Multiple external packs have explicit priority, with enabled mods winning. Overview and
-  JSON reports identify selected files and replaced sources; preflight explains missing data.
-- Desktop, presets, JSON and CLI expose additional resource folders. Resource content
-  changes invalidate saved jobs; unrelated bundle executables are not resource inputs.
+- Added discovery of rules, recipes, mesh lookups, world exclusions, child-world settings and render models in enabled mods and resource-only folders.
+- Fixed scan-only requests starting occlusion generation or terrain preparation.
+- Added a priority order for multiple external packs. Reports name the selected files.
+- Added additional resource folders to the desktop, presets, JSON and CLI.
 
 ## [0.4.0-alpha.11] - 2026-10-30
 
-- Optional native hybrid tree authoring creates aligned front/side trunk cards and normal
-  textures from full models, combined with reduced 3D crowns. Installed LOD models retain
-  precedence; ambiguous material separation or unavailable renders keep native geometry.
-- Both cards count toward tree budgets. Record/season variants have separate verified
-  resources; damaged private caches are repaired. Used trunk textures ship with LOD output.
-- Desktop, presets, JSON and CLI expose hybrid authoring and trunk resolution controls.
-  Tree coverage reports distinguish native hybrids, geometry reduction and billboard fallback.
+- Added optional native hybrid tree authoring: front and side trunk cards with normal textures, combined with reduced 3D crowns.
+- Added hybrid authoring and trunk resolution settings.
+- Changed tree coverage reports to distinguish native hybrids, geometry reduction and billboard fallback.
 
 ## [0.4.0-alpha.10] - 2026-10-30
 
-- Optional automatic object LOD fills missing levels requested by active rules, preserving
-  installed models and explicit exclusions. Native generation applies per-level budgets,
-  minimum size and reduction controls; unsupported sources skip with model-specific reasons.
-- Generated meshes participate in record/season texture matching and optional object
-  atlases. Content-keyed private caches verify generated files before reuse and repair damage.
-  Overview, scan reports and `PenguLOD.objects.json` show coverage and costs.
-- Desktop, presets, JSON requests and CLI flags expose the same controls. CLI scans now
-  honor JSON LOD requests and preset worker/cache settings while always disabling publication.
+- Added optional automatic object LOD for missing levels that active rules request, with per-level budgets, minimum size and reduction settings.
+- Added object LOD coverage and costs to Overview, scan reports and `PenguLOD.objects.json`.
+- Fixed CLI scans ignoring JSON LOD requests and preset worker and cache settings.
 
 ## [0.4.0-alpha.9] - 2026-10-30
 
-- Native tree and grass billboards can render separate front/side diffuse and normal
-  maps. Object-LOD cards consume each view with its own dimensions; standard BTT tree
-  LOD retains the front view. Origin-centered framing keeps off-center crowns aligned.
-- Tree texture resolution follows the largest winning reference scale, with an unplaced
-  default and explicit rule overrides. It does not change physical tree dimensions.
-- Packed complex-grass color and normals are detected per material and split before
-  resizing. Grass normal atlases use normalized mipmaps, independent of specular alpha;
-  the full runtime grass shader is not reproduced.
-- Desktop, saved presets and CLI requests expose HD views, scale discovery, grass layout
-  and detection threshold. Regenerate textures followed by LOD; grass placement caches
-  do not need regeneration for these settings.
+Regenerate textures, then LOD.
+
+- Added separate front and side diffuse and normal maps for tree and grass billboards.
+- Changed tree texture resolution to follow the largest winning reference scale.
+- Added detection and splitting of packed complex-grass colour and normals.
+- Added settings for HD views, scale discovery, grass layout and the detection threshold.
 
 ## [0.4.0-alpha.8] - 2026-10-30
 
-- LOD scans honor deterministic Base Object Swapper removals that replace references or
-  base objects with Skyrim's invisible XMarker. Removed objects stay out of tree/object
-  LOD, child-world copies, generated runtime references and new large-reference entries.
-- Winning enabled `*_SWAP.ini` files are processed in BOS filename order. Reference
-  swaps override base swaps; ambiguous conditional/chance replacements do not become
-  blanket removals. Scan reports identify removed references and unsupported entries.
-- The BOS runtime must be present in the selected Data view. Visible substitutions,
-  property-only edits, seeded chance evaluation and MergeMapper remapping are not yet
-  supported. Regenerate LOD after changing swap configurations.
+- Added Base Object Swapper removals to LOD scans. References and base objects swapped to an XMarker are left out of LOD.
+- Changed `*_SWAP.ini` files to be processed in BOS filename order.
+- Added removed references and unsupported entries to scan reports.
 
 ## [0.4.0-alpha.7] - 2026-10-29
 
-- Missing recipe texture replacements now retain the affected material's supplied LOD
-  textures and UVs. Valid matches on other materials and record/season variants continue.
-- Fallback warnings identify the model, shape and missing file in the run log, pipeline
-  receipt and `PenguLOD.recipes.json`. Repeated uses of the same fallback warn once.
-- A fallback requires the supplied LOD textures to exist. Corrupt texture data, broken
-  recipe inputs, cycles and conflicting mappings still fail safely. Installing missing
-  replacements invalidates affected cached output; recipe-mapped blocks rebuild after
-  this update.
+- Changed a missing recipe texture replacement to keep the material's supplied LOD textures and UVs.
+- Added fallback warnings that name the model, shape and missing file.
 
 ## [0.4.0-alpha.6] - 2026-10-29
 
-- Fixed full-model texture matching for atlases made from one repeated source, including
-  meshes whose UVs wrap beyond the atlas rectangle. Record texture variants now rebuild
-  those atlases while preserving the LOD mesh's UVs.
-- Full shapes already using an atlas with identical texture slots no longer substitute
-  that atlas into its own source tiles or cause cyclic normal-map recipe failures.
-- Duplicate full-model shape names can be resolved by a unique matching LOD material.
-  Ambiguous record overrides and distinct contributors to merged shapes remain protected.
-- Multiple-source layouts still require an unambiguous source tile, and missing required
-  replacement textures remain errors. Recipe-mapped blocks rebuild after this update.
+- Fixed full-model texture matching for atlases made from one repeated source.
+- Fixed cyclic normal-map recipe failures on shapes that already use an atlas.
+- Fixed duplicate full-model shape names not being resolved by a matching LOD material.
 
 ## [0.4.0-alpha.5] - 2026-10-29
 
-- Grass LOD atlases use only types with instances in the selected cache cells, including
-  matching seasonal cells when seasons are enabled. Unused grass-library records can no
-  longer fail atlas generation because their textures are absent.
-- Atlas preparation reads cache type headers and checks payload bounds without decoding
-  every blade. Used models absent from GRAS records still receive model-based billboards.
-- Grass atlas preparation now runs before occlusion generation, so required grass asset
-  failures are reported before the long occlusion pass.
+- Fixed grass atlas generation failing on unused grass records with missing textures.
+- Changed grass atlas preparation to read cache headers without decoding every blade.
+- Changed grass atlas preparation to run before occlusion generation.
 
 ## [0.4.0-alpha.4] - 2026-10-29
 
-- Fixed vanilla and legacy grass meshes using Bethesda's `\bNOR` normal-map marker.
-  Native rendering uses geometry normals instead of treating the marker as a file path.
-  Other invalid texture paths remain errors.
-- Automatic tree billboard discovery reports and excludes whole trees with unsupported
-  animated, blended or view-dependent effect materials. Explicitly requested renders,
-  required grass/trunk/object resources and malformed geometry still fail safely.
-  No partial tree billboard is published.
+- Fixed grass meshes that use Bethesda's `\bNOR` normal-map marker.
+- Changed automatic tree billboard discovery to report and skip trees with unsupported effect materials.
 
 ## [0.4.0-alpha.3] - 2026-10-29
 
-- Added native triangle-strip reading, self-contained static skin poses, SSE skin
-  partition buffers and separate dynamic vertex positions on Linux and Windows.
-- Scene traversal honors active switch branches, avoiding duplicate static/animated
-  tree geometry. Invalid indices, weights and truncated blocks report precise failures.
-- Texture rendering supports static effect textures, tint, UV transforms and lighting
-  influence. Animated, blended and view-dependent effect resources remain unsupported.
-- Incomplete visible models cannot publish partial LOD or required texture output.
-  Deep diagnostics report rejected geometry with its source. Existing texture output
-  is preserved when a required model fails; optional valid texture pairs can be retained.
-- Native full-tree reduction uses plain diffuse/normal LOD materials, avoiding inherited
-  PBR, environment, parallax and glow settings. Authored passthrough materials are preserved.
-- Geometry and automatic billboard cache versions changed; affected LOD must regenerate.
-  Animation evaluation and external skeletons are not supported; in-game visual validation
-  remains ongoing.
+Regenerate LOD.
+
+- Added reading of triangle strips, static skin poses, SSE skin partition buffers and dynamic vertex positions.
+- Fixed duplicate static and animated tree geometry.
+- Added static effect textures, tint, UV transforms and lighting influence to texture rendering.
+- Changed an incomplete visible model to block partial LOD or texture output.
+- Changed native full-tree reduction to use plain diffuse and normal LOD materials.
 
 ## [0.4.0-alpha.2] - 2026-10-29
 
-- Added a self-contained Windows x64 ZIP with the Avalonia desktop, CLI, native
-  grass backend and optional Vulkan texture helper. Linux portable and AppImage
-  packages continue to use the same application source and version.
-- Releases require Linux and Windows engine/UI tests, native backend tests and
-  extracted-package startup checks before publishing either platform.
-- Native dependencies are selected for the target OS. Windows builds retain UTF-8
-  path support and use Windows configuration/cache locations. Grass process tests
-  cover success, cancellation and recovery on both hosts, including Unicode paths.
-- Windows grass staging uses hard links with a cancellable copy fallback, avoiding
-  a requirement for administrator rights or Developer Mode. Steam discovery also
-  reads the default Windows Steam installation and its library manifests.
-- Output locks account for Windows path casing, preventing two jobs from targeting
-  the same directory through differently capitalized paths.
-- Windows desktop modlist testing and physical GPU validation remain open work.
+- Added a Windows x64 package with the desktop app, CLI, grass backend and optional Vulkan texture helper.
+- Added Linux and Windows tests and package startup checks to releases.
+- Changed Windows grass staging to hard links with a copy fallback.
+- Added Steam discovery for the default Windows installation.
+- Fixed two jobs targeting one folder through differently capitalised paths on Windows.
 
 ## [0.4.0-alpha.1] - 2026-10-29
 
-- Native TexGen `x` recipes retain source dimensions and apply the specified mipmap
-  filter, progressive contrast/brightness and alpha handling. Copy and conversion
-  dependencies support source alternatives, intermediates and in-place conversions.
-- Object LOD follows recipe UV layouts, including repeated/cropped tiles and nested
-  copy/stitch chains. Record and seasonal texture overrides rebuild isolated atlas
-  variants, preserving unrelated tiles, normals and original atlas UVs.
-- Normal-only overrides work on full textures and stitched atlases. Normal-map reduction
-  averages directions independently of gloss alpha. Native authoring preserves shape
-  names needed for subsequent material matching.
-- Texture manifests retain validated recipes and original in-place conversion inputs.
-  LOD fingerprints include recipe/source content; reports explain mapped, variant,
-  retained and failed materials. Ambiguous full-texture layouts retain the full texture;
-  conflicting atlas replacements stop the combined pipeline and preserve previous output.
-- Synthetic tests cover conversions, merged shapes, UV coverage, seasonal output,
-  object atlasing, changed sources, reuse and recovery. Full HD billboard/render parity
-  and broad in-game compatibility remain separate work.
+- Added native TexGen `x` recipes, with copy and conversion dependencies.
+- Changed object LOD to follow recipe UV layouts.
+- Changed record and seasonal texture overrides to rebuild separate atlas variants.
+- Added normal-only overrides on full textures and stitched atlases.
+- Added validated recipes to texture manifests and recipe content to LOD fingerprints.
 
 ## [0.3.0-alpha.1] - 2026-10-28
 
-- Native 3D trees and automatic billboards preserve record-specific texture variants.
-  Missing or ambiguous shape mappings produce explicit fallback reasons.
-- Optional foliage reduction removes whole cards within configurable sampled alpha-coverage
-  limits (1% near, 3% far by default), preserving surviving UVs and reporting removed geometry.
-- Terrain combines source normal detail with slope normals, honors the default landscape normal
-  INI setting, and supports PBR albedo/AO calibration with opt-in texture twin lookup.
-  Colour mipmaps average in linear light without treating material alpha as transparency.
-- Seasonal diagnostics report resolved swaps and grass-cache gaps. Pipeline reports count
-  default/WIN/SPR/SUM/AUT output. Invalid seasonal records or required meshes stop publication.
-- Interrupted terrain jobs resume verified mesh/diffuse/normal tile sets, including seasons.
-  Corrupt tiles are rebuilt individually; source, settings or version changes invalidate reuse.
-- Added terrain phase timings, bounded sampling caches, synthetic benchmarks and CI reports.
-  Pipeline caches are kept outside source game files and input mods.
-- Shared desktop/CLI controls and neutral user guides cover the new features. In-game terrain/tree
-  appearance and physical GPU validation remain separate open work.
+- Added record-specific texture variants for native 3D trees and automatic billboards.
+- Added optional foliage reduction within alpha-coverage limits (1% near, 3% far by default).
+- Changed terrain normals to combine source normal detail with slope normals.
+- Added PBR albedo and ambient-occlusion calibration for terrain, with opt-in texture twin lookup.
+- Added seasonal diagnostics for resolved swaps and grass-cache gaps.
+- Added resume for interrupted terrain jobs.
+- Added terrain phase timings.
+- Changed pipeline caches to be kept outside game files and input mods.
 
 ## [0.2.0-alpha.3] - 2026-10-28
 
-- Reorganized documentation into setup, grass, textures and troubleshooting guides, with
-  current workflow instructions and a focused roadmap.
-- Removed profile-specific paths, local benchmark results and development-session notes
-  from documentation; replaced profile-derived fixture names with neutral examples.
-- Binary packages now include only user-facing guides. Bundled backend source excludes
-  assistant instruction files and local tool state while retaining build inputs and licenses.
-- No generation behavior changes.
+- Changed the documentation into setup, grass, textures and troubleshooting guides.
+- Removed profile-specific paths, local benchmark results and development notes from the documentation.
+- Changed binary packages to include only user-facing guides.
 
 ## [0.2.0-alpha.2] - 2026-10-27
 
-- Fixed terrain generation failing on unpainted LAND by using Skyrim's `landscape/dirt02.dds`
-  default instead of `landscape/default.dds`. Honor `sDefaultLandDiffuseTexture` from the
-  selected profile/explicit INI with case-insensitive Linux path lookup.
-- Skip the base texture when alpha layers fully cover it; missing painted textures
-  still stop publication and now identify the world, cell and quadrant.
-- Added regression coverage for omitted/null base layers, INI precedence and opaque paint.
+- Fixed terrain generation failing on unpainted land. The default texture is `landscape/dirt02.dds`, or `sDefaultLandDiffuseTexture` from the INI.
+- Changed the base texture to be skipped where alpha layers cover it fully.
+- Changed a missing painted texture to name the world, cell and quadrant.
 
 ## [0.2.0-alpha.1] - 2026-10-27
 
-- Portable archive and AppImage packages, isolated candidate builds, and compatibility checks
-  for Ubuntu 24.04, Debian 13 and Fedora 43.
-
-- Shared desktop/CLI presets and validation, per-stage CLI commands, request export,
-  saved-job inspection and compact reports. Legacy CLI generation now uses safe publication.
-
-- Optional headless Vulkan BC7 encoding with device/quality checks, a measured automatic
-  speed gate, CPU fallback and desktop/CLI benchmark reports. Software-driver validation
-  passes; hardware performance validation remains pending.
-
-- Native paired object texture atlases with UV remapping, material grouping, padded mips,
-  conservative eligibility checks and coverage reports.
-
-- Seasonal terrain, tree atlases/BTT/LST and native 3D tree replacements, using Seasons of
-  Skyrim form swaps. Added a synthetic seasonal profile and end-to-end regression checks.
-
-- Billboard/trunk/object rendering now bakes source normals, UV transforms and clamp modes,
-  with configurable PBR albedo/AO and light calibration. Fixed stale material grouping keys
-  after texture replacement.
-
-- Added automatic pipeline preflight and a Diagnostics page with model/texture coverage,
-  stale-cache checks, runtime requirements, asset precedence and metadata-only JSON reports.
-
-- Shared desktop/CLI pipeline with durable checkpoints, dependency invalidation, verified
-  output reuse, cancellation recovery and per-stage measured timings.
-- Isolated LOD publication with previous-output backups, concurrent-job locks and retained
-  failure logs; a failed or empty generation preserves the installed output.
-- Native terrain/water stage with landscape layer baking, model-space normals, existing-BTR
-  fallback, terrain-shadow heightmap export and desktop controls.
-- Per-level tree budgets, authored far-model selection, native trunk reduction and optional
-  full-model fallback. Foliage geometry and UVs are preserved; over-budget levels use
-  billboards with explicit coverage/cost reports in the desktop and scan JSON.
-- Native fallback preserves record-specific alternate tree textures by retaining their
-  generated billboards, including seasonal replacements.
+- Added portable archive and AppImage packages for Ubuntu 24.04, Debian 13 and Fedora 43.
+- Added shared desktop and CLI presets, per-stage CLI commands, request export and saved-job inspection.
+- Added optional Vulkan BC7 encoding with a CPU fallback.
+- Added object texture atlases.
+- Added seasonal terrain, tree LOD and 3D tree replacements from Seasons of Skyrim swaps.
+- Changed billboard, trunk and object rendering to bake source normals, UV transforms and clamp modes, with PBR and light calibration.
+- Fixed stale material grouping keys after texture replacement.
+- Added the pipeline preflight and a Diagnostics page.
+- Added the shared desktop and CLI pipeline with checkpoints, verified output reuse and cancellation recovery.
+- Added isolated LOD publication with previous-output backups and job locks.
+- Added the terrain and water stage.
+- Added per-level tree budgets, far-model selection, trunk reduction and optional full-model fallback.
 
 ## [0.1.0-alpha.1] - 2026-10-27
 
-Initial PenguLOD Linux release, based on CageTV/AnvilLOD 0.2.70.
+Initial Linux release, based on CageTV/AnvilLOD 0.2.70.
 
-### Included
-
-- Native Avalonia desktop and Linux CLI, with direct Fluorine/MO2 profile access.
-- Native texture stitching, tree/grass billboards, hybrid tree trunk textures and experimental object rendering.
-- Bundled FasterNGIO CPU grass caching and combined grass → textures → LOD jobs.
-- Incremental LOD generation, existing 3D-tree model support, settings/presets, previews, progress and cancellation.
-- Native BC6H texture decoding/repair and Linux path handling that preserves mod-manager configuration.
-- Fixes for numeric settings bindings, UI stalls, backend scheduling, invalid grass blades and pipeline failure handling.
-- AnvilLOD 0.2.70 occlusion fixes and city grass exclusion; new presets use its updated occlusion sampling defaults.
-- PenguLOD branding, independent versioning and one-time migration of existing AnvilLOD settings.
-- Automated Linux tests, native backend build/tests, portable packages, source archives and SHA-256 checksums.
-
-### Limits at release
-
-- Linux x64 release target: Ubuntu 24.04 or compatible newer glibc distributions. Other distributions need validation.
-- Native terrain/water LOD generation, full TexGen/PBR parity, seasonal billboard generation and GPU grass acceleration remain planned.
-- 3D trees require suitable installed LOD models; dense tree packs can produce large geometry budgets.
-- The Windows AnvilLOD SKSE plugin is installed separately for dynamic LOD/runtime features. Its game-side names and formats are retained.
-- No game assets or generated mod output are included. Grass/texture generation are desktop workflows in this release.
-
-Download the `linux-x64` archive, extract it, and launch `linux-x64/run-pengulod.sh`.
-Existing AnvilLOD settings are imported once without changing the original, output paths or cache location.
-See the [user guide](https://github.com/opteron-x86/PenguLOD/blob/main/docs/USER-GUIDE.md) for setup.
+- Added the desktop app and Linux CLI, with Mod Organizer 2 profile access.
+- Added texture stitching, tree and grass billboards and hybrid tree trunk textures.
+- Added bundled grass caching, and combined grass, textures and LOD jobs.
+- Added incremental LOD generation, 3D tree model support, presets, previews, progress and cancellation.
+- Added BC6H texture decoding and repair.
+- Added a one-time import of AnvilLOD settings.

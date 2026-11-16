@@ -14,7 +14,10 @@ change for a PenguLOD release.
    ```
 
 2. Add a `## [0.7.0-beta.1] - YYYY-MM-DD` section to `CHANGELOG.md`. It becomes the release
-   notes. Update the version in `README.md`.
+   notes on GitHub and Nexus. Write one line per change, starting with Added, Changed, Fixed
+   or Removed, and say only what changed. If output has to be generated again, say so in one
+   line above the list. Causes, measurements and how a fix was checked belong in the pull
+   request. Update the version in `README.md`.
 3. Test and build locally:
 
    ```bash
