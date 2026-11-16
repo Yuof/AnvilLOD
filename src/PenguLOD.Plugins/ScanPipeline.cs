@@ -506,6 +506,12 @@ public static class ScanPipeline
             if (in3d.Count > 0)
             {
                 allRefs = [.. allRefs, .. tree3d!.ToReferences(in3d, t3)];
+                if (req.Generate && req.OutputFolder is { } trunkOutput)
+                {
+                    tree3d.PrepareTrunkAtlas(trunkOutput);
+                    if (tree3d.TrunkAtlas is { } trunks)
+                        progress?.Report($"Tree trunks: {trunks.Tiles:N0} trunk card images in one {trunks.Size}x{trunks.Size} atlas ({trunks.Reduced:N0} scaled down), so a block draws the trunk cards of all its tree types together.");
+                }
                 foreach (var t in in3d) objectLodWorlds.Add(t.Worldspace);
             }
             if (light.Count > 0)
