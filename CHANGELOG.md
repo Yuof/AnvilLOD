@@ -3,6 +3,18 @@
 PenguLOD uses its own semantic version, independent of AnvilLOD’s game plugin version.
 Pre-release versions are marked alpha or beta until the supported workflows have broader validation.
 
+## [Unreleased]
+
+Object atlases
+
+- **Pack object texture atlases** packs more surfaces and onto fewer pages. A surface is
+  now fitted into its texture tile triangle by triangle, so a wall or rock face mapped
+  over several tiles in separate pieces can be packed; before, the whole surface had to
+  sit in one tile. Pages hold up to 256 materials instead of 64, and a page that is half
+  empty is written half as tall. On a 2,047-plugin load order, object shapes per block
+  with the option on fell from 32.7 to 25.3 at LOD8 and from 51.3 to 37.8 at LOD16. The
+  option is still off by default.
+
 ## [0.6.0-beta.3] - 2026-11-15
 
 A generated `Occlusion.esp` no longer hides distant objects and trees, and tree, trunk and
