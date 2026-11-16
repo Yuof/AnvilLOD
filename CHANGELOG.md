@@ -2,11 +2,9 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
-## [0.6.0-beta.6] - 2026-11-16
+## [Unreleased]
 
-Regenerate object LOD.
-
-- Changed the trunk cards of hybrid 3D trees to use one shared atlas.
+- Changed the trunk cards of hybrid 3D trees to use one shared atlas. Regenerate object LOD.
 
 ## [0.6.0-beta.5] - 2026-11-16
 
