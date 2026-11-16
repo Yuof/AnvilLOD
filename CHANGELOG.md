@@ -3,7 +3,11 @@
 PenguLOD uses its own semantic version, independent of AnvilLOD’s game plugin version.
 Pre-release versions are marked alpha or beta until the supported workflows have broader validation.
 
-## [Unreleased]
+## [0.6.0-beta.4] - 2026-11-15
+
+A seasonal generation no longer stops at the end of object LOD on a swap target whose
+alternate texture names no texture set, and the object atlas option packs more surfaces.
+Nothing needs to be generated again for this update.
 
 Object atlases
 
