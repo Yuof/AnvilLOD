@@ -1,7 +1,23 @@
 # Resource packs
 
 A resource pack supplies LOD rules, texture recipes and render models. Packs made for
-DynDOLOD, including DynDOLOD Resources, work as they are. PenguLOD does not bundle any pack.
+DynDOLOD work as they are. PenguLOD does not bundle any pack.
+
+## What most setups need
+
+Two different things carry the name DynDOLOD, and they go in different places:
+
+- **The DynDOLOD program** (the folder that holds `DynDOLODx64.exe` and `TexGenx64.exe`)
+  has the rules, texture recipes and render models for the base game, in
+  `Edit Scripts/DynDOLOD`. Set it as the **Primary resource folder**. It does not need to
+  be installed as a mod, and PenguLOD never runs it.
+- **DynDOLOD Resources SE** is a mod with LOD models and textures for the game. Install
+  and enable it in your mod manager like any other mod. Do not select it as a resource
+  folder: it has no rules, and PenguLOD reads enabled mods by itself.
+
+Without the first, texture generation stops with "No texture stitching recipes match this
+load order". Selecting the second as a resource folder stops with "This folder is a mod,
+not a resource pack".
 
 ## Add a pack
 

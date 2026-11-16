@@ -168,6 +168,25 @@ public class ResourceDiscoveryTests
     }
 
     [Fact]
+    public void AModChosenAsAResourceFolderIsRefusedWithTheFolderToChooseInstead()
+    {
+        using var f = new TextureFixture();
+        // DynDOLOD Resources SE as a mod manager installs it: LOD models and textures, and a DynDOLOD folder with patch files only.
+        string mod = Path.Combine(f.Root, "mods", "DynDOLOD Resources SE 3.00");
+        Directory.CreateDirectory(Path.Combine(mod, "Meshes", "lod")); Directory.CreateDirectory(Path.Combine(mod, "Textures"));
+        Directory.CreateDirectory(Path.Combine(mod, "DynDOLOD")); File.WriteAllText(Path.Combine(mod, "DynDOLOD", "WhiterunExteriorGrass_Tamriel.patch"), "");
+        var error = Assert.Throws<DirectoryNotFoundException>(() => ResourceCatalog.FindRoot(mod));
+        Assert.Contains("is a mod, not a resource pack", error.Message); Assert.Contains("DynDOLODx64.exe", error.Message); Assert.Contains(mod, error.Message);
+        Assert.Throws<DirectoryNotFoundException>(() => TextureGeneration.Run(f.Request with { DynDolodFolder = mod }));
+
+        // An empty folder is not called a mod; the DynDOLOD program layout is accepted.
+        string empty = Path.Combine(f.Root, "empty"); Directory.CreateDirectory(empty);
+        Assert.Contains("has no rules, recipes or render models", Assert.Throws<DirectoryNotFoundException>(() => ResourceCatalog.FindRoot(empty)).Message);
+        string program = Path.Combine(f.Root, "DynDOLOD"); Directory.CreateDirectory(Path.Combine(program, "Edit Scripts", "DynDOLOD", "Configs"));
+        Assert.Equal(Path.Combine(program, "Edit Scripts", "DynDOLOD"), ResourceCatalog.FindRoot(program));
+    }
+
+    [Fact]
     public void InvalidAndNestedResourceFoldersAreRejectedBeforePublicationAndRedactedInDiagnostics()
     {
         using var f = new TextureFixture();

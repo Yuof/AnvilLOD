@@ -90,7 +90,8 @@ public static partial class TextureGeneration
         foreach (string skipped in rules.Skipped) Warn("Texture rule skipped: " + skipped);
         progress?.Report($"Resources: {resources.Report.Rules} rules, {resources.Report.Configs} configurations, {resources.Report.RenderModels} render models.");
         if (request.Stitched && rules.Program.Entries.Count == 0)
-            throw new InvalidOperationException("No texture stitching recipes match this load order. Add a resource pack with recipes for the enabled plugins, or turn off stitched textures.");
+            throw new InvalidOperationException("No texture stitching recipes match this load order. The recipes for the base game come with the DynDOLOD program, not with the DynDOLOD Resources mod: "
+                + "set the primary resource folder to the folder that holds DynDOLODx64.exe. Or turn off stitched textures.");
         rules.Program.BaseSize = request.BaseSize; rules.Program.Brightness = request.Brightness;
         if (request.RenderedObjects && !resources.RenderModels("objects").Any())
             throw new InvalidOperationException("Rendered objects need compatible render models. Add a resource folder or enable a mod supplying them in Data/DynDOLOD/Render.");

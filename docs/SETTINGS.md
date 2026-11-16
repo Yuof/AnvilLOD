@@ -81,7 +81,7 @@ These inputs are shared by all generation stages.
 | Profile | The profile to read. Blank uses the selected instance profile. **Read profiles** fills the list. |
 | Game / Data folder | For a deployed installation, choose the game folder or its `Data` folder. |
 | plugins.txt | The enabled-plugin list for a deployed installation. An empty file is valid for a vanilla game. |
-| Primary resource folder (optional) | Additional recipes, rules and render models outside enabled mods. DynDOLOD resource folders are supported. |
+| Primary resource folder (optional) | Recipes, rules and render models outside enabled mods. Usually the DynDOLOD program folder, the one that holds `DynDOLODx64.exe`; not the DynDOLOD Resources mod, which belongs in the mod manager. See [resource packs](RESOURCE-PACKS.md). |
 | Additional resource folders · one per line | Later external folders take precedence over earlier ones. Enabled mods take precedence over external packs. |
 | Custom rule file | An optional override file for object LOD rules. |
 

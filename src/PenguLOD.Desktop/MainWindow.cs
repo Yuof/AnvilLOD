@@ -215,7 +215,7 @@ public sealed partial class MainWindow : Window
         return Scroll(Stack(16, Heading("Game & resources"),
             Card("Game source", Stack(12, Row(source, Choice("Game edition", nameof(DesktopSettings.Edition), ["SE / AE", "VR"])), mo2, data, advanced)),
             Card("LOD resources", Stack(12,
-                PathField("Primary resource folder (optional)", nameof(DesktopSettings.DynDolodFolder), hint: "Additional LOD rules, recipes and models. Resources in enabled mods are found automatically."),
+                PathField("Primary resource folder (optional)", nameof(DesktopSettings.DynDolodFolder), hint: "LOD rules, recipes and render models. Usually the DynDOLOD program folder (with DynDOLODx64.exe), not the DynDOLOD Resources mod. Enabled mods are read automatically."),
                 MultiField("Additional resource folders · one per line", nameof(DesktopSettings.ResourceFolders)),
                 PathField("Custom rule file", nameof(DesktopSettings.CustomRulesFile), file: true)))));
     }

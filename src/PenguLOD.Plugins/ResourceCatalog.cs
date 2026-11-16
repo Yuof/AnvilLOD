@@ -64,7 +64,16 @@ public sealed class ResourceCatalog
             if (new[] { "Rules", "Configs", "Render" }.Any(n => GamePath.ResolveExisting(root, n) is { } p && Directory.Exists(p))
                 || Directory.EnumerateFiles(root).Any(f => Category(Path.GetFileName(f)) is not null)) return root;
         }
-        throw new DirectoryNotFoundException("Choose a resource pack containing Rules, Configs or Render, or compatible DynDOLOD data files: " + folder);
+        // The usual mistake: the DynDOLOD Resources mod. It holds LOD models and textures for the game, no rules, and belongs in the
+        // mod manager; the rules and texture recipes come with the DynDOLOD program.
+        bool mod = new[] { "meshes", "textures" }.Any(n => GamePath.ResolveExisting(folder, n) is { } p && Directory.Exists(p))
+            || Directory.EnumerateFiles(folder).Any(f => Path.GetExtension(f).ToLowerInvariant() is ".esp" or ".esm" or ".esl" or ".bsa");
+        throw new DirectoryNotFoundException(mod
+            ? $"This folder is a mod, not a resource pack: {folder}. Remove it from the resource folders and keep it enabled in your mod manager; "
+              + "enabled mods are read automatically. Rules and texture recipes come with the DynDOLOD program: choose the folder that holds "
+              + @"DynDOLODx64.exe (they are in its Edit Scripts\DynDOLOD folder)."
+            : "This folder has no rules, recipes or render models: " + folder + @". Choose a folder that contains Rules, Configs or Render, or one that wraps "
+              + @"them in DynDOLOD, Data\DynDOLOD or Edit Scripts\DynDOLOD, such as the DynDOLOD program folder.");
     }
 
     public static ResourceCatalog Load(GameContext game, AssetIndex assets, string? legacy = null, IReadOnlyList<string>? packs = null, CancellationToken ct = default)
