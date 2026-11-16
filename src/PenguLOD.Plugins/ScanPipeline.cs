@@ -56,6 +56,7 @@ public sealed record ScanRequest(
     bool DetailedShips = true,                     // whole ships are drawn from simplified copies of their real models at LOD4 and LOD8 instead of the very coarse stock LOD meshes
     bool AnimatedShips = true,                     // with Animated Ships in the load order, its sailing ships are drawn beyond the loaded cells (real references in PenguLOD.esp; needs native grid objects)
     bool CsGrassLod = true,
+    bool CsGrassOnly = false,                      // with Community Shaders' Grass Optimizations installed, leave grass out of the LOD4 blocks: its LOD meshes and the game's grass distance stand in for it
     int MapObjectLevel = -2,
     PenguLOD.Core.Occlusion.OcclusionSettings? Occlusion = null,   // work out the occlusion data (Occlusion.esp) ourselves, with these settings (null = off)
     string? OcclusionFolder = null,
@@ -103,6 +104,12 @@ public sealed record ScanSummary(
 /// </summary>
 public static class ScanPipeline
 {
+    /// <summary>
+    /// Whether PenguLOD's own grass goes into the LOD4 blocks: grass LOD is on, and it is not left to Community Shaders' Grass
+    /// Optimizations (its LOD meshes are made and <see cref="ScanRequest.CsGrassOnly"/> is on).
+    /// </summary>
+    internal static bool GrassInBlocks(bool grassLod, bool csGrassMeshes, bool csGrassOnly) => grassLod && !(csGrassMeshes && csGrassOnly);
+
     /// <summary>
     /// ESL size for the plugins PenguLOD splits (the effects plugins): game 1.6.1130 and newer read 4,096 FormIDs per ESL, older ones 2,048,
     /// and a plugin made for the larger range does not load on an older game. Auto reads the installed game's version and falls back to 2,048.
@@ -348,7 +355,12 @@ public static class ScanPipeline
 
         GrassLodSource? grass = null;
         IReadOnlyList<LodReference> allRefs = scan.References;
-        if (req.GrassLod && scan.Grids.Count > 0 && (req.Levels is not { Count: > 0 } || req.Levels.Contains(LodLevel.Lod4)))
+        bool csGrassMeshes = req.CsGrassLod && CsGrassLodStage.FeaturePresent(assets);
+        bool grassInBlocks = GrassInBlocks(req.GrassLod, csGrassMeshes, req.CsGrassOnly);
+        if (req.GrassLod && !grassInBlocks)
+            progress?.Report("Grass LOD: left out of the blocks, because Community Shaders' Grass Optimizations is installed and \"Leave grass to Grass Optimizations\" is on. "
+                             + "Beyond the game's grass distance there is no grass. The feature's LOD meshes are used only when its mesh LOD setting is on in the Community Shaders menu.");
+        if (grassInBlocks && scan.Grids.Count > 0 && (req.Levels is not { Count: > 0 } || req.Levels.Contains(LodLevel.Lod4)))
         {
             grass = new GrassLodSource(game, assets, req.GrassDensity, req.GrassSize, req.Generate ? req.OutputFolder : null, req.GrassTop, req.GrassBottom);
             var grassRefs = grass.Discover(scan.Grids, req.Seasons, onlySeasons);
@@ -842,7 +854,7 @@ public static class ScanPipeline
             else OpaqueLodStage.RemoveAll(output);
 
             // Community Shaders' Grass Optimizations: middle and far LOD meshes for the grass models (it keeps the full mesh for any that has none).
-            if (req.CsGrassLod && CsGrassLodStage.FeaturePresent(assets))
+            if (csGrassMeshes)
             {
                 try
                 {
@@ -851,7 +863,7 @@ public static class ScanPipeline
                                      + $" ({gl.TrianglesMiddle:N0} + {gl.TrianglesFar:N0} triangles in them, against {gl.TrianglesFull:N0} in the models) in {gl.Elapsed.TotalSeconds:F1}s."
                                      + $" Left alone: {gl.TooSmall:N0} already tiny, {gl.Authored:N0} with LOD meshes from their grass mod, {gl.MultiShape:N0} with several shapes, {gl.LegacyFormat:N0} in the old Skyrim LE format, {gl.OtherLayout:N0} with another vertex layout"
                                      + (gl.DuplicateNames > 0 ? $", {gl.DuplicateNames:N0} sharing a file name with another model" : "") + ". Turn on mesh LODs in the feature's settings in the Community Shaders menu.");
-                    if (req.GrassLod)
+                    if (grassInBlocks)
                         progress?.Report("Note: PenguLOD's own grass LOD (the grass in the LOD4 blocks) is still on. The feature's author recommends NGIO's extended grass distance plus these LOD meshes instead of grass in the blocks; if you use extended grass, consider unticking Grass LOD.");
                     if (gl.Failed > 0) Warn($"Grass Optimizations LOD: {gl.Failed} grass models could not be processed (first: {gl.Errors.FirstOrDefault()}).");
                 }

@@ -157,6 +157,7 @@ public static partial class Program
           --native-grid-objects     Waterfalls, windmill fans and water wheels (and Animated Ships' sailing ships) as real references in PenguLOD.esp, which the engine animates
           --native-effects          Fires, candles, torches, lava and streams as real references too (second plugin, PenguLOD Effects.esp)
           --no-cs-grass             Don't make LOD meshes for Community Shaders' Grass Optimizations (meshes\LOD\Grass; made only when the feature is installed)
+          --cs-grass-only           With Grass Optimizations installed, leave grass out of the LOD4 blocks (no grass beyond the game's grass distance)
           --no-animated-ships       Don't draw Animated Ships' sailing ships in the distance (they need the native grid objects; on by default when the mod is in the load order)
           --no-detailed-ships       Draw moored ships from the stock LOD meshes instead of simplified copies of their real models
           --ice-inset <units>       Pull glacier/ice LOD this far inside its surface so the full model wins the z-fight (default 6, 0 = off)
@@ -537,7 +538,7 @@ public static partial class Program
             EslRange: Choice("esl-range", "auto", "auto", "2048", "4096") is "auto" ? 0 : int.Parse(a.Get("esl-range")!, System.Globalization.CultureInfo.InvariantCulture),
             DetailedShips: !a.Has("no-detailed-ships"),
             AnimatedShips: !a.Has("no-animated-ships"),
-            CsGrassLod: !a.Has("no-cs-grass"),
+            CsGrassLod: !a.Has("no-cs-grass"), CsGrassOnly: a.Has("cs-grass-only"),
             IceInset: a.Number("ice-inset", PenguLOD.Meshes.LodInset.DefaultIce, 0f, 64f),
             MountainFit: !a.Has("no-mountain-fit"),
             MountainInset: a.Number("mountain-inset", 12f, 0f, 64f),
