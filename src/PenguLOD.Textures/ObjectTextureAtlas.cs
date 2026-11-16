@@ -11,7 +11,9 @@ public static class ObjectTextureAtlas
     public sealed record Input(string Key, TextureImage Diffuse, TextureImage? Normal, bool Alpha, uint ClampMode, int AlphaCutoff = 128,
         IReadOnlyDictionary<int, TextureImage>? Extra = null, IReadOnlySet<int>? SrgbSlots = null);
     public sealed record Placement(int Page, AtlasRect Rect);
-    public sealed record Page(byte[] Diffuse, byte[] Normal, int Size, int Mips, IReadOnlyDictionary<int, byte[]>? Extra = null);
+    /// <param name="Size">Width in pixels.</param>
+    /// <param name="Height">Height in pixels: the width, or half of it when the cells fill no more than the upper half.</param>
+    public sealed record Page(byte[] Diffuse, byte[] Normal, int Size, int Mips, IReadOnlyDictionary<int, byte[]>? Extra = null, int Height = 0);
     public sealed record Result(IReadOnlyList<Page> Pages, IReadOnlyDictionary<string,Placement> Placements);
 
     public static Result Build(IReadOnlyList<Input> inputs, int cellSize = 256, int pageSize = 2048, CancellationToken ct = default)
@@ -30,9 +32,11 @@ public static class ObjectTextureAtlas
             ct.ThrowIfCancellationRequested();
             var subset=sorted.Skip(start).Take(perPage).ToArray();
             int grid=1;while(grid*grid<subset.Length)grid*=2;
-            int size=grid*cellSize;
-            var color=TextureImages.Blank(size,size);var normal=TextureImages.Blank(size,size,normal:true);
-            var extra = subset.SelectMany(s => s.Extra?.Keys ?? []).Distinct().Order().ToDictionary(slot => slot, _ => TextureImages.Blank(size, size));
+            // Cells fill a page row by row, so a page whose cells fit the upper half is half as tall.
+            int rows=grid>1&&subset.Length<=grid*grid/2?grid/2:grid;
+            int size=grid*cellSize,height=rows*cellSize;
+            var color=TextureImages.Blank(size,height);var normal=TextureImages.Blank(size,height,normal:true);
+            var extra = subset.SelectMany(s => s.Extra?.Keys ?? []).Distinct().Order().ToDictionary(slot => slot, _ => TextureImages.Blank(size, height));
             for(int i=0;i<subset.Length;i++)
             {
                 ct.ThrowIfCancellationRequested();var source=subset[i];int ox=i%grid*cellSize,oy=i/grid*cellSize;
@@ -40,7 +44,7 @@ public static class ObjectTextureAtlas
                 Fill(normal,source.Normal??TextureImages.Blank(4,4,normal:true),ox,oy,LodTextureEncoding.Channels.Normal,true,source.ClampMode,false,0);
                 foreach(var (slot, page) in extra) Fill(page,source.Extra![slot],ox,oy,LodTextureEncoding.Channels.Data,true,source.ClampMode,source.SrgbSlots?.Contains(slot)==true,0);
                 // Half-texel inset and a gutter preserve bilinear sampling at the source boundaries.
-                placements[source.Key]=new(pages.Count,new((ox+gutter+.5f)/size,(oy+gutter+.5f)/size,(ox+cellSize-gutter-.5f)/size,(oy+cellSize-gutter-.5f)/size));
+                placements[source.Key]=new(pages.Count,new((ox+gutter+.5f)/size,(oy+gutter+.5f)/height,(ox+cellSize-gutter-.5f)/size,(oy+cellSize-gutter-.5f)/height));
             }
             var diffuseMips=new List<byte[]>();var normalMips=new List<byte[]>();
             var extraMips=extra.Keys.ToDictionary(slot=>slot,_=>new List<byte[]>());
@@ -66,8 +70,8 @@ public static class ObjectTextureAtlas
                 foreach(int slot in extra.Keys.ToArray()) extra[slot]=LodTextureEncoding.Down(extra[slot],LodTextureEncoding.Channels.Data,subset[0].SrgbSlots?.Contains(slot)==true);
                 cell/=2;
             }
-            byte[] Dds(List<byte[]> mips,int slot){using var stream=new MemoryStream();DdsFile.WriteBc7(stream,size,size,mips,subset[0].SrgbSlots?.Contains(slot)==true);return stream.ToArray();}
-            pages.Add(new(Dds(diffuseMips,0),Dds(normalMips,1),size,diffuseMips.Count,extraMips.ToDictionary(k=>k.Key,v=>Dds(v.Value,v.Key))));
+            byte[] Dds(List<byte[]> mips,int slot){using var stream=new MemoryStream();DdsFile.WriteBc7(stream,size,height,mips,subset[0].SrgbSlots?.Contains(slot)==true);return stream.ToArray();}
+            pages.Add(new(Dds(diffuseMips,0),Dds(normalMips,1),size,diffuseMips.Count,extraMips.ToDictionary(k=>k.Key,v=>Dds(v.Value,v.Key)),height));
         }
         return new(pages,placements);
 

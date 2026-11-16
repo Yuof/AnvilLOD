@@ -60,6 +60,31 @@ public class ObjectAtlasTests
 public class ExpandedObjectAtlasTests
 {
     [Fact]
+    public void A_page_is_as_large_as_its_cells_need_and_half_as_tall_when_they_fill_half()
+    {
+        ObjectTextureAtlas.Input[] Inputs(int count) => Enumerable.Range(0, count)
+            .Select(i => new ObjectTextureAtlas.Input("m" + i.ToString("D3"), TextureImages.Decode(TextureFixture.Solid((byte)(i * 7), 8, 8)), null, false, 0)).ToArray();
+        (int Width, int Height) Top(byte[] dds) { var info = DdsFile.ReadInfo(dds); return (info.Width, info.Height); }
+
+        // 5 cells need a 4 x 4 grid but fill only its first two rows; 9 fill three rows, so the page stays square.
+        var five = ObjectTextureAtlas.Build(Inputs(5), 64, 4096); var nine = ObjectTextureAtlas.Build(Inputs(9), 64, 4096);
+        Assert.Equal((256, 128), (Assert.Single(five.Pages).Size, five.Pages[0].Height));
+        Assert.Equal((256, 128), Top(five.Pages[0].Diffuse)); Assert.Equal((256, 128), Top(five.Pages[0].Normal));
+        Assert.Equal((256, 256), (Assert.Single(nine.Pages).Size, nine.Pages[0].Height));
+        Assert.All(five.Placements.Values, p => { Assert.InRange(p.Rect.V0, 0f, 1f); Assert.InRange(p.Rect.V1, p.Rect.V0, 1f); Assert.InRange(p.Rect.U1, p.Rect.U0, 1f); });
+        // The fifth cell is the first of the second row: the lower half of a page two cells tall.
+        Assert.InRange(five.Placements["m004"].Rect.V0, .5f, .6f); Assert.InRange(five.Placements["m004"].Rect.U0, 0f, .1f);
+        var pixels = TextureImages.Decode(five.Pages[0].Diffuse);
+        int x = (int)((five.Placements["m004"].Rect.U0 + five.Placements["m004"].Rect.U1) / 2 * pixels.Width), y = (int)((five.Placements["m004"].Rect.V0 + five.Placements["m004"].Rect.V1) / 2 * pixels.Height);
+        Assert.InRange(pixels.Pixels[(y * pixels.Width + x) * 4], 20, 36);       // red = 4 * 7
+
+        // More materials than one page holds go on to the next.
+        var many = ObjectTextureAtlas.Build(Inputs(20), 64, 256);
+        Assert.Equal(2, many.Pages.Count); Assert.Equal((256, 256), (many.Pages[0].Size, many.Pages[0].Height)); Assert.Equal((128, 128), (many.Pages[1].Size, many.Pages[1].Height));
+        Assert.Throws<ArgumentException>(() => ObjectTextureAtlas.Build(Inputs(2), 64, 8192));
+    }
+
+    [Fact]
     public void A_surface_mapped_over_several_tiles_in_pieces_is_folded_triangle_by_triangle()
     {
         // Two quads side by side sharing an edge: the first uses tile (0, 0) of the texture, the second tile (1, 0), so the two

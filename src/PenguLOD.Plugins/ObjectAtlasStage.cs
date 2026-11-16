@@ -14,7 +14,9 @@ namespace PenguLOD.Plugins;
 /// <summary>Packs shader-compatible object surfaces; unsupported materials retain their original sampling.</summary>
 public static class ObjectAtlasStage
 {
-    public const int Version = 3; // surfaces are folded into one tile triangle by triangle
+    public const int Version = 4; // surfaces are folded into one tile triangle by triangle; pages up to 4096 px
+    /// <summary>Largest page side in pixels, the largest texture the texture code makes. At the default cell size a page holds up to 256 materials.</summary>
+    public const int PageSize = 4096;
     public sealed record Report(int PackedMaterials, int Pages, int EligibleParts, int SkippedParts,
         IReadOnlyDictionary<string, int> Reasons, int SourceMaterials = 0, int AtlasMaterials = 0, long TextureBytes = 0,
         IReadOnlyList<string>? Warnings = null);
@@ -170,7 +172,9 @@ public static class ObjectAtlasStage
         }
         var mapped = new Dictionary<string, Mapping>(StringComparer.Ordinal);
         int pages = 0; long textureBytes = 0;
-        int perPage = (2048 / cellSize) * (2048 / cellSize);
+        // One page per group of compatible materials wherever it fits: shapes merge only when they share a page, and with 2048 px
+        // pages of 64 cells a block drew its atlased surfaces from a couple of dozen pages.
+        int perPage = (PageSize / cellSize) * (PageSize / cellSize);
         // Shader/alpha/emittance/cubemap compatibility comes before path ordering, so each page can actually batch.
         foreach (var group in materials.GroupBy(kv => kv.Value.Group).OrderBy(g => g.Key, StringComparer.Ordinal))
         foreach (var batch in group.Chunk(perPage))
@@ -193,7 +197,7 @@ public static class ObjectAtlasStage
                     ExtraSlots.Where(i => slots[i].Length > 0).ToDictionary(i => i, i => Load(slots[i], i)),
                     slots.Select((p, i) => (p, i)).Where(t => t.i != 4 && t.p.Length > 0 && LodTextureEncoding.IsSrgb(info[t.p].Info)).Select(t => t.i).ToHashSet()));
             }
-            var result = ObjectTextureAtlas.Build(inputs, cellSize, 2048, ct);
+            var result = ObjectTextureAtlas.Build(inputs, cellSize, PageSize, ct);
             string stem = ObjectTextureAssets.Root(batch[0].Value.Material, "objects") + Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant()[..24];
             for (int page = 0; page < result.Pages.Count; page++)
             {
@@ -210,7 +214,9 @@ public static class ObjectAtlasStage
         int after = modelArray.Select(Transform).SelectMany(m => m.Parts).Select(p => p.Material.Key).Distinct().Count();
         var report = new Report(mapped.Count, pages, eligible, skipped, reasons, before, after, textureBytes, warnings);
         File.WriteAllText(Path.Combine(output, "PenguLOD.atlas.json"), JsonSerializer.Serialize(report, PersistentPipeline.Json));
+        var groupSizes = materials.Values.GroupBy(c => c.Group).Select(g => g.Count()).OrderDescending().ToArray();
         progress?.Report($"Object atlas: {mapped.Count:N0} materials on {pages} page sets; {before:N0} → {after:N0} distinct materials; {skipped:N0} parts retain original UVs/materials.");
+        progress?.Report($"Object atlas: {groupSizes.Length:N0} groups of compatible materials; the largest hold {string.Join(", ", groupSizes.Take(8))} materials.");
         foreach (var warning in warnings.Take(20)) progress?.Report("Warning: object atlas kept source material: " + warning);
         // Keep content-addressed previous pages: out-of-scope and seasonal BTOs can still reference them.
         return new(report, Transform);
