@@ -46,6 +46,49 @@ public class HdBillboardTests
     }
 
     [Fact]
+    public void Far_tree_cards_share_one_atlas_and_near_cards_keep_their_own_textures()
+    {
+        using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
+        TextureFixture.Put(f.Data, Asymmetric().Path, LodNifWriter.Write("tree", Asymmetric().Parts));
+        var result = TextureGeneration.Run(f.Request with { Stitched = false, Trees = true, BillboardMaxSize = 128 }); Assert.True(result.Published);
+        var item = Assert.Single(result.Items, i => i.Status == "Written");
+        using var game = GameContext.Open(f.Game); var assets = game.BuildAssets(_ => true);
+        TextureGenerationManifest.Read(f.Output, true)!.Attach(assets, f.Output);
+        string near = TreeCardSource.CardPath(item.Output, far: false), far = TreeCardSource.CardPath(item.Output, far: true);
+        Assert.Equal(TreeCardSource.Prefix + item.Output, near);
+        string lod = Path.Combine(f.Root, "lod");
+
+        // Without an atlas (a scan, or a billboard the atlas does not have) a far card is the same as a near one.
+        var source = new TreeCardSource(assets);
+        Assert.EndsWith("_1.dds", source.Build(far)!.Parts[0].Material.Textures[0]);
+        string unpacked = source.Fingerprint(far)!;
+
+        source.PrepareAtlas(lod, [item.Output, @"textures\terrain\lodgen\skyrim.esm\not_there_00000001.dds"]);
+        Assert.Equal(2, source.Atlas!.Tiles);                                       // the front and the side view
+        Assert.True(File.Exists(GamePath.ToFileSystemPath(lod, TreeCardSource.AtlasDiffuse)));
+        Assert.True(File.Exists(GamePath.ToFileSystemPath(lod, TreeCardSource.AtlasNormal)));
+
+        var cards = source.Build(far)!;
+        Assert.Equal(far, cards.Path);
+        Assert.Equal(2, cards.Parts.Count);
+        Assert.All(cards.Parts, p => { Assert.Equal(TreeCardSource.AtlasDiffuse, p.Material.Textures[0]); Assert.Equal(TreeCardSource.AtlasNormal, p.Material.Textures[1]); });
+        Assert.Equal(cards.Parts[0].Material.Key, cards.Parts[1].Material.Key);    // one material, so a block merges them into one shape
+        // Each view keeps its own part of the atlas and its own size in the world.
+        var front = cards.Parts[0].UVs; var side = cards.Parts[1].UVs;
+        Assert.All(front.Concat(side), uv => { Assert.InRange(uv.X, 0f, 1f); Assert.InRange(uv.Y, 0f, 1f); });
+        Assert.True(front.Max(uv => uv.X) - front.Min(uv => uv.X) < 1f);
+        Assert.NotEqual((front.Min(uv => uv.X), front.Min(uv => uv.Y)), (side.Min(uv => uv.X), side.Min(uv => uv.Y)));
+        Assert.Equal(800, cards.Parts[0].Positions.Max(p => p.X) - cards.Parts[0].Positions.Min(p => p.X));
+        Assert.Equal(400, cards.Parts[1].Positions.Max(p => p.Y) - cards.Parts[1].Positions.Min(p => p.Y));
+
+        var own = source.Build(near)!;
+        Assert.EndsWith("_1.dds", own.Parts[0].Material.Textures[0]); Assert.EndsWith("_2.dds", own.Parts[1].Material.Textures[0]);
+        Assert.NotEqual(unpacked, source.Fingerprint(far));                          // the atlas is part of what a far card is built from
+        Assert.NotEqual(source.Fingerprint(near), source.Fingerprint(far));
+        Assert.Null(source.Build(TreeCardSource.CardPath(@"textures\terrain\lodgen\skyrim.esm\not_there_00000001.dds", far: true)));
+    }
+
+    [Fact]
     public void TextureStagePublishesBothViewsAndCardsConsumeTheirOwnDimensionsAndTextures()
     {
         using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);

@@ -251,8 +251,8 @@ public sealed class Tree3DSource : ISyntheticMeshSource
         foreach (var t in trees)
         {
             var near = Select(t.Model3D!, 4, t.Model3DGenerated, t.MaterialVariant);
-            var model = near.MeshPath ?? TreeCardSource.Prefix + t.Billboard.TexturePath;
-            var card = TreeCardSource.Prefix + t.Billboard.TexturePath;
+            var model = near.MeshPath ?? TreeCardSource.CardPath(t.Billboard.TexturePath, far: false);
+            var card = TreeCardSource.CardPath(t.Billboard.TexturePath, far: true);
             var near8 = settings.Lod8 ? Select(t.Model3D!, 8, t.Model3DGenerated, t.MaterialVariant).MeshPath ?? card : card;
             // Trees copied in from a child worldspace (walled cities) only matter close up, as before.
             var meshes = t.ObjectLod ? new LodMeshSet(model, near8, null, null) : new LodMeshSet(model, near8, card, settings.MapTrees ? card : null);

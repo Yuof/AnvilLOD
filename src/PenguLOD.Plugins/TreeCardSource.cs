@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Numerics;
+using PenguLOD.Core.Pipeline;
 using PenguLOD.Core.World;
 using PenguLOD.Meshes;
 
@@ -9,16 +10,67 @@ namespace PenguLOD.Plugins;
 /// Tree LOD for trees placed by light (ESL-flagged) plugins. The engine never hides <c>.btt</c> tree LOD for
 /// those references (their FE-prefixed FormIDs don't match), so the LOD tree stays standing next to the real one.
 /// Instead they go into the object LOD blocks as two crossed billboard cards, which the engine hides per cell
-/// like any other object LOD.
+/// like any other object LOD. Trees with a 3D LOD model use the same cards beyond the levels their model is used at.
+/// <para>
+/// Cards for LOD8 and further (<see cref="FarPrefix"/>) take their image from one atlas of all tree billboards, so a block draws
+/// all its tree cards in one shape. With every tree type on its own texture a LOD16 block had 60 such shapes. Cards at LOD4 keep
+/// their own full-size textures: there are few of them per block and they are seen from close by.
+/// </para>
 /// </summary>
 public sealed class TreeCardSource : ISyntheticMeshSource
 {
     public const string Prefix = "~pengulod-treecard|";
-    private const int Version = 3; // NIF tangent frame on billboard cards
+    /// <summary>Cards for LOD8 and further, drawn from the atlas when it has their billboard.</summary>
+    public const string FarPrefix = Prefix + "far|";
+    /// <summary>The atlas textures, as the LOD meshes name them (written into the output folder).</summary>
+    public const string AtlasDiffuse = "textures\\pengulod\\trees\\cards.dds", AtlasNormal = "textures\\pengulod\\trees\\cards_n.dds";
+    /// <summary>Largest side a billboard keeps in the atlas. A 1,500-unit tree is about 45 pixels tall on a 4K screen where LOD8 begins.</summary>
+    public const int AtlasTile = 128;
+    private const int Version = 4; // far cards on one atlas
+
+    /// <summary>The mesh path of a tree's card: its own texture close by, the atlas from LOD8 on.</summary>
+    public static string CardPath(string billboardTexture, bool far) => (far ? FarPrefix : Prefix) + billboardTexture;
+
+    private static (string Texture, bool Far) Split(string path)
+        => path.StartsWith(FarPrefix, StringComparison.Ordinal) ? (path[FarPrefix.Length..], true) : (path[Prefix.Length..], false);
 
     private readonly AssetIndex _assets;
     private readonly float _brightness;
     private readonly ConcurrentDictionary<string, LodMesh?> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyDictionary<string, AtlasRect>? _atlasRects;
+    private string _atlasHash = "-";
+
+    /// <summary>What the atlas holds, for the log (null until <see cref="PrepareAtlas"/> has built one).</summary>
+    public TreeCardAtlasSummary? Atlas { get; private set; }
+
+    /// <summary>
+    /// Packs the front and side billboards of the given trees into <see cref="AtlasDiffuse"/> and a normal-map atlas with the same
+    /// layout, in the output folder. Must run before blocks are built: far cards take their UVs from it. A billboard that is not in
+    /// it (a seasonal replacement, an unreadable file) keeps its own texture.
+    /// </summary>
+    public void PrepareAtlas(string outputFolder, IEnumerable<string> billboardTextures)
+    {
+        if (_atlasRects is not null) return;
+        var tiles = new List<BillboardAtlas.Tile>();
+        foreach (string plain in billboardTextures.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase))
+        {
+            var (dds, normal, txt) = Files(plain);
+            if (!_assets.Exists(dds)) continue;
+            tiles.Add(new(GamePath.Normalize(dds), dds, _assets.Exists(normal) ? normal : null));
+            string side = txt[..^4] + "_2.dds", sideNormal = txt[..^4] + "_2_n.dds";
+            if (_assets.Exists(side)) tiles.Add(new(GamePath.Normalize(side), side, _assets.Exists(sideNormal) ? sideNormal : null));
+        }
+        byte[]? Read(string texture)
+        {
+            if (!_assets.TryOpen(texture, out var stream)) return null;
+            using (stream) { using var buffer = new MemoryStream(); stream.CopyTo(buffer); return buffer.ToArray(); }
+        }
+        if (BillboardAtlas.Build(tiles, Read, AtlasTile) is not { } atlas) return;
+        BillboardAtlas.Write(atlas, outputFolder, AtlasDiffuse, AtlasNormal);
+        _atlasRects = atlas.Rects; _atlasHash = atlas.Hash;
+        Atlas = new(atlas.Rects.Count, atlas.Size, atlas.SizeCap, atlas.Reduced, atlas.Skipped);
+        _cache.Clear();
+    }
 
     /// <param name="brightness">Tree LOD brightness (1 = as the billboard is). Applied through vertex colours.</param>
     public TreeCardSource(AssetIndex assets, float brightness = 1f)
@@ -34,7 +86,6 @@ public sealed class TreeCardSource : ISyntheticMeshSource
     {
         foreach (var t in trees)
         {
-            var mesh = Prefix + t.Billboard.TexturePath;
             yield return new LodReference(
                 FormKey: t.FormKey,
                 BaseFormKey: t.BaseFormKey ?? "tree",
@@ -44,7 +95,7 @@ public sealed class TreeCardSource : ISyntheticMeshSource
                 Position: t.Position,
                 RotationRadians: new Vector3(0, 0, t.RotationZ),
                 Scale: t.Scale,
-                Meshes: new LodMeshSet(mesh, mesh, null, null),
+                Meshes: new LodMeshSet(CardPath(t.Billboard.TexturePath, far: false), CardPath(t.Billboard.TexturePath, far: true), null, null),
                 Flags: LodReferenceFlags.None);
         }
     }
@@ -54,12 +105,13 @@ public sealed class TreeCardSource : ISyntheticMeshSource
     public string? Fingerprint(string path)
     {
         if (!Owns(path)) return null;
-        var (dds, normal, txt) = Files(path[Prefix.Length..]);
+        var (texture, far) = Split(path);
+        var (dds, normal, txt) = Files(texture);
         var side = txt[..^4] + "_2";
-        return $"c{Version}|b{_brightness:F3}|{_assets.Fingerprint(dds)}|{_assets.Fingerprint(normal)}|{_assets.Fingerprint(txt)}|{_assets.Fingerprint(side + ".dds")}|{_assets.Fingerprint(side + "_n.dds")}";
+        return $"c{Version}|{(far ? "atlas:" + _atlasHash : "own")}|b{_brightness:F3}|{_assets.Fingerprint(dds)}|{_assets.Fingerprint(normal)}|{_assets.Fingerprint(txt)}|{_assets.Fingerprint(side + ".dds")}|{_assets.Fingerprint(side + "_n.dds")}";
     }
 
-    public LodMesh? Build(string path) => _cache.GetOrAdd(path, p => Create(p[Prefix.Length..]));
+    public LodMesh? Build(string path) => _cache.GetOrAdd(path, p => { var (texture, far) = Split(p); return Create(texture, far); });
 
     /// <summary>Prefers the front view (<c>_1.dds</c> + <c>_1_n.dds</c>), which TexGen renders with a normal map.</summary>
     private (string Dds, string Normal, string Txt) Files(string plainDds)
@@ -69,8 +121,13 @@ public sealed class TreeCardSource : ISyntheticMeshSource
             : (stem + ".dds", stem + "_n.dds", stem + ".txt");
     }
 
-    private LodMesh? Create(string plainDds)
+    /// <summary>The atlas rectangle of a billboard texture, for a far card when the atlas has it.</summary>
+    private AtlasRect? Rect(string dds, bool far)
+        => far && _atlasRects is not null && _atlasRects.TryGetValue(GamePath.Normalize(dds), out var rect) ? rect : null;
+
+    private LodMesh? Create(string plainDds, bool far)
     {
+        string path = CardPath(plainDds, far);
         var (dds, normal, txt) = Files(plainDds);
         if (!_assets.Exists(dds) || !_assets.TryOpen(txt, out var st)) return null;
         string text;
@@ -80,10 +137,17 @@ public sealed class TreeCardSource : ISyntheticMeshSource
 
         string sideDds = txt[..^4] + "_2.dds", sideNormal = txt[..^4] + "_2_n.dds";
         if (_assets.Exists(sideDds) && TreeBillboard.Parse(sideDds, text, view: 2) is { } side)
-            return new LodMesh { Path = Prefix + plainDds, Parts = [ViewCard(bb, normal, false), ViewCard(side, sideNormal, true)] };
+        {
+            // Both views from the atlas, or neither: a card pair on two materials would be two shapes again.
+            var frontRect = Rect(dds, far); var sideRect = Rect(sideDds, far);
+            if (frontRect is null || sideRect is null) frontRect = sideRect = null;
+            return new LodMesh { Path = path, Parts = [ViewCard(bb, normal, false, frontRect), ViewCard(side, sideNormal, true, sideRect)] };
+        }
 
+        var rect = Rect(dds, far);
+        var (u0, v0, u1, v1) = rect is { } r ? (r.U0, r.V0, r.U1, r.V1) : (0f, 0f, 1f, 1f);
         var material = new LodMaterial(
-            [dds, _assets.Exists(normal) ? normal : "", "", "", "", "", "", "", ""],
+            rect is null ? [dds, _assets.Exists(normal) ? normal : "", "", "", "", "", "", "", ""] : [AtlasDiffuse, AtlasNormal, "", "", "", "", "", "", ""],
             0x8000_0300u,
             0x0000_0005u | 0x10u, // double-sided
             3,
@@ -107,7 +171,7 @@ public sealed class TreeCardSource : ISyntheticMeshSource
             pos[v + 1] = dir * hw + new Vector3(0, 0, z0);
             pos[v + 2] = dir * hw + new Vector3(0, 0, z1);
             pos[v + 3] = -dir * hw + new Vector3(0, 0, z1);
-            uv[v] = new Vector2(0, 1); uv[v + 1] = new Vector2(1, 1); uv[v + 2] = new Vector2(1, 0); uv[v + 3] = new Vector2(0, 0);
+            uv[v] = new Vector2(u0, v1); uv[v + 1] = new Vector2(u1, v1); uv[v + 2] = new Vector2(u1, v0); uv[v + 3] = new Vector2(u0, v0);
             // NIF tangent frame: tangent along +V (down the card), bitangent along +U (across it).
             for (int k = 0; k < 4; k++) { nrm[v + k] = normalDir; tan[v + k] = -Vector3.UnitZ; bit[v + k] = dir; }
             int t = c * 6;
@@ -123,13 +187,14 @@ public sealed class TreeCardSource : ISyntheticMeshSource
         }
         return new LodMesh
         {
-            Path = Prefix + plainDds,
+            Path = path,
             Parts = [new LodMeshPart { Material = material, Positions = pos, UVs = uv, Normals = nrm, Tangents = tan, Bitangents = bit, Colors = colors, Triangles = tris }],
         };
     }
 
-    private LodMeshPart ViewCard(TreeBillboard bb, string normal, bool side)
+    private LodMeshPart ViewCard(TreeBillboard bb, string normal, bool side, AtlasRect? rect)
     {
+        var (u0, v0, u1, v1) = rect is { } r ? (r.U0, r.V0, r.U1, r.V1) : (0f, 0f, 1f, 1f);
         var dir = side ? Vector3.UnitY : Vector3.UnitX;
         var normalDir = side ? Vector3.UnitX : -Vector3.UnitY;
         float half = bb.Width * .5f;
@@ -137,16 +202,19 @@ public sealed class TreeCardSource : ISyntheticMeshSource
         return new LodMeshPart
         {
             Name = side ? "Side billboard" : "Front billboard",
-            Material = new LodMaterial([bb.TexturePath, _assets.Exists(normal) ? normal : "", "", "", "", "", "", "", ""],
+            Material = new LodMaterial(rect is null ? [bb.TexturePath, _assets.Exists(normal) ? normal : "", "", "", "", "", "", "", ""] : [AtlasDiffuse, AtlasNormal, "", "", "", "", "", "", ""],
                 0x8000_0300u, 0x0000_0015u, 3, true, GrassPatchBuilder.AlphaTestFlags, GrassPatchBuilder.AlphaThreshold, Vector3.Zero, 1),
             Positions = [bottom - dir * half, bottom + dir * half, top + dir * half, top - dir * half],
-            UVs = [new(0, 1), new(1, 1), new(1, 0), new(0, 0)],
+            UVs = [new(u0, v1), new(u1, v1), new(u1, v0), new(u0, v0)],
             Normals = [normalDir, normalDir, normalDir, normalDir], Tangents = [-Vector3.UnitZ, -Vector3.UnitZ, -Vector3.UnitZ, -Vector3.UnitZ],
             Bitangents = [dir, dir, dir, dir], Triangles = [0, 1, 2, 0, 2, 3],
             Colors = MathF.Abs(_brightness - 1) <= .001f ? null : Enumerable.Repeat(BtoBuilder.Scale(0xFFFFFFFF, _brightness), 4).ToArray()
         };
     }
 }
+
+/// <summary>The tree card atlas for the log: tiles, side length in pixels, the tile size cap that was needed, tiles scaled down, billboards that couldn't be read.</summary>
+public sealed record TreeCardAtlasSummary(int Tiles, int Size, int SizeCap, int Reduced, int Skipped);
 
 /// <summary>Several synthetic mesh sources behind one interface.</summary>
 public sealed class CompositeSyntheticSource(params ISyntheticMeshSource?[] sources) : ISyntheticMeshSource

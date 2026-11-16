@@ -385,50 +385,12 @@ public sealed class GrassLodSource : ISyntheticMeshSource
                 if (bb.Side is { } side) raw.TryAdd(GamePath.Normalize(side.Diffuse), side);
             }
         }
-        var diffuse = new List<TreeAtlasBuilder.Input>();
-        var normal = new List<TreeAtlasBuilder.Input>();
-        var flat = new Dictionary<(int, int), byte[]>();
-        foreach (var (key, bb) in raw)
-        {
-            var d = ReadTexture(bb.Diffuse);
-            if (d is null) continue;
-            DdsFile.Info info;
-            try { info = DdsFile.ReadInfo(d); }
-            catch (Exception ex) when (ex is InvalidDataException or NotSupportedException) { continue; }
-            // The normal tile must have the diffuse tile's size (the two atlases share one layout); otherwise it is flat.
-            var n = bb.Normal is null ? null : ReadTexture(bb.Normal);
-            if (n is not null)
-            {
-                try { var ni = DdsFile.ReadInfo(n); if (ni.Width != info.Width || ni.Height != info.Height) n = null; }
-                catch (Exception ex) when (ex is InvalidDataException or NotSupportedException) { n = null; }
-            }
-            if (n is null)
-            {
-                if (!flat.TryGetValue((info.Width, info.Height), out n)) flat[(info.Width, info.Height)] = n = FlatNormalDds(info.Width, info.Height);
-            }
-            diffuse.Add(new TreeAtlasBuilder.Input(key, d));
-            normal.Add(new TreeAtlasBuilder.Input(key, n));
-        }
-        if (diffuse.Count == 0) return;
-
-        var builder = new TreeAtlasBuilder { MaxSize = 4096, MaxTile = 256 };
-        var a = builder.Build(diffuse);
-        var b = builder.Build(normal, normalMap: true);
-        if (a.Size != b.Size || b.Errors.Count > 0 || a.Rects.Count != b.Rects.Count
-            || a.Rects.Any(kv => !b.Rects.TryGetValue(kv.Key, out var r) || r != kv.Value))
-            return; // the pair doesn't line up (shouldn't happen): leave every grass type on its own textures
-
-        foreach (var (rel, bytes) in new[] { (AtlasDiffuse, a.Dds), (AtlasNormal, b.Dds) })
-        {
-            var full = Path.Combine(_outputFolder, rel.Replace('\\', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-            File.WriteAllBytes(full, bytes);
-        }
-        _atlasRects = new Dictionary<string, AtlasRect>(a.Rects, StringComparer.OrdinalIgnoreCase);
-        using var atlasHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        atlasHash.AppendData(a.Dds); atlasHash.AppendData(b.Dds);
-        _atlasHash = Convert.ToHexString(atlasHash.GetHashAndReset(), 0, 6).ToLowerInvariant();
-        Atlas = new GrassAtlasSummary(a.Rects.Count, a.Size, a.SizeCap, a.Reduced, a.Errors.Count);
+        var atlas = BillboardAtlas.Build(raw.Select(kv => new BillboardAtlas.Tile(kv.Key, kv.Value.Diffuse, kv.Value.Normal)), ReadTexture, maxTile: 256);
+        if (atlas is null) return; // nothing readable, or the pair doesn't line up (shouldn't happen): every grass type stays on its own textures
+        BillboardAtlas.Write(atlas, _outputFolder, AtlasDiffuse, AtlasNormal);
+        _atlasRects = new Dictionary<string, AtlasRect>(atlas.Rects, StringComparer.OrdinalIgnoreCase);
+        _atlasHash = atlas.Hash;
+        Atlas = new GrassAtlasSummary(atlas.Rects.Count, atlas.Size, atlas.SizeCap, atlas.Reduced, atlas.Skipped);
     }
 
     /// <summary>The billboard moved into the atlas (same textures for every type, UVs from its tile), if it has a tile.</summary>
@@ -454,21 +416,6 @@ public sealed class GrassLodSource : ISyntheticMeshSource
             st.CopyTo(ms);
             return ms.ToArray();
         }
-    }
-
-    /// <summary>A BC7 DDS of the given size filled with the flat tangent-space normal (128,128,255), one mip.</summary>
-    private static byte[] FlatNormalDds(int width, int height)
-    {
-        var px = new byte[64];
-        for (int i = 0; i < 64; i += 4) { px[i] = 128; px[i + 1] = 128; px[i + 2] = 255; px[i + 3] = 255; }
-        var block = new byte[16];
-        Bc7Encoder.EncodeBlock(px, block);
-        int blocks = ((width + 3) / 4) * ((height + 3) / 4);
-        var top = new byte[blocks * 16];
-        for (int i = 0; i < top.Length; i += 16) block.CopyTo(top, i);
-        using var ms = new MemoryStream();
-        DdsFile.WriteBc7(ms, width, height, [top]);
-        return ms.ToArray();
     }
 
     /// <summary>One fingerprint over every billboard and .txt in textures\terrain\lodgen (re-run TexGen = rebuild grass).</summary>

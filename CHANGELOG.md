@@ -67,6 +67,15 @@ Grass LOD
   The new values were checked in game on one load order with complex grass; adjust them if
   your grass or lighting differs. Values you have set yourself are kept.
 
+Trees
+
+- Tree cards from LOD8 on are drawn from one atlas of all tree billboards
+  (`textures\pengulod\trees\cards.dds`), so a block draws all of them in one shape. With
+  every tree type on its own texture, a LOD8 block had about 30 tree card shapes and a
+  LOD16 block about 60, each a draw call. Billboards are at most 128 pixels in the atlas,
+  which is more than a tree covers on screen at those distances. Cards at LOD4 keep their
+  own full-size textures.
+
 Seasonal LOD
 
 - Seasonal LOD can be limited to the seasons you play. Four new boxes, **Seasonal LOD:
