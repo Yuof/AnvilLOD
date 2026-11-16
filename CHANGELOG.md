@@ -3,7 +3,12 @@
 PenguLOD uses its own semantic version, independent of AnvilLOD’s game plugin version.
 Pre-release versions are marked alpha or beta until the supported workflows have broader validation.
 
-## [Unreleased]
+## [0.6.0-beta.3] - 2026-11-15
+
+A generated `Occlusion.esp` no longer hides distant objects and trees, and tree, trunk and
+grass LOD are much closer to what TexGen and DynDOLOD make. After updating, generate
+textures and object LOD again, including `Occlusion.esp`; a plugin from 0.6.0-beta.2 or
+earlier should be disabled until then.
 
 Occlusion
 
