@@ -15,6 +15,14 @@ Object atlases
   with the option on fell from 32.7 to 25.3 at LOD8 and from 51.3 to 37.8 at LOD16. The
   option is still off by default.
 
+Seasonal LOD
+
+- Seasonal object LOD no longer stops with "Unresolved seasonal alternate texture on ..."
+  at the end of the object LOD stage. A seasonal swap target whose alternate texture has
+  no texture set, or one from a plugin that is not loaded, now keeps its model's own
+  texture, as it does in game and as the same object does when it is placed normally. A
+  warning names the object. With **Strict seasonal swaps** on it still stops.
+
 ## [0.6.0-beta.3] - 2026-11-15
 
 A generated `Occlusion.esp` no longer hides distant objects and trees, and tree, trunk and

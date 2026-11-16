@@ -66,6 +66,34 @@ public class SeasonalPipelineTests
     }
 
     [Fact]
+    public void ASeasonalObjectWithAnAlternateTextureThatNamesNoTextureSetKeepsItsModelTexture()
+    {
+        // A mod's seasonal object has an alternate texture entry whose texture set is empty, or comes from a plugin that is not
+        // loaded. In game the shape keeps the model's texture. Generation stopped at the end of object LOD with "Unresolved
+        // seasonal alternate texture on 000807:SnowOverSkyrim.esp".
+        using var f=Fixture(mod=>
+        {
+            var target=mod.Statics.Single(s=>s.EditorID=="SeasonObject");
+            var missing=new AlternateTexture {Name="object:0",Index=0};
+            missing.NewTexture.SetTo(new FormKey(ModKey.FromNameAndExtension("NotLoaded.esp"),0x800));
+            target.Model!.AlternateTextures=[new AlternateTexture {Name="object:0",Index=0},missing];
+        });
+        var request=Request(f,native:false);
+        var result=GenerationPipeline.Run(request,Path.Combine(f.Root,"cache"));
+        Assert.True(result.Success,result.Error);
+        var warnings=result.LodReceipt!.Warnings.Where(w=>w.Contains("SeasonObject")).ToArray();
+        Assert.Contains(warnings,w=>w.Contains("names no texture set")&&w.Contains("as in game"));
+        Assert.Contains(warnings,w=>w.Contains("NotLoaded.esp")&&w.Contains("not in the load order"));
+        Assert.Equal(2,warnings.Length);                                           // once each, not once per season
+        var mesh=Read(".WIN",request.Lod!.OutputFolder!);
+        Assert.Contains(mesh.Parts,p=>p.Material.Textures[0].EndsWith("seasonobject.dds",StringComparison.OrdinalIgnoreCase));
+
+        var strict=GenerationPipeline.Run(request with {Preflight=false,Lod=request.Lod with {SeasonsStrict=true}},Path.Combine(f.Root,"strict-cache"));
+        Assert.False(strict.Success);Assert.Equal("lod",strict.FailedStage);
+        Assert.Contains("Strict seasonal swaps are on",strict.Error);
+    }
+
+    [Fact]
     public void OnlyTheSelectedSeasonsAreGeneratedAndTheOthersAreRemoved()
     {
         using var f=Fixture();string cache=Path.Combine(f.Root,"cache");var all=Request(f,false);
@@ -124,7 +152,7 @@ public class SeasonalPipelineTests
         Assert.Equal(2,report.Issues.Count(i=>i.Code=="unresolved-seasonal-swap"&&i.Severity=="Warning"));
     }
 
-    private static TerrainFixture Fixture()
+    private static TerrainFixture Fixture(Action<SkyrimMod>? edit=null)
     {
         uint baseId=0,seasonId=0;
         var f=new TerrainFixture(seasons:true,treeAlternates:true,editMod:mod=>
@@ -136,6 +164,7 @@ public class SeasonalPipelineTests
             var grass=mod.Grasses.AddNew();grass.EditorID="FixtureGrass";grass.Model=new Model {File=@"grass\testplant.nif"};baseId=grass.FormKey.ID;
             var replacement=mod.Grasses.AddNew();replacement.EditorID="SeasonGrass";replacement.Model=new Model {File=@"grass\seasonplant.nif"};seasonId=replacement.FormKey.ID;
             mod.LandscapeTextures.First().Grasses.Add(grass.ToLink());mod.LandscapeTextures.Last().Grasses.Add(replacement.ToLink());
+            edit?.Invoke(mod);
         });
         string data=f.Textures.Data;
         foreach(string name in new[]{"object","seasonobject"})

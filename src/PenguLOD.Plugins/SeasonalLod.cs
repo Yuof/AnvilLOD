@@ -28,6 +28,7 @@ public static class SeasonalLod
         bool strict = false, Action<string>? warn = null, IReadOnlySet<string>? only = null)
     {
         var messages = new List<string>();
+        var reportedAlternates = new HashSet<(FormKey, string)>();
         var index = (AssetIndex)assets;
         // MainFormSwap first, then the other INIs in case-sensitive name order; later files win, as in Seasons of Skyrim.
         var files = SeasonSwaps.LoadOrder(enumerate("seasons\\")
@@ -145,10 +146,19 @@ public static class SeasonalLod
                 var alternates=new List<AltTexture>();
                 foreach(var alternate in model.AlternateTextures??[])
                 {
+                    // An alternate texture without a texture set in the load order changes nothing in game: the shape keeps
+                    // the model's own texture. The scan of placed objects leaves such entries out too.
+                    if(string.IsNullOrEmpty(alternate.Name)) continue;
                     if(!game.LinkCache.TryResolve<ITextureSetGetter>(alternate.NewTexture.FormKey,out var texture))
-                        throw new InvalidDataException("Unresolved seasonal alternate texture on "+key);
-                    alternates.Add(new(alternate.Name,texture.Diffuse is {IsNull:false} d?d.DataRelativePath.Path:null,
-                        texture.NormalOrGloss is {IsNull:false} n?n.DataRelativePath.Path:null));
+                    {
+                        string what=$"Seasonal swap target {record?.EditorID ?? "(no EditorID)"} ({key}): alternate texture for shape '{alternate.Name}' "
+                            + (alternate.NewTexture.IsNull ? "names no texture set" : $"names texture set {alternate.NewTexture.FormKey}, which is not in the load order");
+                        if(strict) throw new InvalidDataException(what+". Strict seasonal swaps are on.");
+                        if(reportedAlternates.Add((key,alternate.Name+"|"+alternate.NewTexture.FormKeyNullable))) warn?.Invoke(what+"; the model's own texture is used, as in game.");
+                        continue;
+                    }
+                    string? diffuse=texture.Diffuse is {IsNull:false} d?d.DataRelativePath.Path:null, normal=texture.NormalOrGloss is {IsNull:false} n?n.DataRelativePath.Path:null;
+                    if(diffuse is not null || normal is not null) alternates.Add(new(alternate.Name,diffuse,normal));
                 }
                 var variant=TextureVariant.Create(model.File.DataRelativePath.Path,alternates);
                 textureVariants[variant.Id]=variant;variantId=variant.Id;
