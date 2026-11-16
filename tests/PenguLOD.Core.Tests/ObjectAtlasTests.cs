@@ -35,7 +35,7 @@ public class ObjectAtlasTests
     {
         var original=TextureFixture.Card("part","original.dds");
         var tiled=new LodMeshPart{Material=original.Material,Positions=original.Positions,Normals=original.Normals,Tangents=original.Tangents,Bitangents=original.Bitangents,
-            Triangles=original.Triangles,UVs=[new(-1,0),new(2,0),new(0,1),new(2,1)]};
+            Triangles=original.Triangles,UVs=[new(-10,0),new(20,0),new(0,10),new(20,10)]};   // the texture repeated hundreds of times over one triangle
         var mesh=new LodMesh{Path="test",Parts=[original,tiled]};
         var result=ObjectAtlasStage.Remap(mesh,new Dictionary<string,ObjectAtlasStage.Mapping>{{original.Material.Key,new("atlas.dds","atlas_n.dds",new(.1f,.2f,.4f,.6f))}});
         Assert.Same(tiled,result.Parts[1]);Assert.Same(original.Positions,result.Parts[0].Positions);
@@ -117,11 +117,70 @@ public class ExpandedObjectAtlasTests
         Assert.Equal(.25f, mapped.UVs[mapped.Triangles[0]].X); Assert.Equal(.5f, mapped.UVs[mapped.Triangles[1]].X);
         Assert.Equal(.25f, mapped.UVs[mapped.Triangles[6]].X); Assert.Equal(.5f, mapped.UVs[mapped.Triangles[7]].X);
 
-        // A triangle that crosses a tile edge, or repeats the texture, cannot be folded. Rounding at the edge is allowed for.
-        Assert.NotNull(ObjectAtlasStage.Ineligible(Change(part, uvs: part.UVs.Select(v => v + new Vector2(.5f, 0)).ToArray())));
-        Assert.NotNull(ObjectAtlasStage.Ineligible(Change(part, uvs: part.UVs.Select(v => v * 3).ToArray())));
-        Assert.Null(ObjectAtlasStage.Ineligible(Change(part, uvs: part.UVs.Select(v => v * 1.0005f).ToArray())));
+        // A triangle that crosses a tile edge, or repeats the texture, is cut at the edge. Rounding at the edge needs no cut.
+        Assert.Equal(0, ObjectAtlasStage.CutTriangles(part));
+        Assert.True(ObjectAtlasStage.CutTriangles(Change(part, uvs: part.UVs.Select(v => v + new Vector2(.5f, 0)).ToArray())) > 0);
+        Assert.Null(ObjectAtlasStage.Ineligible(Change(part, uvs: part.UVs.Select(v => v * 3).ToArray())));
+        Assert.Equal(0, ObjectAtlasStage.CutTriangles(Change(part, uvs: part.UVs.Select(v => v * 1.0005f).ToArray())));
         Assert.NotNull(ObjectAtlasStage.Ineligible(Change(part, part.Material with { ClampMode = 0 })));   // clamped: tile (1, 0) is not a copy
+    }
+
+    [Fact]
+    public void A_triangle_that_crosses_a_tile_edge_is_cut_at_the_edge_and_shows_the_same_texture()
+    {
+        // A 400 x 400 card with the texture repeated 2.5 times across and 1.5 times down, starting part-way into a tile.
+        var card = TextureFixture.Card("rock", "red.dds");
+        Vector2 Uv(Vector3 p) => new Vector2(p.X / 400, 1 - p.Z / 400) * new Vector2(2.5f, 1.5f) + new Vector2(-.75f, .25f);
+        var part = Change(card, uvs: card.Positions.Select(Uv).ToArray()) with
+        {
+            Colors = card.Positions.Select(p => (uint)MathF.Round(p.X / 400 * 200) | 0xFF000000u).ToArray(),   // red follows x
+        };
+        Assert.Null(ObjectAtlasStage.Ineligible(part));
+        int added = ObjectAtlasStage.CutTriangles(part);
+        Assert.InRange(added, 8, 40);
+
+        var rect = new AtlasRect(.25f, .5f, .5f, .75f);
+        var mapped = ObjectAtlasStage.Remap(new LodMesh { Path = "fixture", Parts = [part] },
+            new Dictionary<string, ObjectAtlasStage.Mapping> { [part.Material.Key] = new("atlas", "atlas_n", rect) }).Parts[0];
+        Assert.Equal(part.TriangleCount + added, mapped.TriangleCount);
+        Assert.All(mapped.UVs, uv => { Assert.InRange(uv.X, .25f - 1e-5f, .5f + 1e-5f); Assert.InRange(uv.Y, .5f - 1e-5f, .75f + 1e-5f); });
+
+        float area = 0; var edges = new Dictionary<(Vector3, Vector3), int>();
+        for (int t = 0; t < mapped.Triangles.Length; t += 3)
+        {
+            Vector3[] p = [mapped.Positions[mapped.Triangles[t]], mapped.Positions[mapped.Triangles[t + 1]], mapped.Positions[mapped.Triangles[t + 2]]];
+            Vector2[] uv = [mapped.UVs[mapped.Triangles[t]], mapped.UVs[mapped.Triangles[t + 1]], mapped.UVs[mapped.Triangles[t + 2]]];
+            var normal = Vector3.Cross(p[1] - p[0], p[2] - p[0]);
+            Assert.True(normal.Y < 0);                                              // still facing the way the card faces
+            area += normal.Length() / 2;
+            // The middle of each piece shows the texel the uncut card shows at that place.
+            var middle = (p[0] + p[1] + p[2]) / 3; var shown = (uv[0] + uv[1] + uv[2]) / 3; var expected = Uv(middle);
+            Assert.Equal(expected.X - MathF.Floor(expected.X), (shown.X - rect.U0) / (rect.U1 - rect.U0), 3);
+            Assert.Equal(expected.Y - MathF.Floor(expected.Y), (shown.Y - rect.V0) / (rect.V1 - rect.V0), 3);
+            for (int i = 0; i < 3; i++)
+            {
+                var (a, b) = (p[i], p[(i + 1) % 3]);
+                var key = a.X < b.X || (a.X == b.X && a.Z < b.Z) ? (a, b) : (b, a);
+                edges[key] = edges.GetValueOrDefault(key) + 1;
+            }
+        }
+        Assert.Equal(160000f, area, 0);
+        // No gaps: every edge inside the card is shared by exactly two pieces, so the two triangles of the card were cut at the
+        // same points along their shared diagonal.
+        bool OnBorder(Vector3 a, Vector3 b) => (a.X == b.X && a.X is 0 or 400) || (a.Z == b.Z && a.Z is 0 or 400);
+        Assert.All(edges, e => Assert.Equal(OnBorder(e.Key.Item1, e.Key.Item2) ? 1 : 2, e.Value));
+        // What the vertices carry is interpolated along the cut edge.
+        Assert.All(Enumerable.Range(0, mapped.VertexCount), i =>
+        {
+            Assert.Equal(-Vector3.UnitY, mapped.Normals[i]); Assert.Equal(Vector3.UnitX, mapped.Bitangents[i]);
+            Assert.InRange((int)(mapped.Colors![i] & 0xFF) - mapped.Positions[i].X / 400 * 200, -1f, 1f);
+            Assert.Equal(0xFFu, mapped.Colors![i] >> 24);
+        });
+
+        // An axis that clamps is never cut, and neither is a triangle the texture repeats over more than 64 times.
+        Assert.NotNull(ObjectAtlasStage.Ineligible(Change(part, part.Material with { ClampMode = 0 })));
+        Assert.Null(ObjectAtlasStage.Ineligible(Change(card, uvs: card.UVs.Select(v => v * 8).ToArray())));
+        Assert.NotNull(ObjectAtlasStage.Ineligible(Change(card, uvs: card.UVs.Select(v => v * 9).ToArray())));
     }
 
     private static LodMeshPart Change(LodMeshPart p, LodMaterial? material = null, Vector2[]? uvs = null) => new()
@@ -173,7 +232,7 @@ public class ExpandedObjectAtlasTests
         var mesh = new LodMesh { Path = "fixture", Parts = [shifted] };
         var mapped = ObjectAtlasStage.Remap(mesh, new Dictionary<string, ObjectAtlasStage.Mapping> { [p.Material.Key] = new("atlas", "atlas_n", new(.1f, .2f, .4f, .6f)) });
         Assert.Equal(new Vector2(.1f, .6f), mapped.Parts[0].UVs[0]); Assert.Same(p.Triangles, mapped.Parts[0].Triangles);
-        Assert.NotNull(ObjectAtlasStage.Ineligible(Change(p, uvs: p.UVs.Select(v => v * 2).ToArray())));
+        Assert.NotNull(ObjectAtlasStage.Ineligible(Change(p, uvs: p.UVs.Select(v => v * 20).ToArray())));   // hundreds of repeats over one triangle
         Assert.NotNull(ObjectAtlasStage.Ineligible(Change(shifted, p.Material with { ClampMode = 0 })));
         Assert.NotNull(ObjectAtlasStage.Ineligible(Change(p, p.Material with { ShaderFlags1 = 1u << 11 })));
     }

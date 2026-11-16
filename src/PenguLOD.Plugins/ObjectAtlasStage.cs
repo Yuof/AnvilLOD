@@ -14,12 +14,12 @@ namespace PenguLOD.Plugins;
 /// <summary>Packs shader-compatible object surfaces; unsupported materials retain their original sampling.</summary>
 public static class ObjectAtlasStage
 {
-    public const int Version = 4; // surfaces are folded into one tile triangle by triangle; pages up to 4096 px
+    public const int Version = 5; // triangles that cross a tile edge are cut at it, so surfaces a texture repeats over are packed too
     /// <summary>Largest page side in pixels, the largest texture the texture code makes. At the default cell size a page holds up to 256 materials.</summary>
     public const int PageSize = 4096;
     public sealed record Report(int PackedMaterials, int Pages, int EligibleParts, int SkippedParts,
         IReadOnlyDictionary<string, int> Reasons, int SourceMaterials = 0, int AtlasMaterials = 0, long TextureBytes = 0,
-        IReadOnlyList<string>? Warnings = null);
+        IReadOnlyList<string>? Warnings = null, int CutParts = 0, int CutTriangles = 0);
     public sealed record Mapping(string Diffuse, string Normal, AtlasRect Rect, IReadOnlyDictionary<int, string>? Extra = null);
     public sealed record Result(Report Report, Func<LodMesh, LodMesh> Transform);
     private sealed record Candidate(LodMaterial Material, string Group);
@@ -36,38 +36,173 @@ public static class ObjectAtlasStage
         if ((m.ShaderFlags1 & ((1u << 11) | (1u << 15) | (1u << 16) | (1u << 23) | (1u << 28))) != 0
             || (m.ShaderFlags2 & (1u << 24)) != 0) return "non-affine shader sampling";
         if (m.HasAlpha && ObjectTextureAssets.AlphaCutoff(m) is null) return "unsupported alpha blend/test";
-        if (TriangleShifts(part) is not { } shifts || FoldedVertices(part, shifts) > ushort.MaxValue) return "tiling or invalid UVs";
+        if (Tiles(part) is not { } tiled || FoldedVertices(tiled.Part, tiled.Shifts) > ushort.MaxValue) return "tiling or invalid UVs";
         return null;
     }
 
+    /// <summary>Triangles that cutting at tile edges adds to a part that can be packed; 0 when it needs no cut or cannot be packed.</summary>
+    public static int CutTriangles(LodMeshPart part) => Tiles(part) is { } tiled ? tiled.Part.TriangleCount - part.TriangleCount : 0;
+
     /// <summary>How far a triangle may reach past its tile, in tiles: the rounding of half-precision texture coordinates near a tile edge.</summary>
     private const float FoldTolerance = 0.002f;
+    /// <summary>
+    /// Most tiles one triangle may cover and still be cut. A triangle over more repeats than this is a surface the texture is
+    /// tiled across many times; cutting it would turn one triangle into hundreds.
+    /// </summary>
+    public const int MaxTilesPerTriangle = 64;
 
     /// <summary>
-    /// The whole-tile shift that brings each triangle's texture coordinates into the unit square, or null when some triangle does
-    /// not fit one tile (it crosses a tile edge or repeats the texture) or the coordinates are unusable. Under wrapping, a triangle
-    /// in tile (2, -1) samples exactly what it would in tile (0, 0), so each triangle can be moved on its own; a surface mapped
-    /// across several tiles in separate pieces, as most LOD models of walls and rock are, fits an atlas this way. An axis that
-    /// clamps is never shifted. Triangles are moved whole, never single vertices: that would stretch a triangle across a tile edge.
+    /// The part with every triangle inside one tile of its texture, and the whole-tile shift that brings each triangle's texture
+    /// coordinates into the unit square. Null when the coordinates are unusable, a triangle leaves the unit square on an axis
+    /// that clamps, or a triangle covers more than <see cref="MaxTilesPerTriangle"/> tiles.
+    /// <para>Under wrapping, a triangle in tile (2, -1) samples exactly what it would in tile (0, 0), so each triangle can be
+    /// moved on its own; a surface mapped across several tiles in separate pieces, as most LOD models of walls are, fits an atlas
+    /// this way. A triangle that reaches across a tile edge, as on rock faces and anything else the texture repeats over, is cut
+    /// along the edges first: the pieces lie in the plane of the triangle and carry interpolated normals and colours, so the
+    /// surface is unchanged, and two triangles that share an edge are cut at the same points, so no gap opens between them.
+    /// Triangles are moved whole, never single vertices: that would stretch a triangle across a tile edge.</para>
     /// </summary>
-    private static Vector2[]? TriangleShifts(LodMeshPart part)
+    private static (LodMeshPart Part, Vector2[] Shifts)? Tiles(LodMeshPart part)
     {
         var uvs = part.UVs; var triangles = part.Triangles;
         if (part.Material.ClampMode > 3 || uvs.Length != part.Positions.Length || uvs.Length == 0 || triangles.Length % 3 != 0) return null;
         bool wrapU = (part.Material.ClampMode & 2) != 0, wrapV = (part.Material.ClampMode & 1) != 0;
-        var shifts = new Vector2[triangles.Length / 3];
-        for (int t = 0; t < shifts.Length; t++)
+        var shifts = new List<Vector2>(triangles.Length / 3);
+        Cutter? cutter = null;
+        for (int t = 0; t < triangles.Length; t += 3)
         {
-            int a = triangles[t * 3], b = triangles[t * 3 + 1], c = triangles[t * 3 + 2];
+            int a = triangles[t], b = triangles[t + 1], c = triangles[t + 2];
             if (a >= uvs.Length || b >= uvs.Length || c >= uvs.Length) return null;
             var min = Vector2.Min(uvs[a], Vector2.Min(uvs[b], uvs[c])); var max = Vector2.Max(uvs[a], Vector2.Max(uvs[b], uvs[c]));
             if (!float.IsFinite(min.X) || !float.IsFinite(min.Y) || !float.IsFinite(max.X) || !float.IsFinite(max.Y)) return null;
-            var shift = new Vector2(wrapU ? MathF.Floor(min.X + FoldTolerance) : 0, wrapV ? MathF.Floor(min.Y + FoldTolerance) : 0);
-            if (min.X - shift.X < -FoldTolerance || min.Y - shift.Y < -FoldTolerance
-                || max.X - shift.X > 1 + FoldTolerance || max.Y - shift.Y > 1 + FoldTolerance) return null;
-            shifts[t] = shift;
+            var first = new Vector2(wrapU ? MathF.Floor(min.X + FoldTolerance) : 0, wrapV ? MathF.Floor(min.Y + FoldTolerance) : 0);
+            if (min.X - first.X < -FoldTolerance || min.Y - first.Y < -FoldTolerance) return null;
+            float tilesU = MathF.Max(1, MathF.Ceiling(max.X - FoldTolerance) - first.X), tilesV = MathF.Max(1, MathF.Ceiling(max.Y - FoldTolerance) - first.Y);
+            if ((!wrapU && tilesU > 1) || (!wrapV && tilesV > 1) || tilesU * tilesV > MaxTilesPerTriangle) return null;
+            if (tilesU == 1 && tilesV == 1)
+            {
+                shifts.Add(first); cutter?.Keep(a, b, c);
+                continue;
+            }
+            cutter ??= new Cutter(part, t);
+            cutter.Cut(a, b, c, first, (int)tilesU, (int)tilesV, shifts);
         }
-        return shifts;
+        if (cutter is null) return (part, shifts.ToArray());
+        return cutter.VertexCount > ushort.MaxValue ? null : (cutter.Build(), shifts.ToArray());
+    }
+
+    /// <summary>Cuts triangles of one part along the tile edges of its texture, adding the vertices the cuts need.</summary>
+    private sealed class Cutter
+    {
+        private readonly LodMeshPart _part;
+        private readonly List<Vector3> _positions, _normals, _tangents, _bitangents;
+        private readonly List<Vector2> _uvs;
+        private readonly List<uint>? _colors;
+        private readonly List<int> _triangles;
+        // One cut vertex per edge and tile line, whichever triangle asks first, so neighbours share it.
+        private readonly Dictionary<(int Low, int High, int Axis, float Line), int> _cuts = [];
+        private List<int> _polygon = [], _below = [], _above = [], _strip = [];
+
+        /// <param name="part">The part being cut.</param>
+        /// <param name="kept">How many of its triangle indices come before the first triangle that needs a cut; they are kept as they are.</param>
+        public Cutter(LodMeshPart part, int kept)
+        {
+            _part = part;
+            _positions = [.. part.Positions]; _uvs = [.. part.UVs]; _normals = [.. part.Normals]; _tangents = [.. part.Tangents];
+            _bitangents = [.. part.Bitangents]; _colors = part.Colors is null ? null : [.. part.Colors];
+            _triangles = new List<int>(part.Triangles.Length + 64);
+            for (int i = 0; i < kept; i++) _triangles.Add(part.Triangles[i]);
+        }
+
+        public int VertexCount => _positions.Count;
+
+        public void Keep(int a, int b, int c) { _triangles.Add(a); _triangles.Add(b); _triangles.Add(c); }
+
+        /// <summary>Cuts triangle a, b, c into the tiles it covers, a column of tiles at a time, and adds one shift per piece.</summary>
+        public void Cut(int a, int b, int c, Vector2 first, int tilesU, int tilesV, List<Vector2> shifts)
+        {
+            _polygon.Clear(); _polygon.Add(a); _polygon.Add(b); _polygon.Add(c);
+            for (int u = 0; u < tilesU; u++)
+            {
+                if (u < tilesU - 1) { Split(_polygon, 0, first.X + u + 1); (_strip, _below) = (_below, _strip); (_polygon, _above) = (_above, _polygon); }
+                else (_strip, _polygon) = (_polygon, _strip);
+                for (int v = 0; v < tilesV; v++)
+                {
+                    List<int> piece;
+                    if (v < tilesV - 1) { Split(_strip, 1, first.Y + v + 1); piece = _below; (_strip, _above) = (_above, _strip); }
+                    else piece = _strip;
+                    var shift = new Vector2(first.X + u, first.Y + v);
+                    for (int i = 1; i + 1 < piece.Count; i++)           // a convex polygon, as a fan
+                    {
+                        int p = piece[0], q = piece[i], r = piece[i + 1];
+                        if (p == q || q == r || p == r) continue;
+                        Keep(p, q, r); shifts.Add(shift);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Splits a convex polygon at one tile line into the part below it and the part above it. A corner within the tolerance
+        /// of the line belongs to both, so no sliver is cut off beside it.
+        /// </summary>
+        private void Split(List<int> polygon, int axis, float line)
+        {
+            _below.Clear(); _above.Clear();
+            for (int i = 0; i < polygon.Count; i++)
+            {
+                int p = polygon[i], q = polygon[(i + 1) % polygon.Count];
+                int sideP = Side(p, axis, line), sideQ = Side(q, axis, line);
+                if (sideP <= 0) _below.Add(p);
+                if (sideP >= 0) _above.Add(p);
+                if (sideP * sideQ < 0) { int cut = CutVertex(p, q, axis, line); _below.Add(cut); _above.Add(cut); }
+            }
+        }
+
+        private int Side(int vertex, int axis, float line)
+        {
+            float d = (axis == 0 ? _uvs[vertex].X : _uvs[vertex].Y) - line;
+            return d < -FoldTolerance ? -1 : d > FoldTolerance ? 1 : 0;
+        }
+
+        private int CutVertex(int p, int q, int axis, float line)
+        {
+            var key = (Math.Min(p, q), Math.Max(p, q), axis, line);
+            if (_cuts.TryGetValue(key, out int cut)) return cut;
+            int low = key.Item1, high = key.Item2;      // always from the lower index, so both neighbours compute the same point
+            float from = axis == 0 ? _uvs[low].X : _uvs[low].Y, to = axis == 0 ? _uvs[high].X : _uvs[high].Y;
+            float t = (line - from) / (to - from);
+            var uv = Vector2.Lerp(_uvs[low], _uvs[high], t);
+            _uvs.Add(axis == 0 ? new Vector2(line, uv.Y) : new Vector2(uv.X, line));
+            _positions.Add(Vector3.Lerp(_positions[low], _positions[high], t));
+            _normals.Add(Direction(_normals[low], _normals[high], t)); _tangents.Add(Direction(_tangents[low], _tangents[high], t));
+            _bitangents.Add(Direction(_bitangents[low], _bitangents[high], t));
+            _colors?.Add(Color(_colors[low], _colors[high], t));
+            return _cuts[key] = _positions.Count - 1;
+        }
+
+        private static Vector3 Direction(Vector3 a, Vector3 b, float t)
+        {
+            var mixed = Vector3.Lerp(a, b, t); float length = mixed.Length();
+            return length > 1e-6f ? mixed / length : a;
+        }
+
+        private static uint Color(uint a, uint b, float t)
+        {
+            uint mixed = 0;
+            for (int shift = 0; shift < 32; shift += 8)
+            {
+                float x = (a >> shift) & 0xFF, y = (b >> shift) & 0xFF;
+                mixed |= (uint)Math.Clamp(MathF.Round(x + (y - x) * t), 0, 255) << shift;
+            }
+            return mixed;
+        }
+
+        public LodMeshPart Build() => _part with
+        {
+            Positions = [.. _positions], UVs = [.. _uvs], Normals = [.. _normals], Tangents = [.. _tangents], Bitangents = [.. _bitangents],
+            Colors = _colors is null ? null : [.. _colors], Triangles = _triangles.Select(i => (ushort)i).ToArray(),
+        };
     }
 
     /// <summary>Vertices the part has once every vertex used under two different shifts is doubled.</summary>
@@ -128,7 +263,7 @@ public static class ObjectAtlasStage
         var info = new Dictionary<string, SourceInfo>(StringComparer.OrdinalIgnoreCase);
         var failures = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var reasons = new Dictionary<string, int>(); var warnings = new List<string>();
-        int eligible = 0, skipped = 0;
+        int eligible = 0, skipped = 0, cutParts = 0, cutTriangles = 0;
         var modelArray = meshes.ToArray();
         foreach (var mesh in modelArray) foreach (var part in mesh.Parts)
         {
@@ -167,7 +302,11 @@ public static class ObjectAtlasStage
                 catch (Exception ex) when (ex is IOException or NotSupportedException or ArgumentException or InvalidDataException)
                 { reason = "unavailable or unsupported texture"; }
             }
-            if (reason is null) eligible++;
+            if (reason is null)
+            {
+                eligible++;
+                if (CutTriangles(part) is > 0 and var added) { cutParts++; cutTriangles += added; }
+            }
             else { skipped++; reasons[reason] = reasons.GetValueOrDefault(reason) + 1; }
         }
         var mapped = new Dictionary<string, Mapping>(StringComparer.Ordinal);
@@ -212,10 +351,11 @@ public static class ObjectAtlasStage
         LodMesh Transform(LodMesh mesh) => cache.GetOrAdd(mesh, m => Remap(m, mapped));
         int before = modelArray.SelectMany(m => m.Parts).Select(p => p.Material.Key).Distinct().Count();
         int after = modelArray.Select(Transform).SelectMany(m => m.Parts).Select(p => p.Material.Key).Distinct().Count();
-        var report = new Report(mapped.Count, pages, eligible, skipped, reasons, before, after, textureBytes, warnings);
+        var report = new Report(mapped.Count, pages, eligible, skipped, reasons, before, after, textureBytes, warnings, cutParts, cutTriangles);
         File.WriteAllText(Path.Combine(output, "PenguLOD.atlas.json"), JsonSerializer.Serialize(report, PersistentPipeline.Json));
         var groupSizes = materials.Values.GroupBy(c => c.Group).Select(g => g.Count()).OrderDescending().ToArray();
         progress?.Report($"Object atlas: {mapped.Count:N0} materials on {pages} page sets; {before:N0} → {after:N0} distinct materials; {skipped:N0} parts retain original UVs/materials.");
+        if (cutParts > 0) progress?.Report($"Object atlas: {cutParts:N0} model parts were cut at texture tile edges to fit, adding {cutTriangles:N0} triangles to those models.");
         progress?.Report($"Object atlas: {groupSizes.Length:N0} groups of compatible materials; the largest hold {string.Join(", ", groupSizes.Take(8))} materials.");
         foreach (var warning in warnings.Take(20)) progress?.Report("Warning: object atlas kept source material: " + warning);
         // Keep content-addressed previous pages: out-of-scope and seasonal BTOs can still reference them.
@@ -229,10 +369,10 @@ public static class ObjectAtlasStage
         Path = mesh.Path, Warnings = mesh.Warnings, NoShapesInFile = mesh.NoShapesInFile,
         Parts = mesh.Parts.Select(p =>
         {
-            if (Ineligible(p) is not null || !mappings.TryGetValue(p.Material.Key, out var map) || TriangleShifts(p) is not { } shifts) return p;
+            if (!mappings.TryGetValue(p.Material.Key, out var map) || Ineligible(p) is not null || Tiles(p) is not { } tiled) return p;
             var textures = ShaderGuard.TextureSlots(p.Material.Textures); textures[0] = map.Diffuse; textures[1] = map.Normal;
             if (map.Extra is not null) foreach (var (slot, path) in map.Extra) textures[slot] = path;
-            return Fold(p, p.Material with { Textures = textures, ClampMode = 0 }, shifts,
+            return Fold(tiled.Part, p.Material with { Textures = textures, ClampMode = 0 }, tiled.Shifts,
                 v => new Vector2(map.Rect.U0 + v.X * (map.Rect.U1 - map.Rect.U0), map.Rect.V0 + v.Y * (map.Rect.V1 - map.Rect.V0)));
         }).ToArray()
     };

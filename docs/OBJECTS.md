@@ -38,8 +38,10 @@ Both options are under **Object LOD → Object atlases** and are off by default.
 - **Optimize object LOD textures** writes smaller compressed copies of textures that are
   not in an atlas. **Maximum standalone LOD texture size** defaults to 1024.
 
-Surfaces that cannot be packed keep their original textures. Your source textures are never
-changed; the new ones are written into the object LOD output.
+A surface that a texture repeats over is cut along the repeats so that it fits a sheet,
+which adds triangles to it. Surfaces that cannot be packed keep their original textures.
+Your source textures are never changed; the new ones are written into the object LOD
+output.
 
 After changing either option, run object LOD only and replace the installed output.
 Smaller textures do not guarantee a higher frame rate, so compare the same view before and
