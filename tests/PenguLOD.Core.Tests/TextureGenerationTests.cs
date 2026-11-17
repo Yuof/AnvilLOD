@@ -44,6 +44,28 @@ public sealed class TextureGenerationTests
     }
 
     [Fact]
+    public void ARuleThatCannotBeReadIsSkippedWithItsTextureAndTheRestIsGenerated()
+    {
+        using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
+        // The fixture's two rules for atlas.dds, then DynDOLOD's own Majestic Mountains rule (a negative colour factor) as the second of
+        // two tiles of hq.dds, a line that is no rule at all, and one more good texture.
+        File.AppendAllText(f.RuleFile, "\n" + TextureFixture.Tile(@"textures\red.dds", @"textures\lod\hq.dds", 0)
+            + "\n96\t-3\t1\t1\ttextures\\green.dds\t1\t1\t1\t0\ttextures\\lod\\hq.dds\t2\t1"
+            + "\nnot a rule"
+            + "\n" + TextureFixture.Tile(@"textures\green.dds", @"textures\lod\fine.dds", 0));
+        var result = TextureGeneration.Run(f.Request);
+        Assert.True(result.Published); Assert.Equal(0, result.Errors);
+        var skipped = result.Warnings.Where(w => w.StartsWith("Texture rule skipped", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(2, skipped.Length);
+        Assert.Contains(skipped, w => w.Contains("rule 4") && w.Contains(@"textures\lod\hq.dds is not generated"));
+        Assert.Contains(skipped, w => w.Contains("rule 5") && w.Contains("The rule is skipped"));
+        bool Written(string texture) => File.Exists(GamePath.ToFileSystemPath(f.Output, texture));
+        Assert.True(Written(@"textures\lod\atlas.dds")); Assert.True(Written(@"textures\lod\fine.dds"));
+        Assert.False(Written(@"textures\lod\hq.dds"));          // not half an atlas: the tile that could be read is left out too
+        Assert.DoesNotContain(result.Items, i => i.Output.Contains("hq.dds", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void SourceAlternativesUseFirstAvailableAndFinalAtlasDimensionsWin()
     {
         using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);

@@ -235,7 +235,7 @@ public class RecipeTextureMappingTests
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]
-    public void DuplicateFullShapeNamesRequireAUniqueMaterialAndNoAmbiguousAlternate(bool alternate, bool unknownLodTexture)
+    public void DuplicateFullShapeNamesNeedAUniqueMaterialOrTheShapeKeepsItsLodTexture(bool alternate, bool unknownLodTexture)
     {
         using var f = new TextureFixture();
         string full = @"meshes\fixture\duplicate.nif", lod = @"meshes\fixture\duplicate_lod_0.nif";
@@ -246,16 +246,21 @@ public class RecipeTextureMappingTests
         var variant = TextureVariant.Create(full, alternate ? [new("roof", Blue, null)] : []);
         var generator = new LodGenerator(AssetIndex.Build(GameRelease.SkyrimSE, f.Data))
         { TextureVariants = new Dictionary<string, TextureVariant> { [variant.Id] = variant } };
+        // Which "roof" the LOD shape or the alternate texture belongs to cannot be told. Nothing is guessed and nothing fails: the
+        // shape keeps the texture its LOD model has, and the case is recorded for the log.
+        var part = Assert.Single(generator.GetMesh(LodMeshKey.Make(lod, variant.Id))!.Parts);
+        Assert.Equal(unknownLodTexture ? Blue : Red, part.Material.Textures[0]);
         if (alternate || unknownLodTexture)
         {
-            var error = Assert.Throws<InvalidDataException>(() => generator.GetMesh(LodMeshKey.Make(lod, variant.Id)));
-            Assert.Contains(alternate ? "duplicated" : "conflicting full textures", error.Message);
+            var ambiguous = Assert.Single(generator.Matching.Ambiguous);
+            Assert.Equal(lod + "|roof", ambiguous.Key);
+            Assert.Contains(alternate ? "alternate texture" : "different textures", ambiguous.Value);
         }
-        else Assert.Equal(Red, Assert.Single(generator.GetMesh(LodMeshKey.Make(lod, variant.Id))!.Parts).Material.Textures[0]);
+        else Assert.Empty(generator.Matching.Ambiguous);
     }
 
     [Fact]
-    public void ExistingLodMaterialCannotDiscardOtherNamedContributorsToMergedShape()
+    public void AMergedShapeWhoseContributorsDifferInTextureKeepsItsLodTexture()
     {
         using var f = new TextureFixture();
         string full = @"meshes\fixture\merged.nif", lod = @"meshes\fixture\merged_lod_0.nif";
@@ -265,7 +270,8 @@ public class RecipeTextureMappingTests
         var variant = TextureVariant.Create(full, []);
         var generator = new LodGenerator(AssetIndex.Build(GameRelease.SkyrimSE, f.Data))
         { TextureVariants = new Dictionary<string, TextureVariant> { [variant.Id] = variant } };
-        Assert.Contains("conflicting full textures",
-            Assert.Throws<InvalidDataException>(() => generator.GetMesh(LodMeshKey.Make(lod, variant.Id))).Message);
+        // The LOD shape's own texture matches contributor A, but that may not be used to drop contributor B.
+        Assert.Equal(Red, Assert.Single(generator.GetMesh(LodMeshKey.Make(lod, variant.Id))!.Parts).Material.Textures[0]);
+        Assert.Contains("different textures", Assert.Single(generator.Matching.Ambiguous).Value);
     }
 }

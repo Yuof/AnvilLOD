@@ -524,7 +524,9 @@ public static class ScanPipeline
         if (req.Scan.MatchTextures)
         {
             var generated = req.GeneratedTextureFolder is { } textureFolder ? TextureGenerationManifest.Read(textureFolder, true) : null;
-            var recipeSet = generated?.Recipes ?? TextureGeneration.ReadRules(game, resources).Program;
+            var readRules = generated?.Recipes is null ? TextureGeneration.ReadRules(game, resources) : null;
+            foreach (string skipped in readRules?.Skipped ?? []) Warn("Texture rule skipped: " + skipped);
+            var recipeSet = generated?.Recipes ?? readRules!.Program;
             if (recipeSet.Entries.Count > 0)
             {
                 byte[]? RecipeSource(string path)
@@ -635,6 +637,9 @@ public static class ScanPipeline
             if (scan.TextureVariants is not null && tm.Meshes > 0)
                 progress?.Report($"Texture matching: {tm.ShapesChanged:N0} of {tm.Shapes:N0} LOD shapes (in {tm.MeshesChanged:N0} of {tm.Meshes:N0} LOD meshes) now use the texture their full model has, snow, ice and other variants included;"
                                  + $" {tm.ShapesStitched:N0} shapes keep stitched LOD textures. {tm.FullModelsRead:N0} full models read, {tm.FullModelsMissing:N0} not found.");
+            if (tm.Ambiguous.Count > 0)
+                Warn($"Texture matching: {tm.Ambiguous.Count:N0} LOD shapes keep their LOD model's own texture, because their full model has several shapes of that name with different textures. First: "
+                     + string.Join("; ", tm.Ambiguous.OrderBy(a => a.Key, StringComparer.OrdinalIgnoreCase).Take(3).Select(a => a.Key.Replace("|", ", shape ") + " (" + a.Value + ")")) + ".");
 
             var cl = generator.Cleaning;
             if (cl.TrianglesDropped > 0 || cl.VerticesMerged > 0)

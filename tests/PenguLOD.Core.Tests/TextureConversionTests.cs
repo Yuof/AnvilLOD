@@ -58,14 +58,16 @@ public class TextureConversionTests
     [InlineData("7", "NaN", "0", "0")]
     [InlineData("7", "0", "101", "0")]
     [InlineData("7", "0", "0", "-1")]
-    public void InvalidConversionSettingsFailBeforePublication(string filter, string contrast, string brightness, string start)
+    public void AConversionRuleWithInvalidSettingsIsSkippedAndItsTextureIsNotConverted(string filter, string contrast, string brightness, string start)
     {
         using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
-        Assert.True(TextureGeneration.Run(f.Request).Published);
-        string before = File.ReadAllText(Path.Combine(f.Output, TextureGenerationManifest.FileName));
         File.AppendAllText(f.RuleFile, $"\n0\t1\t1\t1\ttextures\\red.dds\tx\t{filter}\t{contrast}\t{brightness}\ttextures\\red.dds\t{start}\tx");
-        Assert.Throws<InvalidDataException>(() => TextureGeneration.Run(f.Request));
-        Assert.Equal(before, File.ReadAllText(Path.Combine(f.Output, TextureGenerationManifest.FileName)));
+        var result = TextureGeneration.Run(f.Request);
+        Assert.True(result.Published);
+        Assert.Single(result.Warnings, w => w.StartsWith("Texture rule skipped", StringComparison.Ordinal) && w.Contains("rule 3") && w.Contains(@"textures\red.dds is not generated"));
+        // Nothing is written for the texture the rule would have converted; the stitched atlas of the other rules is.
+        Assert.False(File.Exists(GamePath.ToFileSystemPath(f.Output, @"textures\red.dds")));
+        Assert.True(File.Exists(GamePath.ToFileSystemPath(f.Output, @"textures\lod\atlas.dds")));
     }
 
     [Fact]
