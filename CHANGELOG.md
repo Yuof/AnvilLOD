@@ -5,6 +5,10 @@ Versions follow SemVer. Alpha and beta versions are pre-releases.
 ## [Unreleased]
 
 - Fixed a DynDOLOD preset used as the custom rule file giving every object its most detailed LOD mesh at LOD 32. Its LOD 32 rules are used only when the preset has Level32 ticked.
+- Added **High**, **Balanced** and **Performance** presets on Overview and Object LOD. They set the detail levels on Textures, Terrain and Object LOD.
+- Added saved presets on Overview: save the generation settings under a name, load or delete them, or load a preset file.
+- Added **Import DynDOLOD settings…** on Overview, which reads a preset saved by DynDOLOD or TexGen.
+- Changed the Object LOD buttons: **Balanced preset** and **High quality** are replaced by the new presets, and **Reset options** restores the defaults.
 - Fixed buildings and other statics without object bounds disappearing in loaded cells while `Occlusion.esp` is active. `Occlusion.esp` gives them their model's bounds. Regenerate it.
 - Changed `Occlusion.esp` to keep each cell's own max-height data. Cells without any get the bare landscape.
 - Fixed every stage stopping with "Invalid stitching dimensions or colour settings" on a texture rule file it cannot read, such as DynDOLOD's Majestic Mountains rules. The rule is skipped with a warning.

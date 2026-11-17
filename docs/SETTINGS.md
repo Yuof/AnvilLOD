@@ -56,6 +56,86 @@ or resumes a matching saved run. The run button is disabled when no stages are
 selected. Individual stage pages have their own generation button at the bottom
 of the window; those buttons run only that stage.
 
+### Presets
+
+**High**, **Balanced** and **Performance** set the detail levels below and nothing
+else. Which outputs are generated, paths, worldspaces and the game source stay as
+they are. The line under the buttons says which preset the current values match.
+The same three buttons are on **Object LOD**.
+
+| Setting | Performance | Balanced | High |
+| --- | --- | --- | --- |
+| Mesh rules preset | Low | Medium | High |
+| Detailed ships | off | off | on |
+| Grass density | `0.03` | `0.05` | `0.08` |
+| LOD 4 / LOD 8 tree triangle budget | `2000` / `800` | `3000` / `1200` | `4000` / `1600` |
+| Tree geometry target (%) | `45` | `55` | `65` |
+| Maximum native trunk texture size | `256` | `512` | `512` |
+| LOD 4 / 8 / 16 object triangle budget | `1500` / `600` / `250` | `2000` / `800` / `300` | `2500` / `1000` / `400` |
+| Atlas cell size | `128` | `256` | `256` |
+| Maximum standalone LOD texture size | `512` | `1024` | `1024` |
+| PBR texture size | `256` | `512` | `512` |
+| Underside sample step | `32` | `16` | `16` |
+| Stitch base size (Textures) | `128` | `256` | `256` |
+| Maximum billboard size (Textures) | `256` | `512` | `512` |
+| Tree / trunk / grass world units per pixel (Textures) | `12` / `8` / `4` | `8` / `6` / `3` | `6` / `4` / `2` |
+| HD front and side billboards (Textures) | off | on | on |
+| Texture size (Terrain) | `256` | `512` | `512` |
+
+High is every one of these settings at its default. Regenerate the stages whose
+settings changed; changed textures need object LOD regenerated too.
+
+A saved preset holds every generation setting on Textures, Terrain, Grass cache
+and Object LOD, including which outputs are generated. It holds no path, worldspace
+selection, game source, run option or preference, and not **SKSE DLL installation**
+or **ESL record limit**, so a preset from another setup is safe to load.
+
+| Control | What it does |
+| --- | --- |
+| Saved presets, **Load preset**, **Delete preset** | Applies or removes a preset saved by name. |
+| **Save current settings** | Saves the generation settings under the name in the box. A preset of the same name is replaced. |
+| **Load preset file…** | Applies a preset file from anywhere. An exported settings file works too; only its generation settings are taken. |
+| **Open presets folder** | The folder of the saved presets, `presets` beside the settings file. Copy a file in or out to share a preset. |
+| **Import DynDOLOD settings…** | Reads a preset saved by DynDOLOD or TexGen and sets the PenguLOD settings that mean the same. |
+
+A saved preset is not the file that **Export settings…** writes and the command
+line reads with `--settings`: that file also holds the paths and the game source.
+
+**Import DynDOLOD settings…** takes a file from `Edit Scripts\DynDOLOD\Presets` in
+the DynDOLOD folder. The activity log lists what changed and which choices have no
+PenguLOD setting.
+
+| From a DynDOLOD preset | PenguLOD setting |
+| --- | --- |
+| Low / Medium / High | Mesh rules preset |
+| Level 32 | LOD 32 |
+| Tree LOD, Ultra | Tree billboards, 3D tree LOD |
+| Dynamic LOD | Dynamic objects, Animated grid objects |
+| Occlusion data | Generate Occlusion.esp |
+| Grass LOD and its density | Grass billboard LOD, Grass density |
+| Terrain underside | Terrain underside |
+| Seasons | Seasonal LOD |
+| Candles, FXGlow | Candle rules, Glow effect rules |
+| Windows | Night-time window glow |
+| Parent > Child | Parent-to-city copies |
+| The ticked worldspaces | Worldspaces |
+
+| From a TexGen preset | PenguLOD setting |
+| --- | --- |
+| Stitched and its base size | Stitched object textures, Stitch base size |
+| Tree, HD tree | Tree billboards, HD front and side billboards |
+| Grass, HD grass | Grass billboards, HD front and side billboards |
+| Rendered billboards | Hybrid tree trunk textures |
+| Billboard max size | Maximum billboard size |
+| Tree and rendered-billboard direct and ambient light | Tree and trunk light |
+| Rendered PBR scale | PBR scale |
+
+Texture tile sizes, brightness offsets, occlusion and underside quality, the grass
+mode, TexGen's units per pixel and its rendered object textures are not imported.
+The preset's mesh rules are not imported either: PenguLOD reads DynDOLOD's rule
+files itself. To use the preset's own rules, choose the preset as **Custom rule
+file** on **Game & resources**.
+
 ### Run options
 
 | Setting | What it does |
@@ -262,15 +342,13 @@ and opens **Scan results** without generating output.
 
 ### Presets
 
-Each button resets the Object LOD options before applying its choices.
-It leaves source paths and the separate texture and grass-cache settings in place.
-Terrain's seasonal switch is shared with this page and therefore resets too.
+**High**, **Balanced** and **Performance** are the presets described under
+[Overview](#presets). They also set texture and terrain sizes.
 
-| Button | What it selects |
+| Button | What it does |
 | --- | --- |
-| Balanced preset | Medium mesh rules, grass density `0.05`, Detailed ships off, and the other Generation options at their defaults. 3D trees and automatic object models remain off. |
-| High quality | Restores the Generation options' defaults, including High mesh rules. It does not enable every optional feature. |
-| Objects only | Turns off tree and grass LOD, Community Shaders grass, dynamic/grid objects, native grid objects, Animated Ships support and missing-billboard rendering; other options return to defaults. |
+| Objects only | Returns every option on this page to its default, then turns off tree and grass LOD, Community Shaders grass, dynamic/grid objects, native grid objects, Animated Ships support and missing-billboard rendering. |
+| Reset options | Returns every option on this page to its default, including High mesh rules. Terrain's seasonal switch is shared with this page and resets too. |
 
 ### Objects
 

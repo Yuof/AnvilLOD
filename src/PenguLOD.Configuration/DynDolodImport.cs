@@ -1,0 +1,211 @@
+using System.Globalization;
+using System.Text.Json;
+using PenguLOD.Desktop.Models;
+
+namespace PenguLOD.Desktop.Services;
+
+/// <summary>
+/// Reads the choices saved in a DynDOLOD or TexGen preset (<c>Edit Scripts\DynDOLOD\Presets\*.ini</c>) and sets the
+/// PenguLOD settings that mean the same. Settings without a counterpart are listed, not guessed.
+/// </summary>
+public static class DynDolodImport
+{
+    /// <param name="Kind">"DynDOLOD" or "TexGen".</param>
+    /// <param name="Changes">One line per setting that changed, with the old and new value.</param>
+    /// <param name="Unchanged">Settings the file names that already had that value.</param>
+    /// <param name="NotImported">Keys of the file with a choice PenguLOD has no counterpart for.</param>
+    /// <param name="MeshRules">Mesh rules the file holds. They are not imported.</param>
+    public sealed record Result(string Kind, IReadOnlyList<string> Changes, int Unchanged, IReadOnlyList<string> NotImported, int MeshRules);
+
+    // Choices of a DynDOLOD preset that are read here or have no counterpart. Every other key of its [DynDOLOD] section
+    // with the value 0 or 1 is a worldspace.
+    private static readonly string[] DynDolodKeys =
+    [
+        "OutputPath", "Preset", "PresetCopyChild", "DoObjectLOD", "Level32", "DoTreeLOD", "UltraTreeLOD", "TreeLargeRef", "DoDynamicLOD",
+        "DoOcclusion", "DoGrass", "DoTerrainUnderside", "DoSeasons", "SeasonsSnow", "SeasonsToGenerate", "LoadCandles", "LoadFXGlow",
+        "AutoMap", "FakeLights", "FakeLightsChildWorld", "Windows", "WindowsHigh", "UseOrgLOD", "UpgradeLargeReferences",
+        "WorkaroundLargeReferencesBugs", "DowngradeNormalReferences", "CopyParent", "TreeLODMaxTileSize", "TreeLODBrightness",
+        "GrassLODMaxTileSize", "GrassLODBrightness", "ObjectLODMaxTileSize", "ObjectLODBrightness", "FullTextureMaxTileSize",
+        "FullTextureBrightness", "OcclusionPlugin", "OcclusionQuality", "GrassLODDensity", "GrassLODMode", "TerrainUndersideQuality",
+        "TerrainUndersideHeight", "LODLevel", "LODX", "LODY", "FarGrid", "NearGrid",
+    ];
+
+    // Choices that change the output and have no PenguLOD counterpart; reported when the file sets them.
+    private static readonly string[] DynDolodNotImported =
+    [
+        "TreeLargeRef", "SeasonsSnow", "SeasonsToGenerate", "FakeLights", "WindowsHigh", "UpgradeLargeReferences", "DowngradeNormalReferences",
+        "TreeLODMaxTileSize", "TreeLODBrightness", "GrassLODMaxTileSize", "GrassLODBrightness", "ObjectLODMaxTileSize", "ObjectLODBrightness",
+        "FullTextureMaxTileSize", "FullTextureBrightness", "OcclusionQuality", "GrassLODMode", "TerrainUndersideQuality", "TerrainUndersideHeight",
+    ];
+
+    private static readonly string[] TexGenNotImported =
+    [
+        "RenderObjects", "RenderObjectsSize", "BillboardsUnitsPerPixel", "BillboardsMinSize", "StitchPBRScale", "BillboardPBRScale",
+        "GrassBillboardsDirect", "GrassBillboardsAmbient", "GrassHDBillboardsDirect", "GrassHDBillboardsAmbient",
+    ];
+
+    private static readonly Dictionary<string, string> SettingLabels = new(StringComparer.Ordinal)
+    {
+        [nameof(DesktopSettings.Worldspaces)] = "Worldspaces",
+        [nameof(DesktopSettings.TextureGenStitched)] = "Stitched object textures",
+        [nameof(DesktopSettings.TextureGenBaseSize)] = "Stitch base size",
+        [nameof(DesktopSettings.TextureGenTrees)] = "Tree billboards (textures)",
+        [nameof(DesktopSettings.TextureGenGrass)] = "Grass billboards (textures)",
+        [nameof(DesktopSettings.TextureGenTrunks)] = "Hybrid tree trunk textures",
+        [nameof(DesktopSettings.TextureGenHdViews)] = "HD front and side billboards",
+        [nameof(DesktopSettings.TextureGenMaxSize)] = "Maximum billboard size",
+        [nameof(DesktopSettings.TextureGenTreeAmbient)] = "Tree ambient light",
+        [nameof(DesktopSettings.TextureGenTreeDirect)] = "Tree direct light",
+        [nameof(DesktopSettings.TextureGenTrunkAmbient)] = "Trunk ambient light",
+        [nameof(DesktopSettings.TextureGenTrunkDirect)] = "Trunk direct light",
+        [nameof(DesktopSettings.BakePbrScale)] = "PBR scale (textures)",
+    };
+
+    /// <summary>Reads the file and applies what it holds. Nothing is changed when the file is not a DynDOLOD or TexGen preset.</summary>
+    public static Result Apply(DesktopSettings settings, string file)
+    {
+        var (sections, order) = ReadIni(file);
+        var before = settings.Snapshot();
+        var preset = new QualityPreset { Name = Path.GetFileName(file) };
+        string? worldspaces = null;
+        string kind; IEnumerable<string> notImported; int rules = 0;
+
+        if (sections.TryGetValue("TexGen", out var texGen))
+        {
+            kind = "TexGen";
+            TexGen(texGen, preset);
+            notImported = TexGenNotImported.Where(k => Set(texGen, k));
+        }
+        else if (sections.TryGetValue("DynDOLOD", out var dynDolod) && dynDolod.ContainsKey("DoObjectLOD"))
+        {
+            kind = "DynDOLOD";
+            worldspaces = DynDolod(dynDolod, order["DynDOLOD"], preset);
+            notImported = DynDolodNotImported.Where(k => Set(dynDolod, k));
+            rules = sections.Where(s => s.Key.EndsWith("LODGen", StringComparison.OrdinalIgnoreCase))
+                .Sum(s => s.Value.Keys.Count(k => k.StartsWith("LODGen", StringComparison.OrdinalIgnoreCase)));
+        }
+        else throw new InvalidDataException("This is not a DynDOLOD or TexGen preset. Choose a file from DynDOLOD's Edit Scripts\\DynDOLOD\\Presets folder.");
+
+        QualityPresets.Apply(settings, preset);
+        if (worldspaces is not null) settings.Worldspaces = worldspaces;
+
+        var changes = new List<string>(); int unchanged = 0;
+        foreach (var (key, value) in preset.Options)
+        {
+            var spec = GenerationOptions.All.Single(o => o.Key == key);
+            var old = before.Options.TryGetValue(key, out var o) ? o : JsonSerializer.SerializeToElement(spec.Default, spec.Default.GetType());
+            if (Same(old, value)) unchanged++; else changes.Add($"{spec.Label}: {Show(old)} → {Show(value)}");
+        }
+        foreach (var (name, value) in preset.Settings)
+        {
+            var property = typeof(DesktopSettings).GetProperty(name)!;
+            var old = JsonSerializer.SerializeToElement(property.GetValue(before), property.PropertyType);
+            if (Same(old, value)) unchanged++; else changes.Add($"{SettingLabels[name]}: {Show(old)} → {Show(value)}");
+        }
+        if (worldspaces is not null)
+        {
+            if (before.Worldspaces == worldspaces) unchanged++; else changes.Add($"Worldspaces: {before.Worldspaces} → {worldspaces}");
+        }
+        return new Result(kind, changes, unchanged, notImported.ToArray(), rules);
+    }
+
+    // A choice left at 0, empty or Default is DynDOLOD's own default and needs no mention.
+    private static bool Set(Dictionary<string, string> ini, string key) => ini.TryGetValue(key, out var v) && v is not ("" or "0" or "Default");
+
+    private static string? DynDolod(Dictionary<string, string> ini, List<string> order, QualityPreset preset)
+    {
+        void Option(string key, object value) => preset.Options[key] = JsonSerializer.SerializeToElement(value, value.GetType());
+        bool? Flag(string key) => ini.TryGetValue(key, out var v) ? v.Trim() switch { "1" => true, "0" => false, _ => null } : null;
+
+        if (ini.TryGetValue("Preset", out var rules) && new[] { "Low", "Medium", "High" }.FirstOrDefault(p => p.Equals(rules.Trim(), StringComparison.OrdinalIgnoreCase)) is { } level)
+            Option("preset", level);
+        if (Flag("Level32") is { } lod32) Option("lod32", lod32);
+        // DynDOLOD's Ultra puts trees into object LOD with the 3D models its rules name; Tree LOD alone is billboards only.
+        if (Flag("UltraTreeLOD") is { } ultra)
+        {
+            Option("tree3d", ultra);
+            Option("trees", ultra || Flag("DoTreeLOD") != false);
+        }
+        else if (Flag("DoTreeLOD") is { } trees) Option("trees", trees);
+        if (Flag("DoDynamicLOD") is { } dynamic) { Option("dynamic", dynamic); Option("grid", dynamic); }
+        if (Flag("DoOcclusion") is { } occlusion) Option("occlusion", occlusion);
+        if (Flag("DoGrass") is { } grass) Option("grass", grass);
+        if (ini.TryGetValue("GrassLODDensity", out var density) && Number(density) is { } percent and >= 0 and <= 100) Option("grassDensity", percent / 100);
+        if (Flag("DoTerrainUnderside") is { } underside) Option("underside", underside);
+        if (Flag("DoSeasons") is { } seasons) Option("seasons", seasons);
+        if (Flag("LoadCandles") is { } candles) Option("candles", candles);
+        if (Flag("LoadFXGlow") is { } glow) Option("fxGlow", glow);
+        if (Flag("Windows") is { } windows) Option("glowWindows", windows);
+        if (Flag("CopyParent") is { } parent) Option("parentCopies", parent);
+
+        // The worldspace list follows the choices, one "EditorID=0|1" line each.
+        int last = order.FindLastIndex(k => DynDolodKeys.Contains(k, StringComparer.OrdinalIgnoreCase));
+        var selected = order.Skip(last + 1).Where(k => ini[k] == "1").ToArray();
+        return selected.Length > 0 ? string.Join(", ", selected) : null;
+    }
+
+    private static void TexGen(Dictionary<string, string> ini, QualityPreset preset)
+    {
+        void Setting(string name, object value) => preset.Settings[name] = JsonSerializer.SerializeToElement(value, value.GetType());
+        bool? Flag(string key) => ini.TryGetValue(key, out var v) ? v.Trim() switch { "1" => true, "0" => false, _ => null } : null;
+        decimal? Value(string key) => ini.TryGetValue(key, out var v) ? Number(v) : null;
+        static bool PowerOfTwo(decimal v, int min, int max) => v == decimal.Truncate(v) && v >= min && v <= max && ((int)v & ((int)v - 1)) == 0;
+
+        if (Flag("StitchObjects") is { } stitched) Setting(nameof(DesktopSettings.TextureGenStitched), stitched);
+        if (Value("StitchObjectsSize") is { } baseSize && PowerOfTwo(baseSize, 64, 1024)) Setting(nameof(DesktopSettings.TextureGenBaseSize), baseSize);
+        bool? treeHd = Flag("TreeHDBillboards"), grassHd = Flag("GrassHDBillboards");
+        if (Flag("TreeBillboards") is { } trees) Setting(nameof(DesktopSettings.TextureGenTrees), trees || treeHd == true);
+        if (Flag("GrassBillboards") is { } grass) Setting(nameof(DesktopSettings.TextureGenGrass), grass || grassHd == true);
+        if (treeHd is not null || grassHd is not null) Setting(nameof(DesktopSettings.TextureGenHdViews), treeHd == true || grassHd == true);
+        if (Flag("RenderBillboards") is { } trunks) Setting(nameof(DesktopSettings.TextureGenTrunks), trunks);
+        if (Value("BillboardsMaxSize") is { } maxSize && PowerOfTwo(maxSize, 32, 2048)) Setting(nameof(DesktopSettings.TextureGenMaxSize), maxSize);
+
+        // TexGen stores light as a percentage. HD tree billboards have their own pair, used when they are on.
+        string tree = treeHd == true ? "TreeHDBillboards" : "TreeBillboards";
+        void Light(string key, string name) { if (Value(key) is { } v and >= 0 and <= 400) Setting(name, v / 100); }
+        Light(tree + "Ambient", nameof(DesktopSettings.TextureGenTreeAmbient));
+        Light(tree + "Direct", nameof(DesktopSettings.TextureGenTreeDirect));
+        Light("RenderBillboardsAmbient", nameof(DesktopSettings.TextureGenTrunkAmbient));
+        Light("RenderBillboardsDirect", nameof(DesktopSettings.TextureGenTrunkDirect));
+        if (Value("RenderPBRScale") is { } pbr and >= .1m and <= 4) Setting(nameof(DesktopSettings.BakePbrScale), pbr);
+    }
+
+    private static decimal? Number(string text) =>
+        decimal.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : null;
+
+    private static bool Same(JsonElement a, JsonElement b) =>
+        a.ValueKind == JsonValueKind.Number && b.ValueKind == JsonValueKind.Number ? a.GetDecimal() == b.GetDecimal() : JsonElement.DeepEquals(a, b);
+
+    private static string Show(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.True => "on", JsonValueKind.False => "off",
+        JsonValueKind.Number => value.GetDecimal().ToString("0.####", CultureInfo.InvariantCulture),
+        _ => value.GetString() ?? "",
+    };
+
+    /// <summary>Sections of an INI file by name, each a key-to-value map, and each section's keys in file order. Comment lines start with ';' or '/'.</summary>
+    private static (Dictionary<string, Dictionary<string, string>> Sections, Dictionary<string, List<string>> Order) ReadIni(string file)
+    {
+        var sections = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        var order = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string>? current = null; List<string>? keys = null;
+        foreach (string raw in File.ReadLines(file))
+        {
+            string line = raw.Trim();
+            if (line.Length == 0 || line[0] is ';' or '/') continue;
+            if (line[0] == '[')
+            {
+                string name = line.Trim('[', ']').Trim();
+                if (!sections.TryGetValue(name, out current)) { sections[name] = current = new(StringComparer.OrdinalIgnoreCase); order[name] = []; }
+                keys = order[name];
+                continue;
+            }
+            int eq = line.IndexOf('=');
+            if (eq <= 0 || current is null) continue;
+            string key = line[..eq].Trim();
+            if (!current.ContainsKey(key)) keys!.Add(key);
+            current[key] = line[(eq + 1)..].Trim();
+        }
+        return (sections, order);
+    }
+}

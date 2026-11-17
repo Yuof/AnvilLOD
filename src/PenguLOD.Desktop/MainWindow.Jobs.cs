@@ -116,11 +116,10 @@ public sealed partial class MainWindow
     {
         _settings.ResetOptions();
         void Set(string key, object value) => _settings.SetOption(key, JsonSerializer.SerializeToElement(value));
-        if (preset == "Balanced") { Set("preset", "Medium"); Set("grassDensity", .05m); Set("detailedShips", false); }
         if (preset == "Objects")
             foreach (string k in new[] { "trees", "tree3d", "grass", "csGrass", "dynamic", "grid", "nativeGrid", "animatedShips", "renderBillboards" }) Set(k, false);
         _pages["Object LOD"] = ObjectLodPage(); SelectPage("Object LOD"); ScheduleSave();
-        Notice(preset + " preset applied. Source and output paths were kept.");
+        Notice(preset == "Objects" ? "Objects only applied. Source and output paths were kept." : "Object LOD options reset to their defaults. Source and output paths were kept.");
     }
     private async Task AddInput(string property, bool files)
     {
