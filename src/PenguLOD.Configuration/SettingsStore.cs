@@ -8,6 +8,8 @@ public sealed class SettingsStore
     public static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     public string FilePath { get; }
     public string? MigratedFrom { get; private set; }
+    /// <summary>Folder of the presets saved by name, beside the settings file.</summary>
+    public string PresetsFolder => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(FilePath))!, "presets");
     private readonly string? _legacyFile;
     private readonly string _legacyCacheRoot;
     private static string ConfigBase => Environment.GetEnvironmentVariable("XDG_CONFIG_HOME") is { Length: > 0 } path

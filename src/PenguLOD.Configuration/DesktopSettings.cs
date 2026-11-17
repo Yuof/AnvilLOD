@@ -3,6 +3,17 @@ using System.Text.Json.Serialization;
 
 namespace PenguLOD.Desktop.Models;
 
+/// <summary>The choices of <see cref="DesktopSettings.PresetScreen"/>.</summary>
+public static class QualityPresetScreen
+{
+    public const string FromGame = "From the game";
+    public static readonly string[] Choices = [FromGame, "720p", "1080p", "1440p", "2160p", "4320p"];
+
+    /// <summary>The height a choice names, or null for <see cref="FromGame"/>.</summary>
+    public static int? Height(string choice) =>
+        choice.EndsWith('p') && int.TryParse(choice[..^1], out int height) && height is >= 200 and <= 32768 ? height : null;
+}
+
 public sealed class DesktopSettings : ObservableObject
 {
     public int SchemaVersion { get; set; } = 1;
@@ -294,6 +305,9 @@ public sealed class DesktopSettings : ObservableObject
     public bool PipelineTextures { get => _pipelineTextures; set => Set(ref _pipelineTextures, value); }
     private bool _pipelineLod = true;
     public bool PipelineLod { get => _pipelineLod; set => Set(ref _pipelineLod, value); }
+    private string _presetScreen = QualityPresetScreen.FromGame;
+    /// <summary>The screen the built-in presets size textures for: the game's own resolution, or a height such as "1440p".</summary>
+    public string PresetScreen { get => _presetScreen; set => Set(ref _presetScreen, string.IsNullOrWhiteSpace(value) ? QualityPresetScreen.FromGame : value); }
 
     public DesktopSettings Snapshot()
     {

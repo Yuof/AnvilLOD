@@ -27,6 +27,7 @@ public sealed partial class MainWindow
         WorkflowSource(),
         StageSelection(),
         WorkflowWorldspaces(),
+        PresetsCard(),
         new Expander { Header = "Run options", HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch, Content = Stack(12,
             Check("Check setup before generation", nameof(DesktopSettings.PipelinePreflight)),
             Help(Check("Reuse completed stages", nameof(DesktopSettings.ResumeCompletedStages)), "Completed output is checked before reuse. Changed inputs or settings trigger a rebuild."),

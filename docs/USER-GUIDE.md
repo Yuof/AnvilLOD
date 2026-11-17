@@ -68,7 +68,7 @@ The grass cache has its own worldspace field. Textures always cover the whole lo
 
 Each stage has a **Settings** button. The defaults are a reasonable start. For a first run:
 
-- On **Object LOD**, click **Balanced preset**.
+- On **Overview**, under **Presets**, click **Balanced**. It sets DynDOLOD's Medium mesh rules and the texture sizes TexGen and DynDOLOD choose for your game's resolution. **High** and **Performance** use the High and Low rules.
 - Turn on **3D tree LOD** if you want 3D trees in the nearest LOD band. It costs more to draw.
 - Leave **Grass billboard LOD** on only if you have a grass cache, from this run or an
   earlier one.

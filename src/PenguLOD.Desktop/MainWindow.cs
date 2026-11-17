@@ -104,7 +104,11 @@ public sealed partial class MainWindow : Window
     }
 
     private bool _saveAllowed = true;
-    private void AttachSettings() => _settings.PropertyChanged += (_, _) => { ScheduleSave(); UpdateSourceSummary(); };
+    private void AttachSettings()
+    {
+        _settings.PropertyChanged += (_, _) => { ScheduleSave(); UpdateSourceSummary(); UpdatePresetStatus(); };
+        _settings.OptionChanged += _ => UpdatePresetStatus();
+    }
     private void ScheduleSave() { _saveTimer.Stop(); _saveTimer.Start(); }
     private void Save()
     {
@@ -278,7 +282,9 @@ public sealed partial class MainWindow : Window
                 WorldspaceField("Worldspaces", nameof(DesktopSettings.Worldspaces), false, "Shared with terrain. Use comma-separated worldspace IDs, or * for all worlds. Choose… lists the worldspaces in the load order."),
                 Help(Check("Clear previous output before generation", nameof(DesktopSettings.CleanOutput)), "Rebuilds the entire object LOD output. Leave this off to reuse unchanged blocks."),
                 Row(Button("Open object output", () => Open(_settings.OutputFolder)), Button("View scan results", () => SelectPage("Scan results"))))),
-            Row(Button("Balanced preset", () => ApplyPreset("Balanced")), Button("High quality", () => ApplyPreset("High")), Button("Objects only", () => ApplyPreset("Objects"))),
+            QualityPresetButtons(
+                Help(Button("Objects only", () => ApplyPreset("Objects")), "Resets the options on this page, then turns off tree, grass and dynamic LOD."),
+                Help(Button("Reset options", () => ApplyPreset("Default")), "Returns every option on this page to its default.")),
             search, groups));
     }
     private Control MeshMaker() => Scroll(Stack(16,

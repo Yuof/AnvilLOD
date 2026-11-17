@@ -222,7 +222,7 @@ public sealed class DesktopTests : IDisposable
             foreach (string state in new[] { "Initial", "Preset", "Imported" })
             {
                 Click(window, "Object LOD");
-                if (state == "Preset") Click(window, "Balanced preset");
+                if (state == "Preset") Click(window, "Reset options");
                 if (state == "Imported") window.ReplaceSettings(new DesktopSettings());
                 Click(window, "Overview");
                 GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);

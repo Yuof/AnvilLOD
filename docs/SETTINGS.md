@@ -56,6 +56,116 @@ or resumes a matching saved run. The run button is disabled when no stages are
 selected. Individual stage pages have their own generation button at the bottom
 of the window; those buttons run only that stage.
 
+### Presets
+
+**High**, **Balanced** and **Performance** set the values DynDOLOD and TexGen
+ship with, for the settings that have a counterpart there. The preset names
+DynDOLOD's mesh rules: High, Medium or Low. The texture sizes come from the
+**Screen**, as in TexGen and DynDOLOD, which choose them from the game's resolution.
+Which outputs are generated, paths, worldspaces and the game source stay as they
+are. The activity log lists what a preset changed, and the line under the buttons
+says which preset the current settings match. The same three buttons are on
+**Object LOD**.
+
+**Screen** is **From the game** by default: the resolution is read from the game's
+own settings, SSE Display Tweaks' `Resolution` when one is set, else `iSize H` in
+SkyrimCustom.ini or SkyrimPrefs.ini (the profile's, when Mod Organizer 2 keeps
+them there). Choose a height when the game's settings are not where PenguLOD
+looks, or to generate for another screen.
+
+| Setting | 720p | 1080p | 1440p | 2160p | From |
+| --- | --- | --- | --- | --- | --- |
+| Stitch base size (Textures) | `128` | `256` | `256` | `512` | TexGen base size |
+| Tree world units per pixel (Textures) | `17` | `11` | `8` | `5.5` | TexGen units per pixel |
+| Maximum billboard size (Textures) | `512` | `1024` | `1024` | `2048` | TexGen maximum texture size |
+| Atlas cell size | `128` | `256` | `256` | `512` | DynDOLOD max tile size full |
+| Maximum standalone LOD texture size | `512` | `1024` | `1024` | `2048` | DynDOLOD max tile size LOD |
+
+At 4320p TexGen uses a base size of `1024` and billboards up to `4096`; PenguLOD's
+largest atlas cell is `512` and its largest billboard `2048`.
+
+These are the same in every preset:
+
+| Setting | Value | From |
+| --- | --- | --- |
+| Minimum tree height / Minimum grass height (Textures) | `256` / `32` | `TexGen_SSE.INI` |
+| Unplaced tree resolution scale (Textures) | `1.7` | `TexGen_SSE.INI` |
+| Tree ambient / direct light (Textures) | `0.55` / `1.35` | TexGen tree billboards |
+| Trunk ambient / direct light (Textures) | `1.5` / `0.5` | TexGen rendered billboards |
+| PBR scale (Textures) | `0.65` | TexGen |
+| Samples per cell side (Occlusion) | `2` | DynDOLOD occlusion quality 2 |
+| Visibility radius (Occlusion) | `100` | `DynDOLOD_SSE.ini` |
+| Observer height offset (Occlusion) | `0` | `DynDOLOD_SSE.ini` `OcclusionHeight` |
+
+**DynDOLOD defaults** is the state of a new DynDOLOD and TexGen: Balanced
+(DynDOLOD starts on its Medium rules), and what the two have ticked. It turns on
+tree billboards, dynamic and animated grid objects and `Occlusion.esp`, and the
+stitched, tree and trunk textures. It turns off 3D tree LOD, grass billboard LOD,
+LOD 32, candle and glow rules, window glow, parent-to-city copies and grass
+billboard textures. Terrain underside and seasonal LOD stay as they are: DynDOLOD
+ticks them by what is installed.
+
+PenguLOD's own defaults are not one of the presets: a new setup has a smaller
+billboard limit and minimum grass height than TexGen. Settings without a
+counterpart in DynDOLOD or TexGen, such as grass density, triangle budgets and
+terrain sizes, are left as they are. Regenerate the stages whose settings changed;
+changed textures need object LOD regenerated too.
+
+A saved preset holds every generation setting on Textures, Terrain, Grass cache
+and Object LOD, including which outputs are generated. It holds no path, worldspace
+selection, game source, run option or preference, and not **SKSE DLL installation**
+or **ESL record limit**, so a preset from another setup is safe to load.
+
+| Control | What it does |
+| --- | --- |
+| Saved presets, **Load preset**, **Delete preset** | Applies or removes a preset saved by name. |
+| **Save current settings** | Saves the generation settings under the name in the box. A preset of the same name is replaced. |
+| **Load preset file…** | Applies a preset file from anywhere. An exported settings file works too; only its generation settings are taken. |
+| **Open presets folder** | The folder of the saved presets, `presets` beside the settings file. Copy a file in or out to share a preset. |
+| **Import DynDOLOD settings…** | Reads a preset saved by DynDOLOD or TexGen and sets the PenguLOD settings that mean the same. |
+
+A saved preset is not the file that **Export settings…** writes and the command
+line reads with `--settings`: that file also holds the paths and the game source.
+
+**Import DynDOLOD settings…** takes a file from `Edit Scripts\DynDOLOD\Presets` in
+the DynDOLOD folder. The activity log lists what changed and which choices have no
+PenguLOD setting.
+
+| From a DynDOLOD preset | PenguLOD setting |
+| --- | --- |
+| Low / Medium / High | Mesh rules preset |
+| Level 32 | LOD 32 |
+| Tree LOD, Ultra | Tree billboards, 3D tree LOD |
+| Dynamic LOD | Dynamic objects, Animated grid objects |
+| Occlusion data and its quality | Generate Occlusion.esp, Samples per cell side (quality 1, 2, 3 as `1`, `2`, `4`) |
+| Max tile size LOD | Maximum standalone LOD texture size |
+| Max tile size full | Atlas cell size, at most `512` |
+| Grass LOD and its density | Grass billboard LOD, Grass density |
+| Terrain underside | Terrain underside |
+| Seasons | Seasonal LOD |
+| Candles, FXGlow | Candle rules, Glow effect rules |
+| Windows | Night-time window glow |
+| Parent > Child | Parent-to-city copies |
+| The ticked worldspaces | Worldspaces |
+
+| From a TexGen preset | PenguLOD setting |
+| --- | --- |
+| Stitched and its base size | Stitched object textures, Stitch base size |
+| Tree, HD tree | Tree billboards, HD front and side billboards |
+| Grass, HD grass | Grass billboards, HD front and side billboards |
+| Rendered billboards | Hybrid tree trunk textures |
+| Billboard max size | Maximum billboard size |
+| Units per pixel (stored in tenths) | Tree world units per pixel |
+| Tree and rendered-billboard direct and ambient light | Tree and trunk light |
+| Rendered PBR scale | PBR scale |
+
+The billboard tile size, brightness offsets, underside quality and height, the
+grass mode, TexGen's minimum texture size and its rendered object textures are not
+imported.
+The preset's mesh rules are not imported either: PenguLOD reads DynDOLOD's rule
+files itself. To use the preset's own rules, choose the preset as **Custom rule
+file** on **Game & resources**.
+
 ### Run options
 
 | Setting | What it does |
@@ -134,7 +244,7 @@ Keep defaults for the first comparison, then adjust one control at a time.
 | PBR scale | Brightness scale for calibrated PBR colour. Default `0.65`; lower is darker. |
 | PBR gamma | Adjusts PBR midtones. Default `1.15`; higher darkens midtones, lower brightens them. |
 | PBR occlusion strength | Amount of shading taken from the PBR ambient-occlusion map. Default `0.5`; `0` ignores it, `1` uses its full effect. |
-| Tree ambient light / Tree direct light | Light for tree billboards. Billboards are lit from straight above: ambient reaches every surface, direct light adds to the surfaces that face up. Defaults `0.6` and `1.35`, as in TexGen. More ambient brightens the whole tree; more direct light brightens the tops of crowns and branches. |
+| Tree ambient light / Tree direct light | Light for tree billboards. Billboards are lit from straight above: ambient reaches every surface, direct light adds to the surfaces that face up. Defaults `0.6` and `1.35`; TexGen's are `0.55` and `1.35`, which the presets set. More ambient brightens the whole tree; more direct light brightens the tops of crowns and branches. |
 | Trunk ambient light / Trunk direct light | The same for hybrid tree trunk textures. Defaults `1.5` and `0.5`, as in TexGen; bark faces sideways and gets almost no direct light, so its ambient part is high. |
 | Grass ambient light / Grass direct light | Light for grass billboards. Grass is lit softly from the front and above, on both sides of a blade. Defaults `0.7` and `0.3`. |
 
@@ -262,15 +372,13 @@ and opens **Scan results** without generating output.
 
 ### Presets
 
-Each button resets the Object LOD options before applying its choices.
-It leaves source paths and the separate texture and grass-cache settings in place.
-Terrain's seasonal switch is shared with this page and therefore resets too.
+**High**, **Balanced** and **Performance** are the presets described under
+[Overview](#presets). They also set texture settings.
 
-| Button | What it selects |
+| Button | What it does |
 | --- | --- |
-| Balanced preset | Medium mesh rules, grass density `0.05`, Detailed ships off, and the other Generation options at their defaults. 3D trees and automatic object models remain off. |
-| High quality | Restores the Generation options' defaults, including High mesh rules. It does not enable every optional feature. |
-| Objects only | Turns off tree and grass LOD, Community Shaders grass, dynamic/grid objects, native grid objects, Animated Ships support and missing-billboard rendering; other options return to defaults. |
+| Objects only | Returns every option on this page to its default, then turns off tree and grass LOD, Community Shaders grass, dynamic/grid objects, native grid objects, Animated Ships support and missing-billboard rendering. |
+| Reset options | Returns every option on this page to its default, including High mesh rules. Terrain's seasonal switch is shared with this page and resets too. |
 
 ### Objects
 
