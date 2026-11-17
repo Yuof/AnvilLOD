@@ -24,6 +24,7 @@ public sealed class RecipeTextureMapper
     private readonly Func<string, byte[]?> _read;
     private readonly string _output;
     private readonly Action<string> _warn;
+    private readonly float? _pbrBrightness;
     private readonly object _gate = new();
     private readonly Dictionary<string, (string Diffuse, string? Normal)> _variants = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _hashes = new(StringComparer.OrdinalIgnoreCase);
@@ -34,9 +35,15 @@ public sealed class RecipeTextureMapper
     }
     public IReadOnlyList<MappingReport> Report { get { lock (_gate) return _report.Values.OrderBy(r => r.Model).ThenBy(r => r.Source).ThenBy(r => r.Shape).ToArray(); } }
 
-    public RecipeTextureMapper(TextureRecipeSet recipes, IAssetSource assets, string output, Func<string, byte[]?>? readSource = null, Action<string>? warn = null)
+    /// <param name="pbrBrightness">
+    /// With PBR object LOD on, its brightness: a tile read from a PBR albedo (<c>textures\pbr\…</c>) is converted for the LOD shader the
+    /// way <see cref="PbrLodConverter"/> converts a whole texture. Null leaves such tiles as they are.
+    /// </param>
+    public RecipeTextureMapper(TextureRecipeSet recipes, IAssetSource assets, string output, Func<string, byte[]?>? readSource = null, Action<string>? warn = null,
+        float? pbrBrightness = null)
     {
-        _recipes = recipes; _plans = recipes.Compile(); _recipeFingerprint = recipes.Fingerprint; _assets = assets; _output = output;
+        _recipes = recipes; _plans = recipes.Compile(); _assets = assets; _output = output; _pbrBrightness = pbrBrightness;
+        _recipeFingerprint = recipes.Fingerprint + (pbrBrightness is { } b ? FormattableString.Invariant($"|pbr:{b:R}") : "");
         _warn = warn ?? (_ => { });
         _explicitInputs = recipes.Entries.Select(e => e.Copy?.Source ?? e.Tile?.Source ?? e.Conversion!.Source)
             .SelectMany(p => p.Split('|')).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -214,7 +221,8 @@ public sealed class RecipeTextureMapper
             void Save(RecipeRenderedTexture texture)
             { string path = GamePath.ToFileSystemPath(scratch, texture.Destination); Directory.CreateDirectory(Path.GetDirectoryName(path)!); File.WriteAllBytes(path, texture.Bytes); }
             byte[]? ReadGenerated(string path) { string file = GamePath.ToFileSystemPath(scratch, path); return File.Exists(file) ? File.ReadAllBytes(file) : null; }
-            var renderer = new TextureRecipeRenderer(_recipes, _read, Save, replacements: replacements, readGenerated: ReadGenerated);
+            var renderer = new TextureRecipeRenderer(_recipes, _read, Save, replacements: replacements, readGenerated: ReadGenerated,
+                prepareSource: _pbrBrightness is null ? null : ForLodShader);
             byte[] diffuse = renderer.Build(destination); byte[]? normal = renderer.BuildNormal(destination);
             string stem = @"textures\pengulod\recipes\" + OutputSnapshot.HashText(key + Convert.ToHexString(SHA256.HashData(diffuse))
                 + (normal is null ? "" : Convert.ToHexString(SHA256.HashData(normal)))).ToLowerInvariant()[..32];
@@ -225,6 +233,30 @@ public sealed class RecipeTextureMapper
         }
         finally { Directory.Delete(scratch, true); }
     }
+    /// <summary>
+    /// True for a PBR albedo: a texture under <c>textures\pbr\</c> that is not itself a LOD texture. The same rule as
+    /// <see cref="PenguLOD.Core.Lod.PbrLodTextures"/> uses for a texture that names the PBR albedo directly.
+    /// </summary>
+    internal static bool IsPbrAlbedo(string path)
+    {
+        string p = PenguLOD.Core.Lod.PbrLodTextures.Normalize(path);
+        return p.StartsWith("textures\\pbr\\", StringComparison.Ordinal) && !p.EndsWith("lod.dds", StringComparison.Ordinal) && !p.Contains("\\lod\\", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A PBR albedo is made for a shader that lights in linear space; drawn as it is by the LOD shader it is far too bright beside
+    /// LOD made from ordinary textures. The tile gets the conversion a whole texture gets with PBR object LOD on. The atlas is then
+    /// scaled by the texture brightness like every stitched texture, so that is divided out here: the converted copies of whole
+    /// textures do not take it either.
+    /// </summary>
+    private TextureImage ForLodShader(string path, TextureImage image)
+    {
+        if (_pbrBrightness is not { } brightness || !IsPbrAlbedo(path)) return image;
+        var pixels = (byte[])image.Pixels.Clone();
+        PbrLodConverter.ApplyCurve(pixels, brightness / _recipes.Brightness);
+        return image with { Pixels = pixels };
+    }
+
     private bool Record(string model, LodMeshPart part, string source, string destination, string status, string detail)
     { var row = new MappingReport(part.Name ?? "", source, destination, status, detail) { Model = model }; return _report.TryAdd(JsonSerializer.Serialize(row), row); }
     private static bool Same(string? a, string? b) => string.Equals(a?.Replace('/', '\\'), b?.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase);

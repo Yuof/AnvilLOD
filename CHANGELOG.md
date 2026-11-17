@@ -11,6 +11,7 @@ Versions follow SemVer. Alpha and beta versions are pre-releases.
 - Fixed a finished build being lost on Windows when the move into place is refused. The move is tried again for two minutes, and a build that still cannot be published is kept.
 - Changed the error for a mod chosen as a resource folder to say which folder to choose: the DynDOLOD program folder, not the DynDOLOD Resources mod.
 - Changed the resource pack guide to say what the primary resource folder is for.
+- Fixed rebuilt recipe atlases being too bright with **PBR object LOD** on. A tile taken from a PBR albedo is converted like other PBR LOD textures. Regenerate object LOD.
 
 ## [0.6.0-beta.5] - 2026-11-16
 

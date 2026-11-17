@@ -536,9 +536,9 @@ public static class ScanPipeline
                     if (!assets.TryOpenSource(path, out var stream)) return null;
                     using (stream) { using var buffer = new MemoryStream(); stream.CopyTo(buffer); return buffer.ToArray(); }
                 }
-                recipeMapper = new(recipeSet, assets, req.OutputFolder ?? Path.GetTempPath(), RecipeSource, Warn);
+                recipeMapper = new(recipeSet, assets, req.OutputFolder ?? Path.GetTempPath(), RecipeSource, Warn, req.PbrLod ? req.PbrLodBrightness : null);
                 progress?.Report("Fingerprinting recipe sources and record texture variants...");
-                req = req with { SettingsFingerprint = req.SettingsFingerprint + "|recipes4:" + recipeMapper.InputFingerprint(scan.TextureVariants?.Values ?? []) };
+                req = req with { SettingsFingerprint = req.SettingsFingerprint + "|recipes5:" + recipeMapper.InputFingerprint(scan.TextureVariants?.Values ?? []) };
             }
         }
 

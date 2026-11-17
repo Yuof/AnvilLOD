@@ -44,6 +44,30 @@ public class RecipeTextureMappingTests
         Assert.True(image.Pixels[0] > 220); Assert.True(image.Pixels[80 * 4 + 1] > 220);
     }
 
+    [Theory]
+    [InlineData(false, 1f)]
+    [InlineData(true, 1f)]
+    [InlineData(true, .5f)]      // the texture brightness scales the ordinary tile and leaves the converted PBR tile alone
+    public void APbrAlbedoTileOfARebuiltAtlasIsConvertedForTheLodShaderWhenPbrObjectLodIsOn(bool pbrLod, float textureBrightness)
+    {
+        using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
+        // The full model's texture for the red tile is a PBR albedo, as a PBR-patched mesh names it; the green tile is untouched.
+        string albedo = @"textures\pbr\patched.dds";
+        TextureFixture.Put(f.Data, albedo, TextureFixture.Solid(200, 200, 200));
+        var rules = Recipes(TextureFixture.Tile(Red, Atlas, 0), TextureFixture.Tile(Green, Atlas, 1)); rules.Brightness = textureBrightness;
+        var mapper = new RecipeTextureMapper(rules, AssetIndex.Build(GameRelease.SkyrimSE, f.Data), Path.Combine(f.Root, "lod"), pbrBrightness: pbrLod ? 1f : null);
+        var mapped = mapper.Map(TextureFixture.Card("shape", Atlas), [Input(Red, albedo)])!;
+        Assert.StartsWith(@"textures\pengulod\recipes\", mapped.Material.Textures[0]);
+        var image = Image(Path.Combine(f.Root, "lod"), mapped.Material.Textures[0]);
+        // 200 through the PBR curve: 255 * (200 / 255)^1.15 * 0.65 = 125, what a whole converted texture would hold.
+        int expected = pbrLod ? 125 : (int)(200 * textureBrightness);
+        Assert.InRange(image.Pixels[0], expected - 4, expected + 4); Assert.InRange(image.Pixels[2], expected - 4, expected + 4);
+        Assert.InRange(image.Pixels[80 * 4 + 1], 235 * textureBrightness - 6, 235 * textureBrightness + 6);
+        Assert.True(RecipeTextureMapper.IsPbrAlbedo(@"Textures/PBR/patched.dds"));
+        Assert.False(RecipeTextureMapper.IsPbrAlbedo(Red)); Assert.False(RecipeTextureMapper.IsPbrAlbedo(@"textures\pbr\lod\atlas.dds"));
+        Assert.False(RecipeTextureMapper.IsPbrAlbedo(@"textures\pbr\rocklod.dds"));
+    }
+
     [Fact]
     public void NormalOnlyVariantPreservesOtherAtlasTilesAndOriginalUvCoordinates()
     {
