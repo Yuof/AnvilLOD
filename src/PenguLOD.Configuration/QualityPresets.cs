@@ -17,8 +17,9 @@ public sealed class QualityPreset
 }
 
 /// <summary>
-/// The built-in High, Balanced and Performance presets, and presets saved to files. A preset never holds a path, the
-/// game source, a worldspace selection or a machine preference, so a file from another setup is safe to load.
+/// The built-in High, Balanced and Performance presets, and presets saved to files. The built-in ones hold the values
+/// DynDOLOD and TexGen ship with, for the settings that have a counterpart there. A preset never holds a path, the game
+/// source, a worldspace selection or a machine preference, so a file from another setup is safe to load.
 /// </summary>
 public static class QualityPresets
 {
@@ -59,34 +60,35 @@ public static class QualityPresets
     private static readonly IReadOnlySet<string> NotInPresets = typeof(DesktopSettings).GetProperties()
         .Select(p => p.Name).Where(n => !SettingNames.Contains(n)).ToHashSet(StringComparer.Ordinal);
 
-    // Detail levels only: (key, Performance, Balanced, High). High is each setting's default.
+    // What DynDOLOD and TexGen ship, as (key, Performance, Balanced, High): DynDOLOD's Low, Medium and High mesh rules, and
+    // the sizes the two programs choose for a 1080p, 1440p and 2160p game resolution. The rest is the same in all three.
     private static readonly (string Key, object Performance, object Balanced, object High)[] OptionLevels =
     [
         ("preset", "Low", "Medium", "High"),
-        ("detailedShips", false, false, true),
-        ("grassDensity", .03m, .05m, .08m),
-        ("treeNearBudget", 2000m, 3000m, 4000m),
-        ("treeFarBudget", 800m, 1200m, 1600m),
-        ("treeFoliageTarget", 45m, 55m, 65m),
-        ("treeTrunkSize", "256", "512", "512"),
-        ("autoObjectNear", 1500m, 2000m, 2500m),
-        ("autoObjectMiddle", 600m, 800m, 1000m),
-        ("autoObjectFar", 250m, 300m, 400m),
-        ("atlasCell", "128", "256", "256"),
-        ("objectTextureSize", "512", "1024", "1024"),
-        ("pbrSize", "256", "512", "512"),
-        ("undersideStep", "32", "16", "16"),
+        // DynDOLOD "Max tile size full" (a quarter of the screen height) and "Max tile size LOD" (the screen height).
+        ("atlasCell", "256", "256", "512"),
+        ("objectTextureSize", "1024", "1024", "2048"),
+        // DynDOLOD occlusion quality 2 (4 sample points per cell) and OcclusionRadius.
+        ("occSamples", 2m, 2m, 2m),
+        ("occRadius", 100m, 100m, 100m),
     ];
 
     private static readonly (string Name, object Performance, object Balanced, object High)[] SettingLevels =
     [
-        (nameof(DesktopSettings.TextureGenBaseSize), 128m, 256m, 256m),
-        (nameof(DesktopSettings.TextureGenMaxSize), 256m, 512m, 512m),
-        (nameof(DesktopSettings.TextureGenUnitsPerPixel), 12m, 8m, 6m),
-        (nameof(DesktopSettings.TextureGenTrunkUnitsPerPixel), 8m, 6m, 4m),
-        (nameof(DesktopSettings.TextureGenGrassUnitsPerPixel), 4m, 3m, 2m),
-        (nameof(DesktopSettings.TextureGenHdViews), false, true, true),
-        (nameof(DesktopSettings.TerrainTextureSize), 256m, 512m, 512m),
+        // TexGen sets these three from the game resolution on its first run.
+        (nameof(DesktopSettings.TextureGenBaseSize), 256m, 256m, 512m),
+        (nameof(DesktopSettings.TextureGenUnitsPerPixel), 11.8m, 8.85m, 5.9m),
+        (nameof(DesktopSettings.TextureGenMaxSize), 1024m, 1024m, 2048m),
+        // TexGen_SSE.INI: MinTreeModelHeight, MinGrassModelHeight, TreeModelHeightMultiplier.
+        (nameof(DesktopSettings.TextureGenMinTreeHeight), 256m, 256m, 256m),
+        (nameof(DesktopSettings.TextureGenMinGrassHeight), 32m, 32m, 32m),
+        (nameof(DesktopSettings.TextureGenUnplacedTreeScale), 1.7m, 1.7m, 1.7m),
+        // TexGen's light for tree and rendered (trunk) billboards, and its PBR scale.
+        (nameof(DesktopSettings.TextureGenTreeAmbient), .6m, .6m, .6m),
+        (nameof(DesktopSettings.TextureGenTreeDirect), 1.35m, 1.35m, 1.35m),
+        (nameof(DesktopSettings.TextureGenTrunkAmbient), 1.5m, 1.5m, 1.5m),
+        (nameof(DesktopSettings.TextureGenTrunkDirect), .5m, .5m, .5m),
+        (nameof(DesktopSettings.BakePbrScale), .65m, .65m, .65m),
     ];
 
     public static bool IsBuiltIn(string name) => BuiltInNames.Contains(name, StringComparer.OrdinalIgnoreCase);

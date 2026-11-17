@@ -34,13 +34,13 @@ public static class DynDolodImport
     private static readonly string[] DynDolodNotImported =
     [
         "TreeLargeRef", "SeasonsSnow", "SeasonsToGenerate", "FakeLights", "WindowsHigh", "UpgradeLargeReferences", "DowngradeNormalReferences",
-        "TreeLODMaxTileSize", "TreeLODBrightness", "GrassLODMaxTileSize", "GrassLODBrightness", "ObjectLODMaxTileSize", "ObjectLODBrightness",
-        "FullTextureMaxTileSize", "FullTextureBrightness", "OcclusionQuality", "GrassLODMode", "TerrainUndersideQuality", "TerrainUndersideHeight",
+        "TreeLODMaxTileSize", "TreeLODBrightness", "GrassLODMaxTileSize", "GrassLODBrightness", "ObjectLODBrightness",
+        "FullTextureBrightness", "GrassLODMode", "TerrainUndersideQuality", "TerrainUndersideHeight",
     ];
 
     private static readonly string[] TexGenNotImported =
     [
-        "RenderObjects", "RenderObjectsSize", "BillboardsUnitsPerPixel", "BillboardsMinSize", "StitchPBRScale", "BillboardPBRScale",
+        "RenderObjects", "RenderObjectsSize", "BillboardsMinSize", "StitchPBRScale", "BillboardPBRScale",
         "GrassBillboardsDirect", "GrassBillboardsAmbient", "GrassHDBillboardsDirect", "GrassHDBillboardsAmbient",
     ];
 
@@ -54,6 +54,7 @@ public static class DynDolodImport
         [nameof(DesktopSettings.TextureGenTrunks)] = "Hybrid tree trunk textures",
         [nameof(DesktopSettings.TextureGenHdViews)] = "HD front and side billboards",
         [nameof(DesktopSettings.TextureGenMaxSize)] = "Maximum billboard size",
+        [nameof(DesktopSettings.TextureGenUnitsPerPixel)] = "Tree world units per pixel",
         [nameof(DesktopSettings.TextureGenTreeAmbient)] = "Tree ambient light",
         [nameof(DesktopSettings.TextureGenTreeDirect)] = "Tree direct light",
         [nameof(DesktopSettings.TextureGenTrunkAmbient)] = "Trunk ambient light",
@@ -137,6 +138,11 @@ public static class DynDolodImport
         if (Flag("LoadFXGlow") is { } glow) Option("fxGlow", glow);
         if (Flag("Windows") is { } windows) Option("glowWindows", windows);
         if (Flag("CopyParent") is { } parent) Option("parentCopies", parent);
+        // Quality 1, 2 and 3 compare 1, 4 and 16 sample points per cell.
+        if (ini.TryGetValue("OcclusionQuality", out var quality) && Number(quality) is { } q and (1 or 2 or 3)) Option("occSamples", q == 3 ? 4m : q);
+        // DynDOLOD caps the textures it puts on the object atlas: LOD textures at one size, full textures at another.
+        if (ini.TryGetValue("ObjectLODMaxTileSize", out var lodTile) && Size(lodTile, 128, 4096) is { } lodSize) Option("objectTextureSize", lodSize);
+        if (ini.TryGetValue("FullTextureMaxTileSize", out var fullTile) && Size(fullTile, 64, 512) is { } fullSize) Option("atlasCell", fullSize);
 
         // The worldspace list follows the choices, one "EditorID=0|1" line each.
         int last = order.FindLastIndex(k => DynDolodKeys.Contains(k, StringComparer.OrdinalIgnoreCase));
@@ -159,6 +165,7 @@ public static class DynDolodImport
         if (treeHd is not null || grassHd is not null) Setting(nameof(DesktopSettings.TextureGenHdViews), treeHd == true || grassHd == true);
         if (Flag("RenderBillboards") is { } trunks) Setting(nameof(DesktopSettings.TextureGenTrunks), trunks);
         if (Value("BillboardsMaxSize") is { } maxSize && PowerOfTwo(maxSize, 32, 2048)) Setting(nameof(DesktopSettings.TextureGenMaxSize), maxSize);
+        if (Value("BillboardsUnitsPerPixel") is { } units and >= .25m and <= 128) Setting(nameof(DesktopSettings.TextureGenUnitsPerPixel), units);
 
         // TexGen stores light as a percentage. HD tree billboards have their own pair, used when they are on.
         string tree = treeHd == true ? "TreeHDBillboards" : "TreeBillboards";
@@ -169,6 +176,11 @@ public static class DynDolodImport
         Light("RenderBillboardsDirect", nameof(DesktopSettings.TextureGenTrunkDirect));
         if (Value("RenderPBRScale") is { } pbr and >= .1m and <= 4) Setting(nameof(DesktopSettings.BakePbrScale), pbr);
     }
+
+    /// <summary>A power-of-two size as the choice text of an option, brought into the option's range.</summary>
+    private static string? Size(string text, int min, int max) =>
+        Number(text) is { } v && v == decimal.Truncate(v) && v >= 1 && v <= 65536 && ((int)v & ((int)v - 1)) == 0
+            ? Math.Clamp((int)v, min, max).ToString(CultureInfo.InvariantCulture) : null;
 
     private static decimal? Number(string text) =>
         decimal.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : null;

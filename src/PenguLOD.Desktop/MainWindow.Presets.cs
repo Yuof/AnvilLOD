@@ -19,7 +19,7 @@ public sealed partial class MainWindow
         return Card("Presets", Stack(12,
             QualityPresetButtons(),
             status,
-            Text("High, Balanced and Performance set the detail levels on Textures, Terrain and Object LOD: mesh rules, texture sizes, triangle budgets and grass density. A saved preset holds every generation setting. Neither changes paths, worldspaces or the game source.", true),
+            Text("High, Balanced and Performance set what DynDOLOD and TexGen ship with: the High, Medium or Low mesh rules, the texture sizes for a 2160p, 1440p or 1080p screen, TexGen's light and DynDOLOD's occlusion quality. A saved preset holds every generation setting. Neither changes paths, worldspaces or the game source.", true),
             Row(saved,
                 Button("Load preset", () => LoadSavedPreset(Selected())),
                 Button("Delete preset", () => DeleteSavedPreset(Selected()))),
@@ -33,12 +33,12 @@ public sealed partial class MainWindow
         string Selected() => saved.SelectedItem as string ?? throw new ArgumentException("Choose a saved preset first.");
     }
 
-    /// <summary>The three built-in presets, followed by a page's own buttons. They set texture and terrain sizes as well as Object LOD options.</summary>
+    /// <summary>The three built-in presets, followed by a page's own buttons. They set texture settings as well as Object LOD options.</summary>
     private Control QualityPresetButtons(params Control[] more) => Row(
     [
-        Help(Button(QualityPresets.High, () => ApplyQualityPreset(QualityPresets.High)), "The most detail: High mesh rules and the default sizes and budgets, on Textures, Terrain and Object LOD."),
-        Help(Button(QualityPresets.Balanced, () => ApplyQualityPreset(QualityPresets.Balanced)), "Medium mesh rules, thinner grass LOD and smaller tree budgets, on Textures, Terrain and Object LOD."),
-        Help(Button(QualityPresets.Performance, () => ApplyQualityPreset(QualityPresets.Performance)), "Low mesh rules, smaller textures and the smallest budgets, on Textures, Terrain and Object LOD. The cheapest to draw."),
+        Help(Button(QualityPresets.High, () => ApplyQualityPreset(QualityPresets.High)), "DynDOLOD's High mesh rules, and the texture sizes TexGen and DynDOLOD choose for a 2160p screen."),
+        Help(Button(QualityPresets.Balanced, () => ApplyQualityPreset(QualityPresets.Balanced)), "DynDOLOD's Medium mesh rules, and the texture sizes TexGen and DynDOLOD choose for a 1440p screen."),
+        Help(Button(QualityPresets.Performance, () => ApplyQualityPreset(QualityPresets.Performance)), "DynDOLOD's Low mesh rules, and the texture sizes TexGen and DynDOLOD choose for a 1080p screen."),
         .. more,
     ]);
 
@@ -54,13 +54,13 @@ public sealed partial class MainWindow
     {
         if (_presetStatus is null) return;
         _presetStatus.Text = QualityPresets.Matching(_settings) is { } name
-            ? $"Detail levels match {name}." : "Detail levels match no built-in preset.";
+            ? $"The settings match {name}." : "The settings match no built-in preset.";
     }
 
     internal void ApplyQualityPreset(string name)
     {
         QualityPresets.Apply(_settings, QualityPresets.BuiltIn(name)); ScheduleSave();
-        Notice($"{name} preset applied to Textures, Terrain and Object LOD. Paths, worldspaces and what is generated were kept.");
+        Notice($"{name} preset applied to Textures and Object LOD. Paths, worldspaces and what is generated were kept.");
     }
 
     internal void SavePreset(string name)

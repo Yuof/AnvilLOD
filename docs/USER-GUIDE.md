@@ -68,7 +68,7 @@ The grass cache has its own worldspace field. Textures always cover the whole lo
 
 Each stage has a **Settings** button. The defaults are a reasonable start. For a first run:
 
-- On **Overview**, under **Presets**, click **Balanced**. **Performance** is lighter to draw and **High** has the most detail.
+- On **Overview**, under **Presets**, click the preset for your screen: **Performance** for 1080p, **Balanced** for 1440p, **High** for 2160p. They set what DynDOLOD and TexGen ship with.
 - Turn on **3D tree LOD** if you want 3D trees in the nearest LOD band. It costs more to draw.
 - Leave **Grass billboard LOD** on only if you have a grass cache, from this run or an
   earlier one.

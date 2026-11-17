@@ -47,10 +47,27 @@ public sealed class PresetTests : IDisposable
     }
 
     [Fact]
-    public void HighIsTheDefaultsAndEveryBuiltInPresetNamesTheSameValidSettings()
+    public void EveryBuiltInPresetNamesTheSameValidSettingsAndHoldsWhatDynDolodAndTexGenShip()
     {
-        Assert.Equal(QualityPresets.High, QualityPresets.Matching(new DesktopSettings()));
+        // PenguLOD's own defaults are not one of the presets: its billboard cap and minimum grass height differ from TexGen's.
+        Assert.Null(QualityPresets.Matching(new DesktopSettings()));
         var high = QualityPresets.BuiltIn("high");
+        // TexGen's values for a 2160p and a 1080p game resolution, and DynDOLOD's High and Low mesh rules.
+        var top = new DesktopSettings(); QualityPresets.Apply(top, high);
+        Assert.Equal((512m, 5.9m, 2048m), (top.TextureGenBaseSize, top.TextureGenUnitsPerPixel, top.TextureGenMaxSize));
+        Assert.Equal(("High", "512", "2048"), (Option<string>(top, "preset"), Option<string>(top, "atlasCell"), Option<string>(top, "objectTextureSize")));
+        var low = new DesktopSettings(); QualityPresets.Apply(low, QualityPresets.BuiltIn(QualityPresets.Performance));
+        Assert.Equal((256m, 11.8m, 1024m), (low.TextureGenBaseSize, low.TextureGenUnitsPerPixel, low.TextureGenMaxSize));
+        Assert.Equal(("Low", "256", "1024"), (Option<string>(low, "preset"), Option<string>(low, "atlasCell"), Option<string>(low, "objectTextureSize")));
+        var middle = new DesktopSettings(); QualityPresets.Apply(middle, QualityPresets.BuiltIn(QualityPresets.Balanced));
+        Assert.Equal(("Medium", 8.85m), (Option<string>(middle, "preset"), middle.TextureGenUnitsPerPixel));
+        foreach (var s in new[] { top, middle, low })
+        {
+            // TexGen_SSE.INI, TexGen's light and DynDOLOD's occlusion quality are the same in all three.
+            Assert.Equal((256m, 32m, 1.7m), (s.TextureGenMinTreeHeight, s.TextureGenMinGrassHeight, s.TextureGenUnplacedTreeScale));
+            Assert.Equal((.6m, 1.35m, 1.5m, .5m, .65m), (s.TextureGenTreeAmbient, s.TextureGenTreeDirect, s.TextureGenTrunkAmbient, s.TextureGenTrunkDirect, s.BakePbrScale));
+            Assert.Equal((2m, 100m), (Option<decimal>(s, "occSamples"), Option<decimal>(s, "occRadius")));
+        }
         foreach (string name in QualityPresets.BuiltInNames)
         {
             var preset = QualityPresets.BuiltIn(name);
@@ -69,25 +86,25 @@ public sealed class PresetTests : IDisposable
     }
 
     [Fact]
-    public void ABuiltInPresetSetsDetailLevelsAndLeavesFeaturesAndPathsAlone()
+    public void ABuiltInPresetLeavesFeaturesPathsAndSettingsWithoutACounterpartAlone()
     {
-        var s = new DesktopSettings { OutputFolder = "/out/lod", Worldspaces = "Tamriel, Blackreach", TextureGenGrass = true, TerrainBrightness = 1.2m };
-        Option(s, "seasons", true); Option(s, "tree3d", true); Option(s, "skse", "VR");
+        var s = new DesktopSettings { OutputFolder = "/out/lod", Worldspaces = "Tamriel, Blackreach", TextureGenGrass = true, TerrainBrightness = 1.2m,
+            TerrainTextureSize = 1024, TextureGenGrassUnitsPerPixel = 3 };
+        Option(s, "seasons", true); Option(s, "tree3d", true); Option(s, "skse", "VR"); Option(s, "grassDensity", .6m); Option(s, "treeNearBudget", 6000m);
 
         QualityPresets.Apply(s, QualityPresets.BuiltIn(QualityPresets.Performance));
 
         Assert.Equal("Low", Option<string>(s, "preset"));
-        Assert.Equal(.03m, Option<decimal>(s, "grassDensity"));
-        Assert.False(Option<bool>(s, "detailedShips"));
-        Assert.Equal(128m, s.TextureGenBaseSize);
-        Assert.Equal(12m, s.TextureGenUnitsPerPixel);
-        Assert.Equal(256m, s.TerrainTextureSize);
+        Assert.Equal(11.8m, s.TextureGenUnitsPerPixel);
+        Assert.Equal(.6m, Option<decimal>(s, "grassDensity")); Assert.Equal(6000m, Option<decimal>(s, "treeNearBudget"));
+        Assert.True(Option<bool>(s, "detailedShips")); Assert.False(Option<bool>(s, "occlusion"));
+        Assert.Equal(1024m, s.TerrainTextureSize); Assert.Equal(3m, s.TextureGenGrassUnitsPerPixel);
         Assert.True(Option<bool>(s, "seasons")); Assert.True(Option<bool>(s, "tree3d")); Assert.Equal("VR", Option<string>(s, "skse"));
         Assert.True(s.TextureGenGrass); Assert.Equal(1.2m, s.TerrainBrightness);
         Assert.Equal("/out/lod", s.OutputFolder); Assert.Equal("Tamriel, Blackreach", s.Worldspaces);
         Assert.Equal(QualityPresets.Performance, QualityPresets.Matching(s));
 
-        Option(s, "grassDensity", .2m);
+        Option(s, "occSamples", 4m);
         Assert.Null(QualityPresets.Matching(s));
         QualityPresets.Apply(s, QualityPresets.BuiltIn(QualityPresets.Balanced));
         Assert.Equal(QualityPresets.Balanced, QualityPresets.Matching(s));
@@ -189,6 +206,7 @@ public sealed class PresetTests : IDisposable
             CopyParent=0
             TreeLODBrightness=0
             ObjectLODMaxTileSize=2048
+            FullTextureMaxTileSize=1024
             OcclusionQuality=3
             GrassLODDensity=55
             GrassLODMode=1
@@ -233,7 +251,10 @@ public sealed class PresetTests : IDisposable
         Assert.Contains(result.Changes, c => c.StartsWith("Worldspaces: "));
         Assert.DoesNotContain(result.Changes, c => c.StartsWith("Candle rules"));
         Assert.True(result.Unchanged > 0);
-        Assert.Equal(["WindowsHigh", "UpgradeLargeReferences", "ObjectLODMaxTileSize", "OcclusionQuality", "GrassLODMode"], result.NotImported);
+        Assert.Equal(4m, Option<decimal>(s, "occSamples"));    // quality 3: 16 sample points per cell
+        Assert.Equal("2048", Option<string>(s, "objectTextureSize"));
+        Assert.Equal("512", Option<string>(s, "atlasCell"));    // 1024 is above the largest atlas cell
+        Assert.Equal(["WindowsHigh", "UpgradeLargeReferences", "GrassLODMode"], result.NotImported);
         GenerationOptions.Validate(s);
     }
 
@@ -273,10 +294,10 @@ public sealed class PresetTests : IDisposable
         Assert.Equal(.7m, s.TextureGenTreeAmbient); Assert.Equal(1.2m, s.TextureGenTreeDirect);
         Assert.Equal(1.6m, s.TextureGenTrunkAmbient); Assert.Equal(.4m, s.TextureGenTrunkDirect);
         Assert.Equal(.6m, s.BakePbrScale);
-        Assert.Equal(6m, s.TextureGenUnitsPerPixel); Assert.False(s.TextureGenObjects);
+        Assert.Equal(80m, s.TextureGenUnitsPerPixel); Assert.False(s.TextureGenObjects);
         Assert.Equal("/b/textures", s.TextureGenOutput);
         Assert.Contains("Stitch base size: 256 → 512", result.Changes);
-        Assert.Equal(["RenderObjects", "RenderObjectsSize", "BillboardsUnitsPerPixel"], result.NotImported);
+        Assert.Equal(["RenderObjects", "RenderObjectsSize"], result.NotImported);
         Assert.Equal(0, result.MeshRules);
     }
 
@@ -307,7 +328,7 @@ public sealed class PresetTests : IDisposable
         Dispatcher.UIThread.RunJobs(); w.UpdateLayout();
     }
     private static string Status(MainWindow w) =>
-        w.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Text?.StartsWith("Detail levels match") == true).Text!;
+        w.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Text?.StartsWith("The settings match") == true).Text!;
 
     [AvaloniaFact]
     public void OverviewAppliesBuiltInPresetsAndSavesLoadsAndDeletesNamedOnes()
@@ -317,12 +338,12 @@ public sealed class PresetTests : IDisposable
         {
             window.Settings.OutputFolder = "/b/lod";
             Click(window, "Overview");
-            Assert.Equal("Detail levels match High.", Status(window));
+            Assert.Equal("The settings match no built-in preset.", Status(window));
 
             Click(window, "Performance");
             Assert.Equal("Low", Option<string>(window.Settings, "preset"));
-            Assert.Equal(128m, window.Settings.TextureGenBaseSize);
-            Assert.Equal("Detail levels match Performance.", Status(window));
+            Assert.Equal(11.8m, window.Settings.TextureGenUnitsPerPixel);
+            Assert.Equal("The settings match Performance.", Status(window));
 
             Option(window.Settings, "seasons", true); Dispatcher.UIThread.RunJobs();
             var name = window.GetVisualDescendants().OfType<TextBox>().Single(t => t.Name == "PresetName");
@@ -333,7 +354,7 @@ public sealed class PresetTests : IDisposable
             Assert.Equal("Low end", saved.SelectedItem);
 
             Click(window, "Balanced"); Option(window.Settings, "seasons", false); Dispatcher.UIThread.RunJobs();
-            Assert.Equal("Detail levels match Balanced.", Status(window));
+            Assert.Equal("The settings match Balanced.", Status(window));
             Click(window, "Load preset");
             Assert.Equal("Low", Option<string>(window.Settings, "preset")); Assert.True(Option<bool>(window.Settings, "seasons"));
             Assert.Equal("/b/lod", window.Settings.OutputFolder);
@@ -344,7 +365,7 @@ public sealed class PresetTests : IDisposable
             Dispatcher.UIThread.RunJobs(); window.UpdateLayout();
             Assert.True(window.GetVisualDescendants().OfType<CheckBox>().Single(c => c.Content as string == "Seasonal LOD").IsChecked);
             Click(window, "High");
-            Assert.Equal("High", Option<string>(window.Settings, "preset")); Assert.Equal(256m, window.Settings.TextureGenBaseSize);
+            Assert.Equal("High", Option<string>(window.Settings, "preset")); Assert.Equal(512m, window.Settings.TextureGenBaseSize);
             Assert.True(Option<bool>(window.Settings, "seasons"));
 
             Click(window, "Overview");

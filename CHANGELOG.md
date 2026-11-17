@@ -5,7 +5,7 @@ Versions follow SemVer. Alpha and beta versions are pre-releases.
 ## [Unreleased]
 
 - Fixed a DynDOLOD preset used as the custom rule file giving every object its most detailed LOD mesh at LOD 32. Its LOD 32 rules are used only when the preset has Level32 ticked.
-- Added **High**, **Balanced** and **Performance** presets on Overview and Object LOD. They set the detail levels on Textures, Terrain and Object LOD.
+- Added **High**, **Balanced** and **Performance** presets on Overview and Object LOD. They set the mesh rules, texture sizes, light and occlusion quality DynDOLOD and TexGen ship with.
 - Added saved presets on Overview: save the generation settings under a name, load or delete them, or load a preset file.
 - Added **Import DynDOLOD settings…** on Overview, which reads a preset saved by DynDOLOD or TexGen.
 - Changed the Object LOD buttons: **Balanced preset** and **High quality** are replaced by the new presets, and **Reset options** restores the defaults.

@@ -58,32 +58,40 @@ of the window; those buttons run only that stage.
 
 ### Presets
 
-**High**, **Balanced** and **Performance** set the detail levels below and nothing
-else. Which outputs are generated, paths, worldspaces and the game source stay as
-they are. The line under the buttons says which preset the current values match.
-The same three buttons are on **Object LOD**.
+**High**, **Balanced** and **Performance** set the values DynDOLOD and TexGen
+ship with, for the settings that have a counterpart there. They pair DynDOLOD's
+mesh rules with the texture sizes the two programs choose for a game resolution:
+High mesh rules with 2160p, Medium with 1440p, Low with 1080p. Which outputs are
+generated, paths, worldspaces and the game source stay as they are. The line under
+the buttons says which preset the current settings match. The same three buttons
+are on **Object LOD**.
 
-| Setting | Performance | Balanced | High |
-| --- | --- | --- | --- |
-| Mesh rules preset | Low | Medium | High |
-| Detailed ships | off | off | on |
-| Grass density | `0.03` | `0.05` | `0.08` |
-| LOD 4 / LOD 8 tree triangle budget | `2000` / `800` | `3000` / `1200` | `4000` / `1600` |
-| Tree geometry target (%) | `45` | `55` | `65` |
-| Maximum native trunk texture size | `256` | `512` | `512` |
-| LOD 4 / 8 / 16 object triangle budget | `1500` / `600` / `250` | `2000` / `800` / `300` | `2500` / `1000` / `400` |
-| Atlas cell size | `128` | `256` | `256` |
-| Maximum standalone LOD texture size | `512` | `1024` | `1024` |
-| PBR texture size | `256` | `512` | `512` |
-| Underside sample step | `32` | `16` | `16` |
-| Stitch base size (Textures) | `128` | `256` | `256` |
-| Maximum billboard size (Textures) | `256` | `512` | `512` |
-| Tree / trunk / grass world units per pixel (Textures) | `12` / `8` / `4` | `8` / `6` / `3` | `6` / `4` / `2` |
-| HD front and side billboards (Textures) | off | on | on |
-| Texture size (Terrain) | `256` | `512` | `512` |
+| Setting | Performance | Balanced | High | From |
+| --- | --- | --- | --- | --- |
+| Mesh rules preset | Low | Medium | High | DynDOLOD's Low, Medium and High |
+| Stitch base size (Textures) | `256` | `256` | `512` | TexGen base size |
+| Tree world units per pixel (Textures) | `11.8` | `8.85` | `5.9` | TexGen units per pixel |
+| Maximum billboard size (Textures) | `1024` | `1024` | `2048` | TexGen maximum texture size |
+| Atlas cell size | `256` | `256` | `512` | DynDOLOD max tile size full |
+| Maximum standalone LOD texture size | `1024` | `1024` | `2048` | DynDOLOD max tile size LOD |
 
-High is every one of these settings at its default. Regenerate the stages whose
-settings changed; changed textures need object LOD regenerated too.
+These are the same in all three:
+
+| Setting | Value | From |
+| --- | --- | --- |
+| Minimum tree height / Minimum grass height (Textures) | `256` / `32` | `TexGen_SSE.INI` |
+| Unplaced tree resolution scale (Textures) | `1.7` | `TexGen_SSE.INI` |
+| Tree ambient / direct light (Textures) | `0.6` / `1.35` | TexGen tree billboards |
+| Trunk ambient / direct light (Textures) | `1.5` / `0.5` | TexGen rendered billboards |
+| PBR scale (Textures) | `0.65` | TexGen |
+| Samples per cell side (Occlusion) | `2` | DynDOLOD occlusion quality 2 |
+| Visibility radius (Occlusion) | `100` | `DynDOLOD_SSE.ini` |
+
+PenguLOD's own defaults are not one of the presets: a new setup has a smaller
+billboard limit and minimum grass height than TexGen. Settings without a
+counterpart in DynDOLOD or TexGen, such as grass density, triangle budgets and
+terrain sizes, are left as they are. Regenerate the stages whose settings changed;
+changed textures need object LOD regenerated too.
 
 A saved preset holds every generation setting on Textures, Terrain, Grass cache
 and Object LOD, including which outputs are generated. It holds no path, worldspace
@@ -111,7 +119,9 @@ PenguLOD setting.
 | Level 32 | LOD 32 |
 | Tree LOD, Ultra | Tree billboards, 3D tree LOD |
 | Dynamic LOD | Dynamic objects, Animated grid objects |
-| Occlusion data | Generate Occlusion.esp |
+| Occlusion data and its quality | Generate Occlusion.esp, Samples per cell side (quality 1, 2, 3 as `1`, `2`, `4`) |
+| Max tile size LOD | Maximum standalone LOD texture size |
+| Max tile size full | Atlas cell size, at most `512` |
 | Grass LOD and its density | Grass billboard LOD, Grass density |
 | Terrain underside | Terrain underside |
 | Seasons | Seasonal LOD |
@@ -127,11 +137,13 @@ PenguLOD setting.
 | Grass, HD grass | Grass billboards, HD front and side billboards |
 | Rendered billboards | Hybrid tree trunk textures |
 | Billboard max size | Maximum billboard size |
+| Units per pixel | Tree world units per pixel |
 | Tree and rendered-billboard direct and ambient light | Tree and trunk light |
 | Rendered PBR scale | PBR scale |
 
-Texture tile sizes, brightness offsets, occlusion and underside quality, the grass
-mode, TexGen's units per pixel and its rendered object textures are not imported.
+The billboard tile size, brightness offsets, underside quality and height, the
+grass mode, TexGen's minimum texture size and its rendered object textures are not
+imported.
 The preset's mesh rules are not imported either: PenguLOD reads DynDOLOD's rule
 files itself. To use the preset's own rules, choose the preset as **Custom rule
 file** on **Game & resources**.
@@ -343,7 +355,7 @@ and opens **Scan results** without generating output.
 ### Presets
 
 **High**, **Balanced** and **Performance** are the presets described under
-[Overview](#presets). They also set texture and terrain sizes.
+[Overview](#presets). They also set texture settings.
 
 | Button | What it does |
 | --- | --- |
