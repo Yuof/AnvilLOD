@@ -4,6 +4,7 @@ Versions follow SemVer. Alpha and beta versions are pre-releases.
 
 ## [Unreleased]
 
+- Changed **Pack object texture atlases** to leave a surface on its own texture when cutting it at texture tile edges would add more than a tenth to its triangles.
 - Fixed a DynDOLOD preset used as the custom rule file giving every object its most detailed LOD mesh at LOD 32. Its LOD 32 rules are used only when the preset has Level32 ticked.
 - Added **High**, **Balanced** and **Performance** presets on Overview and Object LOD. They set DynDOLOD's mesh rules and the texture sizes, light and occlusion quality DynDOLOD and TexGen ship with.
 - Added **Screen** for the presets. **From the game** reads the game's resolution from its settings, as TexGen does.
