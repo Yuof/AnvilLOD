@@ -169,6 +169,7 @@ public static partial class Program
           --no-map-trees            With --tree-3d: no tree cards in LOD 32, so no trees on the world map (LOD 4 to 16 unchanged)
           --occlusion               Work out the occlusion data (Occlusion.esp) ourselves instead of running xLODGen (EXPERIMENTAL)
           --occlusion-clearance <u> Units a hill must stand above the line of sight to hide what is behind it (default 3072; larger = safer, hides less)
+          --occlusion-mode <mode>   Which cells get data: DynDOLOD (default: its modes for each worldspace), All, or +TVDT / -TVDT, -Flat, +Border
           --occlusion-folder <dir>  Where Occlusion.esp goes (default: the output folder; also works with scan)
           --object-atlas         Consolidate compatible object materials on padded texture pages
           --atlas-cell N         Atlas cell size including border: 64/128/256/512 (default 256)
@@ -541,8 +542,8 @@ public static partial class Program
             MountainFit: !a.Has("no-mountain-fit"),
             MountainInset: a.Number("mountain-inset", 12f, 0f, 64f),
             Occlusion: a.Has("occlusion") ? new PenguLOD.Core.Occlusion.OcclusionSettings(Clearance: a.Number("occlusion-clearance", 3072f, 0f, 1_000_000f),
-                ParentClearance: a.Number("occlusion-clearance", 3072f, 0f, 1_000_000f))
-                : a.Has("occlusion-clearance") ? throw new CliArgException("--occlusion-clearance only applies together with --occlusion.") : null,
+                ParentClearance: a.Number("occlusion-clearance", 3072f, 0f, 1_000_000f), Mode: OcclusionMode(a.Get("occlusion-mode")))
+                : a.Has("occlusion-clearance") || a.Has("occlusion-mode") ? throw new CliArgException("--occlusion-clearance and --occlusion-mode only apply together with --occlusion.") : null,
             OcclusionFolder: a.Get("occlusion-folder"), ObjectAtlas: a.Has("object-atlas"),
             OptimizeObjectTextures: a.Has("optimize-object-textures"),
             ObjectTextureSize: a.Integer("object-texture-size", 1024),
@@ -755,6 +756,13 @@ public static partial class Program
         Console.WriteLine($"Output: {output}");
         Console.WriteLine($"Report: {r.ReportFile}");
         return 0;
+    }
+
+    private static string OcclusionMode(string? text)
+    {
+        if (text is null || text.Equals(PenguLOD.Core.Occlusion.OcclusionWorldRules.DynDolod, StringComparison.OrdinalIgnoreCase)) return PenguLOD.Core.Occlusion.OcclusionWorldRules.DynDolod;
+        try { return PenguLOD.Core.Occlusion.OcclusionCellMode.Parse(text).ToString(); }
+        catch (ArgumentException e) { throw new CliArgException(e.Message); }
     }
 
     private static PenguLOD.Core.Lod.LodPreset ParsePreset(string? s) => s?.ToLowerInvariant() switch

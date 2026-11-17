@@ -132,6 +132,7 @@ public static class GenerationOptions
         new("underside", "PBR & terrain", "Terrain underside", "Add an underside mesh for volumetric lighting. This does not generate terrain LOD.", false),
         new("undersideStep", "PBR & terrain", "Underside sample step", "Smaller steps produce more geometry.", "16", Choices: ["8", "16", "32", "64", "128"]),
         new("occlusion", "Occlusion", "Generate Occlusion.esp", "Calculate visibility with the built-in CPU solver.", false),
+        new("occMode", "Occlusion", "Cells to update", "DynDOLOD: its own modes for each worldspace. -TVDT / +TVDT: only cells without / with occlusion data. -Flat: not flat cells. +Border: only cells of the border region.", "DynDOLOD", Choices: [.. PenguLOD.Core.Occlusion.OcclusionWorldRules.Choices]),
         new("occRadius", "Occlusion", "Visibility radius (cells)", "Maximum distance considered visible.", 100m, 1, 256),
         new("occClearance", "Occlusion", "Block clearance", "Larger values hide fewer blocks behind terrain.", 3072m, 0, 16384),
         new("occParent", "Occlusion", "Parent clearance", "Clearance for 8- and 16-cell quads.", 3072m, 0, 16384),

@@ -4,6 +4,7 @@ using PenguLOD.Core.Pipeline;
 using PenguLOD.Core.World;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Binary.Parameters;
+using Mutagen.Bethesda.Plugins.Cache;
 using Mutagen.Bethesda.Plugins.Order;
 using Mutagen.Bethesda.Skyrim;
 using Noggog;
@@ -30,29 +31,88 @@ public static class OcclusionStage
 
     public static Result Run(GameContext game, TerrainHeights terrain, IReadOnlyDictionary<string, LodGrid> grids, IReadOnlyList<LodReference> refs,
         IReadOnlyList<TreeReference>? trees, IAssetSource assets, string folder, OcclusionSettings settings, IProgress<string>? progress,
-        Action<string> warn, CancellationToken ct, IReadOnlySet<FormKey>? outdoorBases = null)
+        Action<string> warn, CancellationToken ct, IReadOnlySet<FormKey>? outdoorBases = null, OcclusionWorldRules? rules = null)
     {
         var sw = Stopwatch.StartNew();
+        rules ??= OcclusionWorldRules.For(settings.Mode);
         var skipped = new List<string>();
         var children = UndersidePluginWriter.ChildWorldspaces(game);
         var worldspaces = game.LoadOrder.PriorityOrder.Worldspace().WinningOverrides()
             .Where(w => w.EditorID is not null)
             .ToDictionary(w => w.EditorID!, w => w, StringComparer.OrdinalIgnoreCase);
+        // Child worldspaces that draw their parent's LOD (the walled cities) look at the same distant blocks as the parent's cell at
+        // the same coordinates, so they get that cell's data, as DynDOLOD gives them.
+        var names = worldspaces.Values.ToDictionary(w => w.FormKey, w => w.EditorID!);
+        var lodChildren = worldspaces.Values
+            .Where(w => w.Parent is { } p && p.Flags.HasFlag(WorldspaceParent.Flag.UseLodData) && names.ContainsKey(p.Worldspace.FormKey))
+            .ToLookup(w => names[w.Parent!.Worldspace.FormKey], w => w.EditorID!, StringComparer.OrdinalIgnoreCase);
+        var borderRegions = game.LoadOrder.PriorityOrder.Region().WinningOverrides()
+            .Where(r => r.MajorFlags.HasFlag(Region.MajorFlag.BorderRegion)).Select(r => r.FormKey).ToHashSet();
 
+        // The winning exterior cells of each worldspace. An Occlusion.esp from an earlier xLODGen, DynDOLOD or PenguLOD run would otherwise
+        // be the winning override: its stale cell data would be copied forward over later cell edits by other mods, and every cell it
+        // holds would count as one that already has occlusion data.
         var mod = new SkyrimMod(ModKey.FromNameAndExtension(FileName), SkyrimRelease.SkyrimSE) { IsSmallMaster = true };
         mod.ModHeader.Stats.NextFormID = 0x800;
+        var cellsOf = new Dictionary<string, List<IModContext<ISkyrimMod, ISkyrimModGetter, ICell, ICellGetter>>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ctx in game.LoadOrder.PriorityOrder.Where(l => l.ModKey != mod.ModKey).Cell().WinningContextOverrides(game.LinkCache))
+        {
+            if (ctx.Record.Grid is null) continue;
+            if (!ctx.TryGetParentSimpleContext<IWorldspaceGetter>(out var wsCtx) || wsCtx.Record.EditorID is not { } name) continue;
+            // The worldspace's persistent cell holds persistent references; it is not a place. It carries the coordinates of
+            // cell (0, 0) and would get that cell's data, and the plugin would override a record it has no reason to touch.
+            if ((ctx.Record.MajorRecordFlagsRaw & PersistentFlag) != 0 || wsCtx.Record.TopCell?.FormKey == ctx.Record.FormKey) continue;
+            if (!cellsOf.TryGetValue(name, out var list)) cellsOf[name] = list = [];
+            list.Add(ctx);
+        }
+
         var boundsCache = new Dictionary<string, (float Radius, float Top)?>(StringComparer.OrdinalIgnoreCase);
         int worlds = 0, cellsTotal = 0, objectsTotal = 0, treesTotal = 0;
 
         foreach (var (ws, grid) in grids.OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
         {
             ct.ThrowIfCancellationRequested();
-            if (grid.Settings.Stride < MinStride || UndersideStage.IgnoredWorlds.Contains(ws) || children.Contains(ws)) { skipped.Add(ws); continue; }
+            if (children.Contains(ws) || !worldspaces.TryGetValue(ws, out var wrld)) { skipped.Add(ws); continue; }
+            // Small worlds are left alone, as xLODGen (by the size of the LOD grid) and DynDOLOD (by the Small World flag) leave them,
+            // unless the rules switch the worldspace on by name. The worlds that get no underside get no occlusion either, unless the
+            // rules give them a mode of their own.
+            bool? named = rules.Enabled(ws);
+            if (named == false) { skipped.Add(ws); continue; }
+            if (named != true && (grid.Settings.Stride < MinStride || wrld.Flags.HasFlag(Worldspace.Flag.SmallWorld)
+                || (UndersideStage.IgnoredWorlds.Contains(ws) && !rules.Named(ws)))) { skipped.Add(ws); continue; }
             var landCells = terrain.CellsOf(ws).ToList();
             if (landCells.Count < 64) { skipped.Add(ws); continue; }
-            if (!worldspaces.TryGetValue(ws, out var wrld)) { skipped.Add(ws); continue; }
+
+            // Which cells get data: the worldspace's own bounds (the playable area), then the mode.
+            var mode = rules.ModeFor(ws);
+            var own = cellsOf.GetValueOrDefault(ws) ?? [];
+            var state = new Dictionary<(int X, int Y), (bool HasData, bool InBorder)>();
+            foreach (var ctx in own)
+                state[(ctx.Record.Grid!.Point.X, ctx.Record.Grid.Point.Y)] = (ctx.Record.OcclusionData is { Length: > 0 },
+                    ctx.Record.Regions?.Any(r => borderRegions.Contains(r.FormKey)) == true);
+            var bmin = wrld.ObjectBoundsMin; var bmax = wrld.ObjectBoundsMax;
+            bool bounded = bmax.X > bmin.X && bmax.Y > bmin.Y;
+            bool Flat(string world, int x, int y) => terrain.TryGetCell(world, x, y, out var v) && v.All(h => h == v[0]);
+            var todo = landCells.Where(c => !bounded || (c.X >= (int)MathF.Floor(bmin.X) && c.X <= (int)MathF.Ceiling(bmax.X) && c.Y >= (int)MathF.Floor(bmin.Y) && c.Y <= (int)MathF.Ceiling(bmax.Y)))
+                .Where(c => state.TryGetValue((c.X, c.Y), out var s) && mode.Includes(s.HasData, Flat(ws, c.X, c.Y), s.InBorder))
+                .Select(c => (c.X, c.Y)).ToHashSet();
 
             int x0 = landCells.Min(c => c.X), x1 = landCells.Max(c => c.X), y0 = landCells.Min(c => c.Y), y1 = landCells.Max(c => c.Y);
+            // A child worldspace's cells are not in the parent's border region; the mode applies to them without "+Border".
+            var childMode = mode with { BorderOnly = false };
+            var childCells = new List<IModContext<ISkyrimMod, ISkyrimModGetter, ICell, ICellGetter>>();
+            foreach (string child in lodChildren[ws])
+            {
+                if (rules.Enabled(child) == false) continue;
+                foreach (var ctx in cellsOf.GetValueOrDefault(child) ?? [])
+                {
+                    var p = ctx.Record.Grid!.Point;
+                    if (p.X < x0 || p.X > x1 || p.Y < y0 || p.Y > y1 || !terrain.TryGetCell(ws, p.X, p.Y, out _)) continue;
+                    if (childMode.Includes(ctx.Record.OcclusionData is { Length: > 0 }, Flat(child, p.X, p.Y), false)) childCells.Add(ctx);
+                }
+            }
+            if (todo.Count == 0 && childCells.Count == 0) { skipped.Add(ws); continue; }
+
             float seaLevel = wrld.LandDefaults?.DefaultWaterHeight is { } wh && float.IsFinite(wh) ? wh : -14000f;
             var heights = new OcclusionGrid(x0, y0, x1 - x0 + 1, y1 - y0 + 1, seaLevel);
             foreach (var c in landCells)
@@ -88,27 +148,18 @@ public static class OcclusionStage
                     treeCount++;
                 }
 
-            // Which cells get data: the worldspace's own bounds (the playable area), landscape cells that are not perfectly flat.
-            var bmin = wrld.ObjectBoundsMin; var bmax = wrld.ObjectBoundsMax;
-            bool bounded = bmax.X > bmin.X && bmax.Y > bmin.Y;
-            var todo = landCells.Where(c => !bounded || (c.X >= (int)MathF.Floor(bmin.X) && c.X <= (int)MathF.Ceiling(bmax.X) && c.Y >= (int)MathF.Floor(bmin.Y) && c.Y <= (int)MathF.Ceiling(bmax.Y)))
-                .Where(c => terrain.TryGetCell(ws, c.X, c.Y, out var v) && v.Any(h => h != v[0])).Select(c => (c.X, c.Y)).ToList();
-            progress?.Report($"Occlusion {ws}: {todo.Count:N0} cells, {objects:N0} objects and {treeCount:N0} trees in the height grid ({heights.Width}x{heights.Height} samples)");
+            var compute = todo.Concat(childCells.Select(c => (c.Record.Grid!.Point.X, c.Record.Grid.Point.Y))).Distinct().ToList();
+            progress?.Report($"Occlusion {ws}: {compute.Count:N0} cells (mode {mode}), {objects:N0} objects and {treeCount:N0} trees in the height grid ({heights.Width}x{heights.Height} samples)");
             var calc = new OcclusionCalculator(heights, grid.Settings.SwCellX, grid.Settings.SwCellY, settings, grid.Settings.Stride);
             calc.AddOwnedTargets(owned);
             int last = 0;
-            var data = calc.ComputeMany(todo, new Progress<int>(n => { if (n - last >= 2000) { last = n; progress?.Report($"Occlusion {ws}: {n:N0} of {todo.Count:N0} cells"); } }), ct);
+            var data = calc.ComputeMany(compute, new Progress<int>(n => { if (n - last >= 2000) { last = n; progress?.Report($"Occlusion {ws}: {n:N0} of {compute.Count:N0} cells"); } }), ct);
 
             int written = 0;
-            // An Occlusion.esp from an earlier xLODGen, DynDOLOD or PenguLOD run would otherwise be the winning override and its
-            // stale cell data would be copied forward over later cell edits by other mods.
-            foreach (var ctx in game.LoadOrder.PriorityOrder.Where(l => l.ModKey != mod.ModKey).Cell().WinningContextOverrides(game.LinkCache))
+            foreach (var ctx in own.Where(c => todo.Contains((c.Record.Grid!.Point.X, c.Record.Grid.Point.Y))).Concat(childCells))
             {
-                if (ctx.Record.Grid is not { } g || !data.TryGetValue((g.Point.X, g.Point.Y), out var tvdt)) continue;
-                if (!ctx.TryGetParentSimpleContext<IWorldspaceGetter>(out var wsCtx) || !string.Equals(wsCtx.Record.EditorID, ws, StringComparison.OrdinalIgnoreCase)) continue;
-                // The worldspace's persistent cell holds persistent references; it is not a place. It carries the coordinates of
-                // cell (0, 0) and would get that cell's data, and the plugin would override a record it has no reason to touch.
-                if ((ctx.Record.MajorRecordFlagsRaw & PersistentFlag) != 0 || wsCtx.Record.TopCell?.FormKey == ctx.Record.FormKey) continue;
+                var g = ctx.Record.Grid!;
+                if (!data.TryGetValue((g.Point.X, g.Point.Y), out var tvdt)) continue;
                 var cell = ctx.GetOrAddAsOverride(mod);
                 // A cell keeps the max-height data it has, as DynDOLOD's Occlusion.esp does. The base game's is not the bare landscape: in
                 // Skyrim.esm it stands on average 1,366 units above it (rock and mountain statics are in it), and objects in loaded cells
@@ -124,7 +175,7 @@ public static class OcclusionStage
                 cell.OcclusionData = tvdt.ToBytes();
                 written++;
             }
-            progress?.Report($"Occlusion {ws}: {written:N0} cells written");
+            progress?.Report($"Occlusion {ws}: {written:N0} cells written" + (childCells.Count > 0 ? $", {childCells.Count:N0} of them in child worldspaces" : ""));
             worlds++; cellsTotal += written; objectsTotal += objects; treesTotal += treeCount;
         }
 

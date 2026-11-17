@@ -366,11 +366,16 @@ public static class ScanPipeline
         // Validate and prepare grass inputs before the potentially long occlusion pass.
         if (req.Generate && req.Occlusion is not null && terrain is not null && (req.OcclusionFolder ?? req.OutputFolder) is { } occlusionFolder)
         {
+            // "DynDOLOD" takes the modes of each worldspace from DynDOLOD's own settings file when the resource folder has one.
+            string? dynDolodIni = null;
+            if (req.DynDolodFolder is { } dynDolod && Directory.Exists(dynDolod))
+                try { dynDolodIni = GamePath.ResolveExisting(ResourceCatalog.FindRoot(dynDolod), "DynDOLOD_SSE.ini"); }
+                catch (DirectoryNotFoundException) { }
             var occ = OcclusionStage.Run(game, terrain.Heights, scan.Grids, scan.References, scan.Trees, assets, occlusionFolder, req.Occlusion, progress, Warn, ct,
-                scanner.OutdoorBases);
+                scanner.OutdoorBases, PenguLOD.Core.Occlusion.OcclusionWorldRules.For(req.Occlusion.Mode, dynDolodIni));
             if (occ.Path is not null)
                 progress?.Report($"Occlusion.esp: {occ.Cells:N0} cells of {occ.Worldspaces} worldspace(s) in {occ.Elapsed.TotalSeconds:F0}s (clearance {req.Occlusion.Clearance:0}), written to {occ.Path}. Put it last in your plugin order.");
-            if (occ.Skipped.Count > 0) progress?.Report($"Occlusion: left out (too small, a child world or no landscape): {string.Join(", ", occ.Skipped)}");
+            if (occ.Skipped.Count > 0) progress?.Report($"Occlusion: left out (too small, switched off, no landscape or no cell the mode takes): {string.Join(", ", occ.Skipped)}");
         }
         // Trees that go into object LOD instead of the billboard tree LOD files:
         //  - 3D tree LOD (opt-in): trees with a 3D model (DynDOLOD's passthru_lod.nif): the model at LOD4 (and LOD8), cards beyond.

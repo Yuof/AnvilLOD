@@ -16,11 +16,12 @@ namespace PenguLOD.Core.Occlusion;
 /// <param name="BlockTargetPoints">How many of a block's highest sample points are tried as targets (0 = all of them). The highest points are the
 /// likeliest to be seen, so a few are enough; fewer points make it faster.</param>
 /// <param name="EyePoints">How many of the observer cell's sample points are tried (0 = all of them, the highest first).</param>
+/// <param name="Mode">Which cells get data: one of <see cref="OcclusionWorldRules.Choices"/>.</param>
 public sealed record OcclusionSettings(int RadiusCells = 100, float Clearance = 3072f, int SamplesPerCellSide = 2, float EyeAdd = 0f,
-    float ParentClearance = 3072f, int ParentTargetPoints = 32, int BlockTargetPoints = 32, int EyePoints = 0)
+    float ParentClearance = 3072f, int ParentTargetPoints = 32, int BlockTargetPoints = 32, int EyePoints = 0, string Mode = OcclusionWorldRules.DynDolod)
 {
     /// <summary>Starts with the revision of the written data, so output from an earlier layout is not reused ("occ2": nodes in the game's order).</summary>
-    public string Fingerprint => $"occ2:r{RadiusCells}:c{Clearance:0}:s{SamplesPerCellSide}:e{EyeAdd:0}:p{ParentClearance:0}:{ParentTargetPoints}:{BlockTargetPoints}:{EyePoints}";
+    public string Fingerprint => $"occ2:r{RadiusCells}:c{Clearance:0}:s{SamplesPerCellSide}:e{EyeAdd:0}:p{ParentClearance:0}:{ParentTargetPoints}:{BlockTargetPoints}:{EyePoints}:{Mode}";
 }
 
 /// <summary>

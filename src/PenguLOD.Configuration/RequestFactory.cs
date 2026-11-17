@@ -177,7 +177,7 @@ public static class RequestFactory
             IceInset: F("iceInset"), MountainFit: B("mountainFit"), MountainInset: F("mountainInset"), ObjectInset: F("objectInset"),
             SnowShaderMode: I("snowMode"), SnowCover: I("snowCover"), OpaqueAlpha: B("opaqueAlpha"), DetailedShips: B("detailedShips"), AnimatedShips: B("animatedShips"),
             CsGrassLod: B("csGrass"), MapObjectLevel: I("mapLevel"),
-            Occlusion: generate && B("occlusion") ? new OcclusionSettings(I("occRadius"), F("occClearance"), I("occSamples"), F("occEye"), F("occParent"), I("occParentTargets"), I("occBlockTargets"), I("occEyes")) : null,
+            Occlusion: generate && B("occlusion") ? new OcclusionSettings(I("occRadius"), F("occClearance"), I("occSamples"), F("occEye"), F("occParent"), I("occParentTargets"), I("occBlockTargets"), I("occEyes"), C("occMode")) : null,
             GeneratedTextureFolder: s.UseGeneratedTextures ? RequiredPath(s.TextureGenOutput, "a texture output folder", s) : null,
             GeneratedGrassFolder: s.UseGeneratedGrass ? RequiredPath(s.GrassOutput, "a grass cache output folder", s) : null,
             ObjectAtlas: B("objectAtlas"), AtlasCellSize: int.Parse(C("atlasCell")),
