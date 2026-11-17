@@ -4,6 +4,7 @@ Versions follow SemVer. Alpha and beta versions are pre-releases.
 
 ## [Unreleased]
 
+- Fixed terrain generation failing when a selected worldspace has no landscape or existing terrain. It is skipped with a warning, and the error for a worldspace that does fail names it.
 - Fixed terrain generation stopping on landscape textures saved as 8-bit luminance (L8), A8L8 or A8. They are read as grey.
 - Changed the error for a landscape texture that cannot be read to name the texture.
 - Added a check for enabled plugins whose master is not enabled. The check names both; it is an error when grass caching is selected.

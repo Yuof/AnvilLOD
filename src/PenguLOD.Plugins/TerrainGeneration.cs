@@ -89,6 +89,7 @@ public static class TerrainGeneration
         var seasons = request.Seasons ? SeasonalAssets.Read(game,assets,"LandTextures",request.SeasonsStrict,Warn,PenguLOD.Core.Lod.SeasonSwaps.Selection(request.OnlySeasons)) : new Dictionary<string,Dictionary<Mutagen.Bethesda.Plugins.FormKey,Mutagen.Bethesda.Plugins.FormKey>>();
         using var stage=new StagedOutput(request.OutputFolder,false,progress,ct);
         preparation.Dispose();using var generation=WorkTiming.Measure("generation");
+        var empty=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach(var world in worlds)
         {
             ct.ThrowIfCancellationRequested();string name=world.EditorID!;
@@ -105,7 +106,9 @@ public static class TerrainGeneration
             var grid=new LodGrid(name,settings);var source=new TerrainSource(game,assets,world,grid,request.UseExistingTerrain,ct,defaultDiffuse:defaultDiffuse,defaultNormal:defaultNormal,materials:request.Materials,
                 fillUncoveredLand:request.FillUncoveredLand,substituteMissingTextures:request.SubstituteMissingTextures,sharedTextures:textures,records:records);
             var planned=source.Tiles(levels).ToArray();
-            if(planned.Length==0){Warn(name+": no landscape or existing terrain in the selected grid/levels; skipped.");continue;}
+            // Nothing to generate is not a failure, even for a world picked by name: a tester's run with every world ticked was
+            // discarded after 20 minutes for two worlds without any landscape.
+            if(planned.Length==0){Warn(name+": no landscape or existing terrain in the selected grid/levels; skipped.");empty.Add(name);continue;}
             if(request.Water && !source.HasLodWater) Warn(name+": no worldspace LOD-water record; water meshes are omitted to avoid invalid engine references.");
             var fallbackUsed=GenerateTiles(planned,source,null);
             foreach (var (season, swaps) in seasons)
@@ -131,8 +134,8 @@ public static class TerrainGeneration
             Write(LodSettings.RelativePathFor(name),settings.ToBytes());
         }
         if(tiles.Count==0)throw new InvalidDataException("No terrain tiles were generated. Check worldspace selection, LOD settings and landscape coverage.");
-        if(wanted is not null && wanted.Except(reports.Select(r=>r.Worldspace),StringComparer.OrdinalIgnoreCase).Any())
-            throw new InvalidDataException("Not all explicitly selected worldspaces generated terrain. Review the warnings; previous output was preserved.");
+        if(wanted is not null && wanted.Except(reports.Select(r=>r.Worldspace),StringComparer.OrdinalIgnoreCase).Except(empty,StringComparer.OrdinalIgnoreCase).ToList() is {Count:>0} notGenerated)
+            throw new InvalidDataException("Not all explicitly selected worldspaces generated terrain: "+string.Join(", ",notGenerated.Take(10))+". Review the warnings; previous output was preserved.");
         generation.Dispose();
         var materials = materialReports.OrderBy(m=>m.Source,StringComparer.Ordinal).ThenBy(m=>m.Diffuse,StringComparer.Ordinal).ToArray();
         var performance=new TerrainPerformance(built,reused,new Dictionary<string,double>(timings));
