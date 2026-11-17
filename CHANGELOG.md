@@ -4,6 +4,7 @@ Versions follow SemVer. Alpha and beta versions are pre-releases.
 
 ## [Unreleased]
 
+- Changed **Pack object texture atlases** to put materials used in the same places on the same page, so each block draws from fewer pages.
 - Fixed a DynDOLOD preset used as the custom rule file giving every object its most detailed LOD mesh at LOD 32. Its LOD 32 rules are used only when the preset has Level32 ticked.
 - Added **High**, **Balanced** and **Performance** presets on Overview and Object LOD. They set DynDOLOD's mesh rules and the texture sizes, light and occlusion quality DynDOLOD and TexGen ship with.
 - Added **Screen** for the presets. **From the game** reads the game's resolution from its settings, as TexGen does.

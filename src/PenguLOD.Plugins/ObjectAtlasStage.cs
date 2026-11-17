@@ -253,8 +253,10 @@ public static class ObjectAtlasStage
         };
     }
 
+    /// <param name="usage">For each material key, the blocks it is drawn in, as a bit per block. Pages are then filled with materials
+    /// drawn in the same blocks, so a block draws its atlased surfaces from fewer pages. Without it, pages fill in key order.</param>
     public static Result Build(IEnumerable<LodMesh> meshes, AssetIndex assets, string output, int cellSize = 256,
-        IProgress<string>? progress = null, CancellationToken ct = default)
+        IProgress<string>? progress = null, CancellationToken ct = default, IReadOnlyDictionary<string, ulong[]>? usage = null)
     {
         if (cellSize is < 64 or > 512 || (cellSize & (cellSize - 1)) != 0) throw new ArgumentOutOfRangeException(nameof(cellSize));
         Directory.CreateDirectory(output);
@@ -316,7 +318,7 @@ public static class ObjectAtlasStage
         int perPage = (PageSize / cellSize) * (PageSize / cellSize);
         // Shader/alpha/emittance/cubemap compatibility comes before path ordering, so each page can actually batch.
         foreach (var group in materials.GroupBy(kv => kv.Value.Group).OrderBy(g => g.Key, StringComparer.Ordinal))
-        foreach (var batch in group.Chunk(perPage))
+        foreach (var batch in Batches(group.ToList(), perPage, usage))
         {
             ct.ThrowIfCancellationRequested();
             progress?.Report($"Object atlas: {mapped.Count:N0}/{materials.Count:N0} materials...");
@@ -362,6 +364,52 @@ public static class ObjectAtlasStage
         return new(report, Transform);
 
         void Write(string path, byte[] bytes) { ObjectTextureAssets.Write(output, path, bytes); textureBytes += bytes.Length; }
+    }
+
+    /// <summary>
+    /// Splits a group of compatible materials into pages. With block usage, each page starts from the most used material left and
+    /// takes, one at a time, the material that adds the fewest blocks the page is not yet drawn in (ties: most shared blocks, then key),
+    /// so materials placed together share a page. A block draws one shape per page it uses, so this lowers its draw calls.
+    /// </summary>
+    internal static IEnumerable<KeyValuePair<string, TCandidate>[]> Batches<TCandidate>(IReadOnlyList<KeyValuePair<string, TCandidate>> group, int perPage,
+        IReadOnlyDictionary<string, ulong[]>? usage)
+    {
+        if (usage is null || group.Count <= perPage)
+        {
+            foreach (var chunk in group.Chunk(perPage)) yield return chunk;
+            yield break;
+        }
+        int words = usage.Values.Select(u => u.Length).DefaultIfEmpty(0).Max();
+        ulong[] Bits(string key) => usage.TryGetValue(key, out var u) ? u : [];
+        static int Count(ulong[] a) { int n = 0; foreach (ulong w in a) n += System.Numerics.BitOperations.PopCount(w); return n; }
+        var left = group.OrderBy(kv => kv.Key, StringComparer.Ordinal).ToList();
+        while (left.Count > 0)
+        {
+            int seed = 0, seedCount = -1;
+            for (int i = 0; i < left.Count; i++) { int c = Count(Bits(left[i].Key)); if (c > seedCount) { seed = i; seedCount = c; } }
+            var page = new List<KeyValuePair<string, TCandidate>> { left[seed] };
+            var covered = new ulong[words]; Or(covered, Bits(left[seed].Key));
+            left.RemoveAt(seed);
+            while (page.Count < perPage && left.Count > 0)
+            {
+                int best = 0, bestNew = int.MaxValue, bestShared = -1;
+                for (int i = 0; i < left.Count; i++)
+                {
+                    var u = Bits(left[i].Key); int added = 0, shared = 0;
+                    for (int w = 0; w < u.Length; w++)
+                    {
+                        added += System.Numerics.BitOperations.PopCount(u[w] & ~covered[w]);
+                        shared += System.Numerics.BitOperations.PopCount(u[w] & covered[w]);
+                    }
+                    if (added < bestNew || (added == bestNew && shared > bestShared)) { best = i; bestNew = added; bestShared = shared; }
+                }
+                page.Add(left[best]); Or(covered, Bits(left[best].Key));
+                left.RemoveAt(best);
+            }
+            yield return page.OrderBy(kv => kv.Key, StringComparer.Ordinal).ToArray();
+        }
+
+        static void Or(ulong[] into, ulong[] bits) { for (int w = 0; w < bits.Length; w++) into[w] |= bits[w]; }
     }
 
     public static LodMesh Remap(LodMesh mesh, IReadOnlyDictionary<string, Mapping> mappings) => new()

@@ -623,15 +623,17 @@ public static class ScanPipeline
             var generator = new LodGenerator(assets, cullTerrain?.Heights, new CompositeSyntheticSource(grass, cards, tree3d, ships)) { RemoveUnderwater = req.RemoveUnderwater, Brightness = req.ObjectBrightness, SnowShaderMode = req.SnowShaderMode, SnowCover = req.SnowCover, FitMountains = req.MountainFit && req.MountainInset > 0f, Pbr = pbrLod, Opaque = opaqueLod, Categorize = SizeBreakdown.Categorize, Inset = req.IceInset > 0f || req.MountainInset > 0f || req.ObjectInset > 0f || req.DetailedShips ? path => LodInset.For(path, req.IceInset, req.MountainInset, req.DetailedShips ? LodInset.DefaultShip : 0f, req.ObjectInset) : null, TextureVariants = seasonalVariants, RecipeMapper = recipeMapper is null ? null : recipeMapper.Map };
             if (req.ObjectAtlas || req.OptimizeObjectTextures)
             {
-                var models=quads.SelectMany(kv=>kv.Value.Select(r=>(Path:r.Meshes.For(kv.Key.Level),r.TextureVariant)))
+                var meshByKey=quads.SelectMany(kv=>kv.Value.Select(r=>(Path:r.Meshes.For(kv.Key.Level),r.TextureVariant)))
                     .Where(r=>r.Path is {Length:>0} && !r.Path.StartsWith('~')).Select(r=>LodMeshKey.Make(r.Path!,r.TextureVariant)).Distinct(StringComparer.OrdinalIgnoreCase)
-                    .Select(p=>{ct.ThrowIfCancellationRequested();return generator.GetMesh(p);}).OfType<LodMesh>().ToArray();
+                    .Select(p=>{ct.ThrowIfCancellationRequested();return (Key:p,Mesh:generator.GetMesh(p));}).Where(m=>m.Mesh is not null)
+                    .ToDictionary(m=>m.Key,m=>m.Mesh!,StringComparer.OrdinalIgnoreCase);
+                var models=meshByKey.Values.ToArray();
                 // Mapping above discovers converted PBR/opaque inputs. Materialize them before packing paired pages.
                 if(pbrLod is not null && PbrLodStage.Run(assets,pbrLod,output,req.PbrLodSize,req.PbrLodBrightness,progress,ct) is {Failed:>0} pbrFailure)
                     throw new InvalidDataException("Cannot prepare failed PBR material inputs: "+string.Join("; ",pbrFailure.Errors));
                 if(opaqueLod is not null && OpaqueLodStage.Run(assets,opaqueLod,output,progress,ct) is {Failed:>0} opaqueFailure)
                     throw new InvalidDataException("Cannot prepare failed opaque material inputs: "+string.Join("; ",opaqueFailure.Errors));
-                var atlas = req.ObjectAtlas ? ObjectAtlasStage.Build(models, assets, output, req.AtlasCellSize, progress, ct) : null;
+                var atlas = req.ObjectAtlas ? ObjectAtlasStage.Build(models, assets, output, req.AtlasCellSize, progress, ct, MaterialBlocks(quads, meshByKey)) : null;
                 var optimized = req.OptimizeObjectTextures ? ObjectTextureOptimizationStage.Build(
                     atlas is null ? models : models.Select(atlas.Transform), assets, output, req.ObjectTextureSize, progress, ct) : null;
                 if (atlas?.Report.Warnings is { Count: > 0 } atlasWarnings)
@@ -1057,5 +1059,25 @@ public static class ScanPipeline
             warnings.Add(w);
             progress?.Report("WARNING: " + w);
         }
+    }
+
+    /// <summary>For each material key, the blocks (one bit each) whose references draw it, for packing atlas pages by place.</summary>
+    internal static Dictionary<string, ulong[]> MaterialBlocks(IReadOnlyDictionary<QuadKey, IReadOnlyList<LodReference>> quads, IReadOnlyDictionary<string, LodMesh> meshes)
+    {
+        var blocks = quads.Keys.OrderBy(q => q.ToString(), StringComparer.Ordinal).ToArray();
+        int words = (blocks.Length + 63) / 64;
+        var usage = new Dictionary<string, ulong[]>(StringComparer.Ordinal);
+        for (int b = 0; b < blocks.Length; b++)
+            foreach (var r in quads[blocks[b]])
+            {
+                if (r.Meshes.For(blocks[b].Level) is not { Length: > 0 } path || path.StartsWith('~')) continue;
+                if (!meshes.TryGetValue(LodMeshKey.Make(path, r.TextureVariant), out var mesh)) continue;
+                foreach (var part in mesh.Parts)
+                {
+                    if (!usage.TryGetValue(part.Material.Key, out var bits)) usage[part.Material.Key] = bits = new ulong[words];
+                    bits[b >> 6] |= 1UL << (b & 63);
+                }
+            }
+        return usage;
     }
 }
