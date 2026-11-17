@@ -93,15 +93,40 @@ public class LodRulesTests
     [Fact]
     public void Lod_4_is_the_LOD32_file_and_an_explicit_lod_3_beats_it()
     {
-        // FOLIP's road chunks: roadchunkl01_lod_0.nif for LOD4 and roadchunkl01_lod_4.nif for the far levels.
+        // FOLIP's road chunks: roadchunkl01_lod_0.nif for LOD4 and roadchunkl01_lod_4.nif for the world map. DynDOLOD: lod_4 "will be
+        // assigned to level 3 only and not fill any of the lower levels", so the road chunks have no LOD8 or LOD16 mesh.
         var roads = LodMeshIndex.Build([@"meshes\lod\roads\roadchunkl01_lod_0.nif", @"meshes\lod\roads\map\roadchunkl01_lod_4.nif"]);
         var r = roads.Find(@"meshes\landscape\roads\roadchunkl01.nif")!;
         Assert.Equal(@"meshes\lod\roads\roadchunkl01_lod_0.nif", r[0]);
         Assert.Equal(@"meshes\lod\roads\map\roadchunkl01_lod_4.nif", r[3]);
-        Assert.Equal(@"meshes\lod\roads\map\roadchunkl01_lod_4.nif", r[1]); // missing lower levels fall back to the next higher one
+        Assert.Null(r[1]);
+        Assert.Null(r[2]);
+        var mapOnly = LodMeshIndex.Build([@"meshes\lod\roads\map\road3way01_lod_4.nif"]).Find(@"meshes\landscape\roads\road3way01.nif")!;
+        Assert.Equal([null, null, null, @"meshes\lod\roads\map\road3way01_lod_4.nif"], mapOnly);
+        var resolved = new LodMeshResolver(roads, new LodRules(), _ => true).Resolve(null, null, @"meshes\landscape\roads\roadchunkl01.nif", null);
+        Assert.Null(resolved.Meshes.Lod8);
 
         var both = LodMeshIndex.Build([@"meshes\lod\a_lod_3.nif", @"meshes\lod\a_lod_4.nif"]).Find(@"meshes\x\a.nif")!;
         Assert.Equal(@"meshes\lod\a_lod_3.nif", both[3]);
+    }
+
+    [Fact]
+    public void A_plain_lod_name_next_to_numbered_files_only_fills_level_0()
+    {
+        // DynDOLOD: house_lod.nif alone is levels 0, 1 and 2; next to numbered files it fills only the levels they leave out at the
+        // bottom, and a numbered file fills the lower levels below it. DynDOLOD's own output for Skyrim: rockpilel01_lod_0.nif and
+        // midwoodisle\rockpilel01_lod.nif give the rock pile LOD4 only; wrwallcap01_lod.nif and wrwallcap01_lod_2.nif give
+        // _lod, _lod_2, _lod_2; impextwall01_lod.nif and impextwall01_lod_3.nif give _lod, _lod_3, _lod_3.
+        var idx = LodMeshIndex.Build([@"meshes\lod\rocks\rockpilel01_lod_0.nif", @"meshes\lod\midwoodisle\rockpilel01_lod.nif",
+            @"meshes\lod\whiterun\wrwallcap01_lod.nif", @"meshes\lod\whiterun\wrwallcap01_lod_2.nif",
+            @"meshes\lod\imperial\impextwall01_lod.nif", @"meshes\lod\imperial\impextwall01_lod_3.nif", @"meshes\lod\farmhouse\farmhouse01_lod.nif"]);
+        Assert.Equal([@"meshes\lod\rocks\rockpilel01_lod_0.nif", null, null, null], idx.Find(@"meshes\landscape\rocks\rockpilel01.nif"));
+        Assert.Equal([@"meshes\lod\whiterun\wrwallcap01_lod.nif", @"meshes\lod\whiterun\wrwallcap01_lod_2.nif", @"meshes\lod\whiterun\wrwallcap01_lod_2.nif", null],
+            idx.Find(@"meshes\architecture\whiterun\wrcitywalls\wrwallcap01.nif"));
+        Assert.Equal([@"meshes\lod\imperial\impextwall01_lod.nif", @"meshes\lod\imperial\impextwall01_lod_3.nif", @"meshes\lod\imperial\impextwall01_lod_3.nif", @"meshes\lod\imperial\impextwall01_lod_3.nif"],
+            idx.Find(@"meshes\dungeons\imperial\exterior\impextwall01.nif"));
+        var farmhouse = @"meshes\lod\farmhouse\farmhouse01_lod.nif";
+        Assert.Equal([farmhouse, farmhouse, farmhouse, null], idx.Find(@"meshes\architecture\farmhouse\farmhouse01.nif"));
     }
 
     [Fact]
