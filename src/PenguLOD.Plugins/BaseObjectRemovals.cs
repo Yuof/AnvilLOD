@@ -27,10 +27,13 @@ internal sealed partial class BaseObjectRemovals
     private readonly List<BaseObjectRemoval> _removed = [];
     private readonly List<BaseObjectSwapDiagnostic> _diagnostics = [];
     private readonly HashSet<FormKey> _excluded = [];
+    private readonly HashSet<FormKey> _swapTargets = [];
     private bool _runtime;
     private int _files;
 
     public IReadOnlySet<FormKey> Excluded => _excluded;
+    /// <summary>Every base record a swap can put in, conditional and chance-based ones included: they can stand wherever their source does.</summary>
+    public IReadOnlySet<FormKey> SwapTargets => _swapTargets;
     public BaseObjectSwapReport Report => new(_runtime, _files,
         _references.Values.Count(r => r.Remove) + _forms.Count(p => p.Value.Remove && !_conditionalForms.Contains(p.Key)),
         _removed.ToArray(), _diagnostics.ToArray());
@@ -99,6 +102,7 @@ internal sealed partial class BaseObjectRemovals
                 var targets = fields[1].Split(',').Select(Resolve<IPlaceableObjectGetter>).OfType<IPlaceableObjectGetter>()
                     .Where(r => !r.IsDeleted).Select(r => r.FormKey).Distinct().ToArray();
                 if (targets.Length == 0) { Diagnostic("Replacement is unresolved or is not a placeable object."); continue; }
+                result._swapTargets.UnionWith(targets);
                 if (conditional)
                 {
                     result._conditionalForms.UnionWith(sources);

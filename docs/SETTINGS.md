@@ -418,7 +418,7 @@ that is in view; [generate it again](TROUBLESHOOTING.md#objects-and-trees-are-mi
 
 | Setting | What it does |
 | --- | --- |
-| Generate Occlusion.esp | Builds the visibility plugin. Off by default. |
+| Generate Occlusion.esp | Builds the visibility plugin. It also gives statics without object bounds the bounds of their model, so the game does not hide them in loaded cells. Off by default. |
 | Visibility radius (cells) | Maximum distance considered visible. Default `100`; reducing it can cut off distant scenery. |
 | Block clearance | Height terrain must rise above the viewing line before it hides a block. Default `3072` game units; higher hides fewer blocks. |
 | Parent clearance | The corresponding allowance for larger 8- and 16-cell blocks. Default `3072`. |

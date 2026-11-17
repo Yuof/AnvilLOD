@@ -70,6 +70,12 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
     /// mesh's CRC32) while the accept-by-name option is off. Zero when the option is on.
     /// </summary>
     public int Tree3DNameOnlyAvailable { get; private set; }
+    /// <summary>
+    /// Base records that can stand outdoors: those of references placed in a worldspace (deleted ones and ones removed by Base Object
+    /// Swapper aside), and every record Base Object Swapper can put in. Filled by <see cref="Scan"/>.
+    /// </summary>
+    public IReadOnlySet<FormKey> OutdoorBases => _outdoorBases;
+    private readonly HashSet<FormKey> _outdoorBases = [];
 
     /// <summary>3D tree LOD, last scan: meshes in PGPatcher's ParallaxGen_Diff.json (0 when there is no such file).</summary>
     public int Tree3DPatchedMeshes { get; private set; }
@@ -86,6 +92,7 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
         BaseObjectSwaps = null;
         var baseObjectRemovals = BaseObjectRemovals.Load(_game, _assets, ct, progress);
         RemovedByBaseObjectSwapper = baseObjectRemovals.Excluded;
+        _outdoorBases.Clear(); _outdoorBases.UnionWith(baseObjectRemovals.SwapTargets);
         var sw = Stopwatch.StartNew();
         var priority = _game.LoadOrder.PriorityOrder;
 
@@ -532,6 +539,7 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
             var wsId = wsCtx.Record.EditorID;
             if (wsId is null) continue;
             if (baseObjectRemovals.Exclude(r, wsId)) continue;
+            if (r.Base.FormKeyNullable is { IsNull: false } outdoorBase) _outdoorBases.Add(outdoorBase);
             if (resolver.Rules.IgnoresWorld(r.FormKey.ModKey.FileName.String, wsId)) { ignoredByWorldRule++; continue; }
             if (grids.ContainsKey(wsId)) Handle(wsId, null);
             if (parentCopyTargets.Count > 0 && parentCopyTargets.TryGetValue(wsId, out var pcTargets)) CollectParentCopy(ctx, pcTargets);
