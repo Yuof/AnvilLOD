@@ -98,6 +98,7 @@ public static class GenerationOptions
         new("grassTop", "Trees & grass", "Grass tip brightness", "Vertex colour at tuft tips.", .3m, 0, 4),
         new("grassBottom", "Trees & grass", "Grass root brightness", "Vertex colour at tuft roots.", .18m, 0, 4),
         new("csGrass", "Trees & grass", "Community Shaders grass", "Generate grass meshes when Grass Optimizations is installed.", true),
+        new("csGrassOnly", "Trees & grass", "Leave grass to Grass Optimizations", "With Grass Optimizations installed, leave grass out of the LOD blocks. Beyond the game's grass distance there is then no grass.", false),
         new("dynamic", "World & runtime", "Dynamic objects", "Quest-toggled LOD requires PenguLOD's Windows SKSE plugin in the game.", true),
         new("grid", "World & runtime", "Animated grid objects", "Waterfalls, windmills and fires; requires the SKSE plugin unless backed by native references.", true),
         new("nativeGrid", "World & runtime", "Use game references for grid objects", "Write animated real references to PenguLOD.esp.", true),

@@ -22,6 +22,7 @@ Versions follow SemVer. Alpha and beta versions are pre-releases.
 - Changed the error for a mod chosen as a resource folder to say which folder to choose: the DynDOLOD program folder, not the DynDOLOD Resources mod.
 - Changed the resource pack guide to say what the primary resource folder is for.
 - Fixed rebuilt recipe atlases being too bright with **PBR object LOD** on. A tile taken from a PBR albedo is converted like other PBR LOD textures. Regenerate object LOD.
+- Added **Leave grass to Grass Optimizations** (`--cs-grass-only`), off by default. With Community Shaders' Grass Optimizations installed, grass is left out of the LOD blocks.
 
 ## [0.6.0-beta.5] - 2026-11-16
 
