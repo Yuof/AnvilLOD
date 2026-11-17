@@ -9,6 +9,8 @@ Versions follow SemVer. Alpha and beta versions are pre-releases.
 - Fixed every stage stopping with "Invalid stitching dimensions or colour settings" on a texture rule file it cannot read, such as DynDOLOD's Majestic Mountains rules. The rule is skipped with a warning.
 - Fixed object LOD failing with "Merged LOD shape has conflicting full textures" or "Alternate texture is ambiguous". The shape keeps its LOD model's texture and a warning names it.
 - Fixed a finished build being lost on Windows when the move into place is refused. The move is tried again for two minutes, and a build that still cannot be published is kept.
+- Changed the error for a mod chosen as a resource folder to say which folder to choose: the DynDOLOD program folder, not the DynDOLOD Resources mod.
+- Changed the resource pack guide to say what the primary resource folder is for.
 
 ## [0.6.0-beta.5] - 2026-11-16
 

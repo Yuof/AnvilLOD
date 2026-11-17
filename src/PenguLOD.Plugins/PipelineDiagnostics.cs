@@ -93,7 +93,7 @@ public static class PipelineDiagnostics
                     {
                         var rules = TextureGeneration.ReadRules(game, resources);
                         if (rules.Program.Entries.Count == 0)
-                            Add("Error", "missing-texture-recipes", "No stitching recipes match the enabled plugins.", "Add a compatible resource pack or turn off stitched textures.");
+                            Add("Error", "missing-texture-recipes", "No stitching recipes match the enabled plugins.", "Set the primary resource folder to the DynDOLOD program folder (the one that holds DynDOLODx64.exe), or turn off stitched textures.");
                         foreach (string skipped in rules.Skipped)
                             Add("Warning", "texture-rule-skipped", "Texture rule skipped: " + skipped, "The texture is taken from the load order if it is installed. Report the rule file if the texture is missing in game.");
                     }
