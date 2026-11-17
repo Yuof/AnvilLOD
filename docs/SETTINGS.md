@@ -527,6 +527,7 @@ that is in view; [generate it again](TROUBLESHOOTING.md#objects-and-trees-are-mi
 | Setting | What it does |
 | --- | --- |
 | Generate Occlusion.esp | Builds the visibility plugin. It also gives statics without object bounds the bounds of their model, so the game does not hide them in loaded cells. Off by default. |
+| Cells to update | Which cells get occlusion data. Default **DynDOLOD**: the modes DynDOLOD uses for each worldspace. See below. |
 | Visibility radius (cells) | Maximum distance considered visible. Default `100`; reducing it can cut off distant scenery. |
 | Block clearance | Height terrain must rise above the viewing line before it hides a block. Default `3072` game units; higher hides fewer blocks. |
 | Parent clearance | The corresponding allowance for larger 8- and 16-cell blocks. Default `3072`. |
@@ -535,6 +536,23 @@ that is in view; [generate it again](TROUBLESHOOTING.md#objects-and-trees-are-mi
 | Parent target points | Number of high points tested on larger blocks. Default `32`; more takes longer and can find additional visible areas. |
 | Block target points | Number of target points tested on ordinary blocks. Default `32`; `0` tests every available point. |
 | Observer sample points | Number of observer positions used. Default `0` tests every available position; a cap reduces checking work. |
+
+**Cells to update** takes DynDOLOD's occlusion modes. A mode is **All**, or any of:
+
+- `-TVDT` or `+TVDT`: only cells without occlusion data, or only cells that already have it. An `Occlusion.esp` from an earlier run does not count.
+- `-Flat`: not cells whose landscape is perfectly flat.
+- `+Border`: only cells linked to a region with the Border Region flag, which is the playable area. A worldspace without such a region gets nothing.
+
+**DynDOLOD** uses `-TVDT -Flat +Border`, with `-Flat +Border` for Tamriel and
+`-TVDT -Flat` for Sovngarde and the Soul Cairn, as DynDOLOD ships. When the primary
+resource folder is the DynDOLOD program folder, the modes and the worldspaces switched
+on or off (`OcclusionMode`, `OcclusionMode_<worldspace>`, `Occlusion_<worldspace>`)
+are read from its `DynDOLOD_SSE.ini`. Any other choice applies to every worldspace.
+
+Walled cities and other child worldspaces that show their parent's LOD get the data
+of the parent's cell at the same place; `+Border` does not apply to them. Worldspaces
+with the Small World flag or a small LOD grid are left alone unless `Occlusion_<worldspace>=1`
+switches them on. Cells outside the worldspace's bounds are never updated.
 
 ## Diagnostics
 

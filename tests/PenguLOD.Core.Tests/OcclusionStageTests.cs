@@ -58,7 +58,7 @@ public class OcclusionStageTests
         var terrain = TerrainReader.Read(game, ["FixtureWorld"]);
         var grids = new Dictionary<string, LodGrid> { { "FixtureWorld", new("FixtureWorld", new(-64, -64, 128, 4, 32)) } };
         string folder = Path.Combine(f.Root, "occlusion");
-        var result = OcclusionStage.Run(game, terrain.Heights, grids, [], null, game.BuildAssets(), folder, new OcclusionSettings(), null, _ => { }, default);
+        var result = OcclusionStage.Run(game, terrain.Heights, grids, [], null, game.BuildAssets(), folder, new OcclusionSettings(Mode: "-Flat"), null, _ => { }, default);
         Assert.NotNull(result.Path);
         using var written = SkyrimMod.CreateFromBinaryOverlay(result.Path!, SkyrimRelease.SkyrimSE);
         var cells = written.Worldspaces.SelectMany(w => w.SubCells).SelectMany(b => b.Items).SelectMany(s => s.Items).ToList();
@@ -108,7 +108,7 @@ public class OcclusionStageTests
             new LodMeshSet(@"test\tower.nif", null, null, null), LodReferenceFlags.None);
         TextureFixture.Put(f.Data, @"meshes\test\tower.nif", LodNifWriter.Write("tower", [TextureFixture.Card("tower", @"textures\red.dds") with
             { Positions = [new(-200, 0, 0), new(200, 0, 0), new(-200, 0, 8000), new(200, 0, 8000)] }]));
-        var result = OcclusionStage.Run(game, terrain.Heights, grids, [tower], null, game.BuildAssets(), Path.Combine(f.Root, "occlusion"), new OcclusionSettings(), null, _ => { }, default);
+        var result = OcclusionStage.Run(game, terrain.Heights, grids, [tower], null, game.BuildAssets(), Path.Combine(f.Root, "occlusion"), new OcclusionSettings(Mode: "-Flat"), null, _ => { }, default);
         using var written = SkyrimMod.CreateFromBinaryOverlay(result.Path!, SkyrimRelease.SkyrimSE);
         var cells = written.Worldspaces.SelectMany(w => w.SubCells).SelectMany(b => b.Items).SelectMany(s => s.Items).ToDictionary(c => c.Grid!.Point);
         var kept = cells[new P2Int(2, 2)].MaxHeightData!;
@@ -143,7 +143,7 @@ public class OcclusionStageTests
         var terrain = TerrainReader.Read(game, ["FixtureWorld"]);
         var grids = new Dictionary<string, LodGrid> { { "FixtureWorld", new("FixtureWorld", new(-64, -64, 128, 4, 32)) } };
         var outdoors = new HashSet<FormKey> { outdoor.FormKey, tiny.FormKey, bounded.FormKey, noModel.FormKey };
-        var result = OcclusionStage.Run(game, terrain.Heights, grids, [], null, game.BuildAssets(), Path.Combine(f.Root, "occlusion"), new OcclusionSettings(), null, _ => { },
+        var result = OcclusionStage.Run(game, terrain.Heights, grids, [], null, game.BuildAssets(), Path.Combine(f.Root, "occlusion"), new OcclusionSettings(Mode: "-Flat"), null, _ => { },
             default, outdoors);
         Assert.Equal(new BoundsFixStage.Result(3, 1, 1, 1, 0, []), result.Bounds! with { LeftOutPlugins = [] });
         using var written = SkyrimMod.CreateFromBinaryOverlay(result.Path!, SkyrimRelease.SkyrimSE);
@@ -178,7 +178,7 @@ public class OcclusionStageTests
         var terrain = TerrainReader.Read(game, ["FixtureWorld"]);
         var grids = new Dictionary<string, LodGrid> { { "FixtureWorld", new("FixtureWorld", new(-64, -64, 128, 4, 32)) } };
         var warnings = new List<string>();
-        var result = OcclusionStage.Run(game, terrain.Heights, grids, [], null, game.BuildAssets(), Path.Combine(f.Root, "occlusion"), new OcclusionSettings(), null, warnings.Add,
+        var result = OcclusionStage.Run(game, terrain.Heights, grids, [], null, game.BuildAssets(), Path.Combine(f.Root, "occlusion"), new OcclusionSettings(Mode: "-Flat"), null, warnings.Add,
             default, outdoors);
         // Skyrim.esm is already a master (the cells), so 249 plugins fit: the first one's two statics and one each from 248 more.
         Assert.Equal(BoundsFixStage.MaxMasters, result.Bounds!.Fixed);
@@ -214,7 +214,7 @@ public class OcclusionStageTests
         using var game = GameContext.Open(f.Game);
         var terrain = TerrainReader.Read(game, ["FixtureWorld"]);
         var grids = new Dictionary<string, LodGrid> { { "FixtureWorld", new("FixtureWorld", new(-64, -64, 128, 4, 32)) } };
-        var result = OcclusionStage.Run(game, terrain.Heights, grids, [], null, game.BuildAssets(), Path.Combine(f.Root, "occlusion"), new OcclusionSettings(), null, _ => { }, default);
+        var result = OcclusionStage.Run(game, terrain.Heights, grids, [], null, game.BuildAssets(), Path.Combine(f.Root, "occlusion"), new OcclusionSettings(Mode: "-Flat"), null, _ => { }, default);
         Assert.Equal(64, result.Cells);
         using var written = SkyrimMod.CreateFromBinaryOverlay(result.Path!, SkyrimRelease.SkyrimSE);
         var worldspace = Assert.Single(written.Worldspaces);
@@ -223,5 +223,125 @@ public class OcclusionStageTests
         Assert.Equal(64, cells.Count);
         Assert.DoesNotContain(cells, c => c.FormKey == world.TopCell.FormKey);
         Assert.All(cells, c => Assert.NotNull(c.OcclusionData));
+    }
+
+    [Fact]
+    public void AModeNamesTheCellsItTakesAndDynDolodsSettingsFileGivesEachWorldspaceItsOwn()
+    {
+        Assert.Equal("All", OcclusionCellMode.Parse("all").ToString());
+        Assert.Equal("-TVDT -Flat +Border", OcclusionCellMode.Parse("+border  -flat -TVDT").ToString());
+        Assert.All(OcclusionWorldRules.Choices.Skip(1), c => Assert.Equal(c, OcclusionCellMode.Parse(c).ToString()));
+        foreach (string bad in new[] { "", "+Flat", "+TVDT -TVDT", "All -Flat", "-Flat -Flat" }) Assert.Throws<ArgumentException>(() => OcclusionCellMode.Parse(bad));
+        var mode = OcclusionCellMode.Parse("-TVDT -Flat +Border");
+        Assert.True(mode.Includes(hasData: false, flat: false, inBorder: true));
+        Assert.False(mode.Includes(true, false, true)); Assert.False(mode.Includes(false, true, true)); Assert.False(mode.Includes(false, false, false));
+        Assert.True(OcclusionCellMode.Parse("+TVDT").Includes(true, true, false));
+
+        // What DynDOLOD ships with: the general mode, and Tamriel, Sovngarde and the Soul Cairn with their own.
+        var shipped = OcclusionWorldRules.For(OcclusionWorldRules.DynDolod);
+        Assert.Equal("-TVDT -Flat +Border", shipped.ModeFor("DLC2SolstheimWorld").ToString());
+        Assert.Equal("-Flat +Border", shipped.ModeFor("tamriel").ToString());
+        Assert.Equal("-TVDT -Flat", shipped.ModeFor("DLC01SoulCairn").ToString());
+        Assert.False(shipped.Enabled("ArnimaDagonRealm")); Assert.Null(shipped.Enabled("Tamriel"));
+
+        var read = OcclusionWorldRules.Read(["[DynDOLOD]", "; OcclusionMode=All", "OcclusionMode=-Flat", "OcclusionMode_Tamriel=+TVDT", "OcclusionMode_Broken=sideways",
+            "Occlusion_SmallIsland=1", "Occlusion_Other=0", "OcclusionRadius=100", "OcclusionMaxThreadsObjectLOD=4"]);
+        Assert.Equal("-Flat", read.ModeFor("Anywhere").ToString()); Assert.Equal("+TVDT", read.ModeFor("Tamriel").ToString());
+        Assert.Equal("-Flat", read.ModeFor("Broken").ToString());
+        Assert.True(read.Enabled("SmallIsland")); Assert.False(read.Enabled("Other")); Assert.Null(read.Enabled("MaxThreadsObjectLOD"));
+        Assert.Equal("All", OcclusionWorldRules.For("All").ModeFor("Tamriel").ToString());
+    }
+
+    /// <summary>
+    /// The hilly world with a border region: cells with x below 4 are linked to it, the row y = 0 already has occlusion data, and cell
+    /// (2, 5) is flat. A city worldspace that draws this world's LOD has two cells, one of them with occlusion data.
+    /// </summary>
+    private static (SkyrimMod Master, Worldspace World, Worldspace City) WorldWithABorderAndACity()
+    {
+        var (master, world) = HillyWorld();
+        var border = new Region(master.GetNextFormKey(), SkyrimRelease.SkyrimSE) { EditorID = "BorderRegionFixture", MajorFlags = Region.MajorFlag.BorderRegion };
+        var other = new Region(master.GetNextFormKey(), SkyrimRelease.SkyrimSE) { EditorID = "WeatherRegionFixture" };
+        master.Regions.Add(border); master.Regions.Add(other);
+        foreach (var cell in world.SubCells[0].Items[0].Items)
+        {
+            var p = cell.Grid!.Point;
+            cell.Regions = [(p.X < 4 ? border : other).ToLink<IRegionGetter>()];
+            if (p.Y == 0) cell.OcclusionData = new byte[684];
+            if (p == new P2Int(2, 5)) cell.Landscape!.VertexHeightMap = new LandscapeVertexHeightMap { Offset = 0, HeightMap = new Array2d<sbyte>(new P2Int(33, 33), 0) };
+        }
+        var city = new Worldspace(master.GetNextFormKey(), SkyrimRelease.SkyrimSE) { EditorID = "FixtureCity",
+            Parent = new WorldspaceParent { Worldspace = world.ToLink<IWorldspaceGetter>(), Flags = WorldspaceParent.Flag.UseLodData } };
+        var block = new WorldspaceBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = (GroupTypeEnum)4 };
+        var sub = new WorldspaceSubBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = (GroupTypeEnum)5 };
+        block.Items.Add(sub); city.SubCells.Add(block); master.Worldspaces.Add(city);
+        sub.Items.Add(new Cell(master.GetNextFormKey(), SkyrimRelease.SkyrimSE) { Grid = new CellGrid { Point = new P2Int(6, 6) }, OcclusionData = new byte[684] });
+        sub.Items.Add(new Cell(master.GetNextFormKey(), SkyrimRelease.SkyrimSE) { Grid = new CellGrid { Point = new P2Int(6, 7) } });
+        return (master, world, city);
+    }
+
+    private static Dictionary<(string World, int X, int Y), ICellGetter> RunWithMode(TextureFixture f, string? mode, OcclusionWorldRules? rules = null)
+    {
+        using var game = GameContext.Open(f.Game);
+        var terrain = TerrainReader.Read(game, ["FixtureWorld"]);
+        var grids = new Dictionary<string, LodGrid> { { "FixtureWorld", new("FixtureWorld", new(-64, -64, 128, 4, 32)) } };
+        string folder = Path.Combine(f.Root, "occlusion-" + Guid.NewGuid().ToString("N"));
+        var settings = mode is null ? new OcclusionSettings() : new OcclusionSettings(Mode: mode);
+        var result = OcclusionStage.Run(game, terrain.Heights, grids, [], null, game.BuildAssets(), folder, settings, null, _ => { }, default, rules: rules);
+        if (result.Path is null) return [];
+        var written = SkyrimMod.CreateFromBinary(result.Path, SkyrimRelease.SkyrimSE);
+        var names = new Dictionary<FormKey, string>();
+        using (var master = SkyrimMod.CreateFromBinaryOverlay(Path.Combine(f.Data, "Skyrim.esm"), SkyrimRelease.SkyrimSE))
+            foreach (var w in master.Worldspaces) names[w.FormKey] = w.EditorID!;
+        var cells = written.Worldspaces.SelectMany(w => w.SubCells.SelectMany(b => b.Items).SelectMany(s => s.Items).Select(c => (World: names[w.FormKey], Cell: (ICellGetter)c)))
+            .ToDictionary(c => (c.World, c.Cell.Grid!.Point.X, c.Cell.Grid.Point.Y), c => c.Cell);
+        Assert.Equal(cells.Count, result.Cells);
+        return cells;
+    }
+
+    [Fact]
+    public void TheModeDecidesWhichCellsGetOcclusionDataAndCityCellsGetTheirParents()
+    {
+        using var f = new TextureFixture();
+        var (master, _, _) = WorldWithABorderAndACity();
+        master.WriteToBinary(Path.Combine(f.Data, "Skyrim.esm"));
+        File.WriteAllText(f.Plugins, "");
+        static int Own(Dictionary<(string World, int X, int Y), ICellGetter> cells) => cells.Keys.Count(k => k.World == "FixtureWorld");
+
+        // DynDOLOD's general mode, "-TVDT -Flat +Border": the border half (32 cells) less its row with data (4) and the flat cell.
+        var shipped = RunWithMode(f, null);
+        Assert.Equal(27, Own(shipped));
+        Assert.All(shipped.Keys.Where(k => k.World == "FixtureWorld"), k => Assert.True(k.X < 4 && k.Y > 0 && (k.X, k.Y) != (2, 5)));
+        // The city is not in the border region; of its two cells the one without data is taken, and it gets the parent's data.
+        Assert.False(shipped.ContainsKey(("FixtureCity", 6, 6)));
+        var all = RunWithMode(f, "All");
+        Assert.Equal(64, Own(all));
+        Assert.Equal(all[("FixtureWorld", 6, 7)].OcclusionData!.Value.ToArray(), shipped[("FixtureCity", 6, 7)].OcclusionData!.Value.ToArray());
+        Assert.Equal(all[("FixtureWorld", 6, 6)].OcclusionData!.Value.ToArray(), all[("FixtureCity", 6, 6)].OcclusionData!.Value.ToArray());
+        Assert.Contains(all[("FixtureWorld", 6, 6)].OcclusionData!.Value.ToArray(), b => b != 0);
+
+        Assert.Equal(63, Own(RunWithMode(f, "-Flat")));
+        Assert.Equal(32, Own(RunWithMode(f, "+Border")));
+        var withData = RunWithMode(f, "+TVDT");
+        Assert.Equal(8, Own(withData)); Assert.All(withData.Keys.Where(k => k.World == "FixtureWorld"), k => Assert.Equal(0, k.Y));
+        Assert.True(withData.ContainsKey(("FixtureCity", 6, 6))); Assert.False(withData.ContainsKey(("FixtureCity", 6, 7)));
+        Assert.Equal(56, Own(RunWithMode(f, "-TVDT")));
+
+        // A worldspace's own mode and its switch in DynDOLOD's settings file.
+        Assert.Equal(28, Own(RunWithMode(f, null, OcclusionWorldRules.Read(["OcclusionMode=All", "OcclusionMode_FixtureWorld=-TVDT +Border"]))));
+        Assert.Empty(RunWithMode(f, null, OcclusionWorldRules.Read(["OcclusionMode=All", "Occlusion_FixtureWorld=0"])));
+        var noCity = RunWithMode(f, null, OcclusionWorldRules.Read(["OcclusionMode=All", "Occlusion_FixtureCity=0"]));
+        Assert.Equal(64, noCity.Count);
+    }
+
+    [Fact]
+    public void AWorldspaceFlaggedAsSmallIsLeftAloneUnlessItIsSwitchedOnByName()
+    {
+        using var f = new TextureFixture();
+        var (master, world) = HillyWorld();
+        world.Flags |= Worldspace.Flag.SmallWorld;
+        master.WriteToBinary(Path.Combine(f.Data, "Skyrim.esm"));
+        File.WriteAllText(f.Plugins, "");
+        Assert.Empty(RunWithMode(f, "All"));
+        Assert.Equal(64, RunWithMode(f, null, OcclusionWorldRules.Read(["OcclusionMode=All", "Occlusion_FixtureWorld=1"])).Count);
     }
 }

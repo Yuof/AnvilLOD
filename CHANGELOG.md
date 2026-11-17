@@ -11,6 +11,9 @@ Versions follow SemVer. Alpha and beta versions are pre-releases.
 - Added saved presets on Overview: save the generation settings under a name, load or delete them, or load a preset file.
 - Added **Import DynDOLOD settings…** on Overview, which reads a preset saved by DynDOLOD or TexGen.
 - Changed the Object LOD buttons: **Balanced preset** and **High quality** are replaced by the new presets, and **Reset options** restores the defaults.
+- Added **Cells to update** (`--occlusion-mode`) for `Occlusion.esp`, with DynDOLOD's occlusion modes. The default follows DynDOLOD: Tamriel gets data for the cells of its border region only. Regenerate `Occlusion.esp`.
+- Changed `Occlusion.esp` to give walled cities the occlusion data of the parent worldspace's cell.
+- Changed `Occlusion.esp` to leave out worldspaces with the Small World flag, and to read `OcclusionMode` and `Occlusion_<worldspace>` from `DynDOLOD_SSE.ini` in the primary resource folder.
 - Fixed buildings and other statics without object bounds disappearing in loaded cells while `Occlusion.esp` is active. `Occlusion.esp` gives them their model's bounds. Regenerate it.
 - Changed `Occlusion.esp` to keep each cell's own max-height data. Cells without any get the bare landscape.
 - Fixed every stage stopping with "Invalid stitching dimensions or colour settings" on a texture rule file it cannot read, such as DynDOLOD's Majestic Mountains rules. The rule is skipped with a warning.
