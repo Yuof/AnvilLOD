@@ -102,7 +102,7 @@ public class LodRulesTests
         Assert.Null(r[1]);
         Assert.Null(r[2]);
         var mapOnly = LodMeshIndex.Build([@"meshes\lod\roads\map\road3way01_lod_4.nif"]).Find(@"meshes\landscape\roads\road3way01.nif")!;
-        Assert.Equal([null, null, null, @"meshes\lod\roads\map\road3way01_lod_4.nif"], mapOnly);
+        Assert.Equal(Levels(null, null, null, @"meshes\lod\roads\map\road3way01_lod_4.nif"), Levels(mapOnly));
         var resolved = new LodMeshResolver(roads, new LodRules(), _ => true).Resolve(null, null, @"meshes\landscape\roads\roadchunkl01.nif", null);
         Assert.Null(resolved.Meshes.Lod8);
 
@@ -120,14 +120,14 @@ public class LodRulesTests
         var idx = LodMeshIndex.Build([@"meshes\lod\rocks\rockpilel01_lod_0.nif", @"meshes\lod\midwoodisle\rockpilel01_lod.nif",
             @"meshes\lod\whiterun\wrwallcap01_lod.nif", @"meshes\lod\whiterun\wrwallcap01_lod_2.nif",
             @"meshes\lod\imperial\impextwall01_lod.nif", @"meshes\lod\imperial\impextwall01_lod_3.nif", @"meshes\lod\farmhouse\farmhouse01_lod.nif"]);
-        Assert.Equal([@"meshes\lod\rocks\rockpilel01_lod_0.nif", null, null, null], idx.Find(@"meshes\landscape\rocks\rockpilel01.nif"));
-        Assert.Equal([@"meshes\lod\whiterun\wrwallcap01_lod.nif", @"meshes\lod\whiterun\wrwallcap01_lod_2.nif", @"meshes\lod\whiterun\wrwallcap01_lod_2.nif", null],
-            idx.Find(@"meshes\architecture\whiterun\wrcitywalls\wrwallcap01.nif"));
-        Assert.Equal([@"meshes\lod\imperial\impextwall01_lod.nif", @"meshes\lod\imperial\impextwall01_lod_3.nif", @"meshes\lod\imperial\impextwall01_lod_3.nif", @"meshes\lod\imperial\impextwall01_lod_3.nif"],
-            idx.Find(@"meshes\dungeons\imperial\exterior\impextwall01.nif"));
+        Assert.Equal(Levels(@"meshes\lod\rocks\rockpilel01_lod_0.nif", null, null, null), Levels(idx.Find(@"meshes\landscape\rocks\rockpilel01.nif")));
+        Assert.Equal(Levels(@"meshes\lod\whiterun\wrwallcap01_lod.nif", @"meshes\lod\whiterun\wrwallcap01_lod_2.nif", @"meshes\lod\whiterun\wrwallcap01_lod_2.nif", null), Levels(idx.Find(@"meshes\architecture\whiterun\wrcitywalls\wrwallcap01.nif")));
+        Assert.Equal(Levels(@"meshes\lod\imperial\impextwall01_lod.nif", @"meshes\lod\imperial\impextwall01_lod_3.nif", @"meshes\lod\imperial\impextwall01_lod_3.nif", @"meshes\lod\imperial\impextwall01_lod_3.nif"), Levels(idx.Find(@"meshes\dungeons\imperial\exterior\impextwall01.nif")));
         var farmhouse = @"meshes\lod\farmhouse\farmhouse01_lod.nif";
-        Assert.Equal([farmhouse, farmhouse, farmhouse, null], idx.Find(@"meshes\architecture\farmhouse\farmhouse01.nif"));
+        Assert.Equal(Levels(farmhouse, farmhouse, farmhouse, null), Levels(idx.Find(@"meshes\architecture\farmhouse\farmhouse01.nif")));
     }
+
+    private static string Levels(params string?[]? levels) => string.Join("|", levels ?? []);
 
     [Fact]
     public void Resolver_prefers_mnam_and_fills_from_named()
