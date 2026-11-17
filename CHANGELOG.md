@@ -4,6 +4,10 @@ Versions follow SemVer. Alpha and beta versions are pre-releases.
 
 ## [Unreleased]
 
+- Fixed terrain generation stopping on landscape textures saved as 8-bit luminance (L8), A8L8 or A8. They are read as grey.
+- Changed the error for a landscape texture that cannot be read to name the texture.
+- Added a check for enabled plugins whose master is not enabled. The check names both; it is an error when grass caching is selected.
+- Changed the error for a missing grass cache to say that **Use generated grass cache for LOD** can be turned off.
 - Fixed a DynDOLOD preset used as the custom rule file giving every object its most detailed LOD mesh at LOD 32. Its LOD 32 rules are used only when the preset has Level32 ticked.
 - Added **High**, **Balanced** and **Performance** presets on Overview and Object LOD. They set DynDOLOD's mesh rules and the texture sizes, light and occlusion quality DynDOLOD and TexGen ship with.
 - Added **Screen** for the presets. **From the game** reads the game's resolution from its settings, as TexGen does.

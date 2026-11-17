@@ -56,7 +56,7 @@ public sealed class GrassGenerationManifest
         var file = ProductPaths.FindFile(folder, FileName);
         if (file is null)
         {
-            if (requireFull) throw new InvalidOperationException("Generate a complete grass cache first: " + folder);
+            if (requireFull) throw new InvalidOperationException("No grass cache in " + folder + ". Generate the grass cache first, or disable 'Use generated grass cache for LOD'.");
             return null;
         }
         RejectLink(file, folder);

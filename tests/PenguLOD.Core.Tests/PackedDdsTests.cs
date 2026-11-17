@@ -34,6 +34,39 @@ public sealed class PackedDdsTests
         return bytes;
     }
 
+    private static byte[] Luminance(int width, int height, byte[] texels, int bits, uint flags, uint l, uint a)
+    {
+        int pitch = width * bits / 8;
+        var bytes = new byte[128 + pitch * height];
+        void Set(int at, uint value) => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(at), value);
+        Set(0, 0x20534444); Set(4, 124); Set(8, 0x100F); Set(12, (uint)height); Set(16, (uint)width); Set(20, (uint)pitch);
+        Set(76, 32); Set(80, flags); Set(88, (uint)bits); Set(92, l); Set(104, a); Set(108, 0x1000);
+        texels.CopyTo(bytes.AsSpan(128));
+        return bytes;
+    }
+
+    [Fact]
+    public void LuminanceAndAlphaOnlyFormatsAreDecodedAsGrey()
+    {
+        // L8 (DDPF_LUMINANCE, 0x20000), as a tester's landscape texture was saved: grey, opaque.
+        var l8 = Luminance(2, 1, [0, 200], 8, 0x20000, 0xFF, 0);
+        var info = DdsFile.ReadInfo(l8);
+        Assert.True(info.Uncompressed); Assert.Equal(8, info.BitsPerPixel); Assert.False(DdsFile.HasAlpha(l8, info));
+        DdsFile.RequireTopMip(l8, info);
+        Assert.Equal(new byte[] { 0, 0, 0, 255, 200, 200, 200, 255 }, DdsFile.DecodeTopMip(l8).Rgba);
+        Assert.Equal(new byte[] { 0, 0, 0, 255, 200, 200, 200, 255 }, TextureImages.Decode(l8).Pixels);
+        Assert.False(DdsAlpha.IsTranslucent(l8));
+
+        // A8L8: grey in the low byte, alpha in the high byte.
+        var a8l8 = Luminance(1, 1, [100, 50], 16, 0x20001, 0xFF, 0xFF00);
+        Assert.Equal(new byte[] { 100, 100, 100, 50 }, DdsFile.DecodeTopMip(a8l8).Rgba);
+        Assert.True(DdsAlpha.IsTranslucent(a8l8));
+
+        // A8 (DDPF_ALPHA): white with the stored alpha.
+        var a8 = Luminance(1, 1, [128], 8, 0x2, 0, 0xFF);
+        Assert.Equal(new byte[] { 255, 255, 255, 128 }, DdsFile.DecodeTopMip(a8).Rgba);
+    }
+
     [Fact]
     public void R5G6B5IsDecodedWithEachChannelScaledToEightBits()
     {

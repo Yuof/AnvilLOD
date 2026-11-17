@@ -68,6 +68,8 @@ public static class PipelineDiagnostics
         {
             plugins=game.PluginsLoaded;version=SksePluginInstaller.GameVersion(game.DataFolder)?.ToString();
             foreach(var missing in game.MissingPlugins)Add("Error","missing-plugin","Enabled plugin is unavailable: "+missing,"Restore the plugin or correct the profile before generating.",missing);
+            // Grass caching (FasterNGIO) stops on a missing master; object LOD and textures do not, so for them it is a warning.
+            foreach(var (plugin,master) in game.MissingMasters)Add(request.Grass is not null?"Error":"Warning","missing-master",$"{plugin} needs {master}, which is not enabled.",$"Enable {master}, or disable {plugin} too. The game does not start with a plugin whose master is missing.",plugin);
             foreach(var warning in game.Warnings)Add("Warning","source-warning",warning,"Check the selected game and profile paths.");
             // A mod manager's virtual Data folder appears and disappears with the game; reads through it stop when it does.
             if(RunEnvironment.RunningGame() is {} running)Add("Warning",RunEnvironment.GameRunningCode,$"The game is running: {running}.",

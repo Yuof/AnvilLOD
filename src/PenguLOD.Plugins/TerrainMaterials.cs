@@ -87,7 +87,13 @@ internal sealed class TerrainTextures(IAssetSource assets, CancellationToken ct)
         if (!assets.TryOpen(path, out var stream)) throw new FileNotFoundException("Missing landscape texture: " + path, path);
         Interlocked.Increment(ref _loads);
         TextureImage raw;
-        using (stream) { using var bytes = new MemoryStream(); stream.CopyTo(bytes); raw = TextureImages.Decode(bytes.ToArray()); }
+        using (stream)
+        {
+            using var bytes = new MemoryStream(); stream.CopyTo(bytes);
+            try { raw = TextureImages.Decode(bytes.ToArray()); }
+            catch (Exception e) when (e is NotSupportedException or InvalidDataException)
+            { throw new InvalidDataException($"Landscape texture {path} cannot be read: {e.Message} Inspect asset precedence on Diagnostics names the mod it comes from.", e); }
+        }
         int factor=1;
         while (raw.Width/factor>512 || raw.Height/factor>512) factor*=2;
         int width=Math.Max(1,raw.Width/factor), height=Math.Max(1,raw.Height/factor);

@@ -57,6 +57,9 @@ public sealed class GameContext : IDisposable
 
     public int PluginsListed { get; }
     public IReadOnlyList<string> MissingPlugins { get; }
+
+    /// <summary>Enabled plugins whose master is not enabled, as (plugin, master). The game does not start with such a plugin, and grass caching stops on it.</summary>
+    public IReadOnlyList<(string Plugin, string Master)> MissingMasters { get; }
     public IReadOnlyList<string> Warnings { get; }
     public int PluginsLoaded => PluginsListed - MissingPlugins.Count;
 
@@ -87,6 +90,10 @@ public sealed class GameContext : IDisposable
 
         PluginsListed = loadOrder.Count;
         MissingPlugins = loadOrder.ListedOrder.Where(l => l.Mod is null).Select(l => l.ModKey.ToString()).ToList();
+        var present = loadOrder.ListedOrder.Select(l => l.ModKey).ToHashSet();
+        MissingMasters = loadOrder.ListedOrder.Where(l => l.Mod is not null)
+            .SelectMany(l => l.Mod!.ModHeader.MasterReferences.Where(m => !present.Contains(m.Master)).Select(m => (l.ModKey.ToString(), m.Master.ToString())))
+            .ToList();
         if (MissingPlugins.Count > 0)
         {
             warnings.Add(
