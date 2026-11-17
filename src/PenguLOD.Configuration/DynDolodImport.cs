@@ -44,24 +44,6 @@ public static class DynDolodImport
         "GrassBillboardsDirect", "GrassBillboardsAmbient", "GrassHDBillboardsDirect", "GrassHDBillboardsAmbient",
     ];
 
-    private static readonly Dictionary<string, string> SettingLabels = new(StringComparer.Ordinal)
-    {
-        [nameof(DesktopSettings.Worldspaces)] = "Worldspaces",
-        [nameof(DesktopSettings.TextureGenStitched)] = "Stitched object textures",
-        [nameof(DesktopSettings.TextureGenBaseSize)] = "Stitch base size",
-        [nameof(DesktopSettings.TextureGenTrees)] = "Tree billboards (textures)",
-        [nameof(DesktopSettings.TextureGenGrass)] = "Grass billboards (textures)",
-        [nameof(DesktopSettings.TextureGenTrunks)] = "Hybrid tree trunk textures",
-        [nameof(DesktopSettings.TextureGenHdViews)] = "HD front and side billboards",
-        [nameof(DesktopSettings.TextureGenMaxSize)] = "Maximum billboard size",
-        [nameof(DesktopSettings.TextureGenUnitsPerPixel)] = "Tree world units per pixel",
-        [nameof(DesktopSettings.TextureGenTreeAmbient)] = "Tree ambient light",
-        [nameof(DesktopSettings.TextureGenTreeDirect)] = "Tree direct light",
-        [nameof(DesktopSettings.TextureGenTrunkAmbient)] = "Trunk ambient light",
-        [nameof(DesktopSettings.TextureGenTrunkDirect)] = "Trunk direct light",
-        [nameof(DesktopSettings.BakePbrScale)] = "PBR scale (textures)",
-    };
-
     /// <summary>Reads the file and applies what it holds. Nothing is changed when the file is not a DynDOLOD or TexGen preset.</summary>
     public static Result Apply(DesktopSettings settings, string file)
     {
@@ -87,25 +69,12 @@ public static class DynDolodImport
         }
         else throw new InvalidDataException("This is not a DynDOLOD or TexGen preset. Choose a file from DynDOLOD's Edit Scripts\\DynDOLOD\\Presets folder.");
 
-        QualityPresets.Apply(settings, preset);
-        if (worldspaces is not null) settings.Worldspaces = worldspaces;
-
-        var changes = new List<string>(); int unchanged = 0;
-        foreach (var (key, value) in preset.Options)
-        {
-            var spec = GenerationOptions.All.Single(o => o.Key == key);
-            var old = before.Options.TryGetValue(key, out var o) ? o : JsonSerializer.SerializeToElement(spec.Default, spec.Default.GetType());
-            if (Same(old, value)) unchanged++; else changes.Add($"{spec.Label}: {Show(old)} → {Show(value)}");
-        }
-        foreach (var (name, value) in preset.Settings)
-        {
-            var property = typeof(DesktopSettings).GetProperty(name)!;
-            var old = JsonSerializer.SerializeToElement(property.GetValue(before), property.PropertyType);
-            if (Same(old, value)) unchanged++; else changes.Add($"{SettingLabels[name]}: {Show(old)} → {Show(value)}");
-        }
+        var changes = QualityPresets.Apply(settings, preset).ToList();
+        int unchanged = preset.Options.Count + preset.Settings.Count - changes.Count;
         if (worldspaces is not null)
         {
             if (before.Worldspaces == worldspaces) unchanged++; else changes.Add($"Worldspaces: {before.Worldspaces} → {worldspaces}");
+            settings.Worldspaces = worldspaces;
         }
         return new Result(kind, changes, unchanged, notImported.ToArray(), rules);
     }
@@ -165,7 +134,8 @@ public static class DynDolodImport
         if (treeHd is not null || grassHd is not null) Setting(nameof(DesktopSettings.TextureGenHdViews), treeHd == true || grassHd == true);
         if (Flag("RenderBillboards") is { } trunks) Setting(nameof(DesktopSettings.TextureGenTrunks), trunks);
         if (Value("BillboardsMaxSize") is { } maxSize && PowerOfTwo(maxSize, 32, 2048)) Setting(nameof(DesktopSettings.TextureGenMaxSize), maxSize);
-        if (Value("BillboardsUnitsPerPixel") is { } units and >= .25m and <= 128) Setting(nameof(DesktopSettings.TextureGenUnitsPerPixel), units);
+        // TexGen stores units per pixel in tenths: 80 is 8.0.
+        if (Value("BillboardsUnitsPerPixel") is { } tenths and >= 3 and <= 1280) Setting(nameof(DesktopSettings.TextureGenUnitsPerPixel), tenths / 10);
 
         // TexGen stores light as a percentage. HD tree billboards have their own pair, used when they are on.
         string tree = treeHd == true ? "TreeHDBillboards" : "TreeBillboards";
@@ -184,16 +154,6 @@ public static class DynDolodImport
 
     private static decimal? Number(string text) =>
         decimal.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : null;
-
-    private static bool Same(JsonElement a, JsonElement b) =>
-        a.ValueKind == JsonValueKind.Number && b.ValueKind == JsonValueKind.Number ? a.GetDecimal() == b.GetDecimal() : JsonElement.DeepEquals(a, b);
-
-    private static string Show(JsonElement value) => value.ValueKind switch
-    {
-        JsonValueKind.True => "on", JsonValueKind.False => "off",
-        JsonValueKind.Number => value.GetDecimal().ToString("0.####", CultureInfo.InvariantCulture),
-        _ => value.GetString() ?? "",
-    };
 
     /// <summary>Sections of an INI file by name, each a key-to-value map, and each section's keys in file order. Comment lines start with ';' or '/'.</summary>
     private static (Dictionary<string, Dictionary<string, string>> Sections, Dictionary<string, List<string>> Order) ReadIni(string file)

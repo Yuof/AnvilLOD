@@ -59,33 +59,51 @@ of the window; those buttons run only that stage.
 ### Presets
 
 **High**, **Balanced** and **Performance** set the values DynDOLOD and TexGen
-ship with, for the settings that have a counterpart there. They pair DynDOLOD's
-mesh rules with the texture sizes the two programs choose for a game resolution:
-High mesh rules with 2160p, Medium with 1440p, Low with 1080p. Which outputs are
-generated, paths, worldspaces and the game source stay as they are. The line under
-the buttons says which preset the current settings match. The same three buttons
-are on **Object LOD**.
+ship with, for the settings that have a counterpart there. The preset names
+DynDOLOD's mesh rules: High, Medium or Low. The texture sizes come from the
+**Screen**, as in TexGen and DynDOLOD, which choose them from the game's resolution.
+Which outputs are generated, paths, worldspaces and the game source stay as they
+are. The activity log lists what a preset changed, and the line under the buttons
+says which preset the current settings match. The same three buttons are on
+**Object LOD**.
 
-| Setting | Performance | Balanced | High | From |
-| --- | --- | --- | --- | --- |
-| Mesh rules preset | Low | Medium | High | DynDOLOD's Low, Medium and High |
-| Stitch base size (Textures) | `256` | `256` | `512` | TexGen base size |
-| Tree world units per pixel (Textures) | `11.8` | `8.85` | `5.9` | TexGen units per pixel |
-| Maximum billboard size (Textures) | `1024` | `1024` | `2048` | TexGen maximum texture size |
-| Atlas cell size | `256` | `256` | `512` | DynDOLOD max tile size full |
-| Maximum standalone LOD texture size | `1024` | `1024` | `2048` | DynDOLOD max tile size LOD |
+**Screen** is **From the game** by default: the resolution is read from the game's
+own settings, SSE Display Tweaks' `Resolution` when one is set, else `iSize H` in
+SkyrimCustom.ini or SkyrimPrefs.ini (the profile's, when Mod Organizer 2 keeps
+them there). Choose a height when the game's settings are not where PenguLOD
+looks, or to generate for another screen.
 
-These are the same in all three:
+| Setting | 720p | 1080p | 1440p | 2160p | From |
+| --- | --- | --- | --- | --- | --- |
+| Stitch base size (Textures) | `128` | `256` | `256` | `512` | TexGen base size |
+| Tree world units per pixel (Textures) | `17` | `11` | `8` | `5.5` | TexGen units per pixel |
+| Maximum billboard size (Textures) | `512` | `1024` | `1024` | `2048` | TexGen maximum texture size |
+| Atlas cell size | `128` | `256` | `256` | `512` | DynDOLOD max tile size full |
+| Maximum standalone LOD texture size | `512` | `1024` | `1024` | `2048` | DynDOLOD max tile size LOD |
+
+At 4320p TexGen uses a base size of `1024` and billboards up to `4096`; PenguLOD's
+largest atlas cell is `512` and its largest billboard `2048`.
+
+These are the same in every preset:
 
 | Setting | Value | From |
 | --- | --- | --- |
 | Minimum tree height / Minimum grass height (Textures) | `256` / `32` | `TexGen_SSE.INI` |
 | Unplaced tree resolution scale (Textures) | `1.7` | `TexGen_SSE.INI` |
-| Tree ambient / direct light (Textures) | `0.6` / `1.35` | TexGen tree billboards |
+| Tree ambient / direct light (Textures) | `0.55` / `1.35` | TexGen tree billboards |
 | Trunk ambient / direct light (Textures) | `1.5` / `0.5` | TexGen rendered billboards |
 | PBR scale (Textures) | `0.65` | TexGen |
 | Samples per cell side (Occlusion) | `2` | DynDOLOD occlusion quality 2 |
 | Visibility radius (Occlusion) | `100` | `DynDOLOD_SSE.ini` |
+| Observer height offset (Occlusion) | `0` | `DynDOLOD_SSE.ini` `OcclusionHeight` |
+
+**DynDOLOD defaults** is the state of a new DynDOLOD and TexGen: Balanced
+(DynDOLOD starts on its Medium rules), and what the two have ticked. It turns on
+tree billboards, dynamic and animated grid objects and `Occlusion.esp`, and the
+stitched, tree and trunk textures. It turns off 3D tree LOD, grass billboard LOD,
+LOD 32, candle and glow rules, window glow, parent-to-city copies and grass
+billboard textures. Terrain underside and seasonal LOD stay as they are: DynDOLOD
+ticks them by what is installed.
 
 PenguLOD's own defaults are not one of the presets: a new setup has a smaller
 billboard limit and minimum grass height than TexGen. Settings without a
@@ -137,7 +155,7 @@ PenguLOD setting.
 | Grass, HD grass | Grass billboards, HD front and side billboards |
 | Rendered billboards | Hybrid tree trunk textures |
 | Billboard max size | Maximum billboard size |
-| Units per pixel | Tree world units per pixel |
+| Units per pixel (stored in tenths) | Tree world units per pixel |
 | Tree and rendered-billboard direct and ambient light | Tree and trunk light |
 | Rendered PBR scale | PBR scale |
 
@@ -226,7 +244,7 @@ Keep defaults for the first comparison, then adjust one control at a time.
 | PBR scale | Brightness scale for calibrated PBR colour. Default `0.65`; lower is darker. |
 | PBR gamma | Adjusts PBR midtones. Default `1.15`; higher darkens midtones, lower brightens them. |
 | PBR occlusion strength | Amount of shading taken from the PBR ambient-occlusion map. Default `0.5`; `0` ignores it, `1` uses its full effect. |
-| Tree ambient light / Tree direct light | Light for tree billboards. Billboards are lit from straight above: ambient reaches every surface, direct light adds to the surfaces that face up. Defaults `0.6` and `1.35`, as in TexGen. More ambient brightens the whole tree; more direct light brightens the tops of crowns and branches. |
+| Tree ambient light / Tree direct light | Light for tree billboards. Billboards are lit from straight above: ambient reaches every surface, direct light adds to the surfaces that face up. Defaults `0.6` and `1.35`; TexGen's are `0.55` and `1.35`, which the presets set. More ambient brightens the whole tree; more direct light brightens the tops of crowns and branches. |
 | Trunk ambient light / Trunk direct light | The same for hybrid tree trunk textures. Defaults `1.5` and `0.5`, as in TexGen; bark faces sideways and gets almost no direct light, so its ambient part is high. |
 | Grass ambient light / Grass direct light | Light for grass billboards. Grass is lit softly from the front and above, on both sides of a blade. Defaults `0.7` and `0.3`. |
 

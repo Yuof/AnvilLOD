@@ -1,6 +1,8 @@
 using Avalonia.Controls;
 using Avalonia.Platform.Storage;
+using PenguLOD.Desktop.Models;
 using PenguLOD.Desktop.Services;
+using PenguLOD.Plugins;
 
 namespace PenguLOD.Desktop;
 
@@ -17,9 +19,13 @@ public sealed partial class MainWindow
         var name = _presetName = new TextBox { Name = "PresetName", Width = 240, PlaceholderText = "Name for a new preset", VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
         RefreshSavedPresets(); UpdatePresetStatus();
         return Card("Presets", Stack(12,
-            QualityPresetButtons(),
+            QualityPresetButtons(
+                Help(Button(QualityPresets.DynDolodDefaults, () => ApplyQualityPreset(QualityPresets.DynDolodDefaults)),
+                    "The state of a new DynDOLOD and TexGen: Balanced, and what the two have ticked. Tree, dynamic and occlusion on; grass LOD, 3D trees, LOD 32, candles, glow rules and window glow off."),
+                Help(Choice("Screen", nameof(DesktopSettings.PresetScreen), QualityPresetScreen.Choices),
+                    "The screen the presets size textures for. From the game reads the resolution in the game's own settings (SkyrimPrefs.ini, SkyrimCustom.ini or SSE Display Tweaks), as TexGen does.")),
             status,
-            Text("High, Balanced and Performance set what DynDOLOD and TexGen ship with: the High, Medium or Low mesh rules, the texture sizes for a 2160p, 1440p or 1080p screen, TexGen's light and DynDOLOD's occlusion quality. A saved preset holds every generation setting. Neither changes paths, worldspaces or the game source.", true),
+            Text("High, Balanced and Performance set what DynDOLOD and TexGen ship with: DynDOLOD's High, Medium or Low mesh rules, the texture sizes the two choose for the screen, TexGen's light and DynDOLOD's occlusion quality. They leave what is generated as it is; DynDOLOD defaults also sets that. A saved preset holds every generation setting. None of them changes paths, worldspaces or the game source.", true),
             Row(saved,
                 Button("Load preset", () => LoadSavedPreset(Selected())),
                 Button("Delete preset", () => DeleteSavedPreset(Selected()))),
@@ -36,9 +42,9 @@ public sealed partial class MainWindow
     /// <summary>The three built-in presets, followed by a page's own buttons. They set texture settings as well as Object LOD options.</summary>
     private Control QualityPresetButtons(params Control[] more) => Row(
     [
-        Help(Button(QualityPresets.High, () => ApplyQualityPreset(QualityPresets.High)), "DynDOLOD's High mesh rules, and the texture sizes TexGen and DynDOLOD choose for a 2160p screen."),
-        Help(Button(QualityPresets.Balanced, () => ApplyQualityPreset(QualityPresets.Balanced)), "DynDOLOD's Medium mesh rules, and the texture sizes TexGen and DynDOLOD choose for a 1440p screen."),
-        Help(Button(QualityPresets.Performance, () => ApplyQualityPreset(QualityPresets.Performance)), "DynDOLOD's Low mesh rules, and the texture sizes TexGen and DynDOLOD choose for a 1080p screen."),
+        Help(Button(QualityPresets.High, () => ApplyQualityPreset(QualityPresets.High)), "DynDOLOD's High mesh rules, with the texture sizes TexGen and DynDOLOD choose for the screen."),
+        Help(Button(QualityPresets.Balanced, () => ApplyQualityPreset(QualityPresets.Balanced)), "DynDOLOD's Medium mesh rules, with the texture sizes TexGen and DynDOLOD choose for the screen."),
+        Help(Button(QualityPresets.Performance, () => ApplyQualityPreset(QualityPresets.Performance)), "DynDOLOD's Low mesh rules, with the texture sizes TexGen and DynDOLOD choose for the screen."),
         .. more,
     ]);
 
@@ -53,14 +59,34 @@ public sealed partial class MainWindow
     private void UpdatePresetStatus()
     {
         if (_presetStatus is null) return;
-        _presetStatus.Text = QualityPresets.Matching(_settings) is { } name
-            ? $"The settings match {name}." : "The settings match no built-in preset.";
+        var heights = _detectedHeight is { } detected ? QualityPresets.ScreenHeights.Prepend(detected) : QualityPresets.ScreenHeights;
+        _presetStatus.Text = QualityPresets.Matching(_settings, heights) is { } match
+            ? $"The settings match {match.Name} for a {match.ScreenHeight}p screen." : "The settings match no built-in preset.";
+    }
+
+    // The game's resolution as last read for a preset, so the status line can name a screen that is not one of the listed heights.
+    private int? _detectedHeight;
+
+    /// <summary>The screen height the presets are made for: the chosen one, or the game's own resolution.</summary>
+    internal (int Height, string? Source) PresetScreenHeight()
+    {
+        if (QualityPresetScreen.Height(_settings.PresetScreen) is { } chosen) return (chosen, null);
+        var found = GameResolution.Detect(RequestFactory.Game(_settings))
+            ?? throw new InvalidOperationException("The game's resolution was not found in SkyrimPrefs.ini, SkyrimCustom.ini or SSE Display Tweaks. Choose a screen beside the presets.");
+        _detectedHeight = found.Height;
+        return (found.Height, found.Source);
     }
 
     internal void ApplyQualityPreset(string name)
     {
-        QualityPresets.Apply(_settings, QualityPresets.BuiltIn(name)); ScheduleSave();
-        Notice($"{name} preset applied to Textures and Object LOD. Paths, worldspaces and what is generated were kept.");
+        var (height, source) = PresetScreenHeight();
+        bool shipped = name == QualityPresets.DynDolodDefaults;
+        var changes = QualityPresets.Apply(_settings, shipped ? QualityPresets.Shipped(height) : QualityPresets.BuiltIn(name, height));
+        ScheduleSave(); UpdatePresetStatus();
+        _messages.Enqueue($"{name} applied for a {height}p screen" + (source is null ? "" : $" (read from {source})") + (changes.Count == 0 ? ": nothing to change." : ":"));
+        foreach (string change in changes) _messages.Enqueue("  " + change);
+        Notice($"{name} applied for a {height}p screen" + (source is null ? "" : $", read from {source}") + $": {changes.Count} settings changed"
+            + (changes.Count > 0 ? ", listed in the activity log. " : ". ") + (shipped ? "Paths and worldspaces were kept." : "Paths, worldspaces and what is generated were kept."));
     }
 
     internal void SavePreset(string name)
