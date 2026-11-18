@@ -25,6 +25,9 @@ public static partial class GrassGeneration
         var options = req.Game with { ExcludeFolder = req.OutputFolder, ExtraLooseRoots = InputRoots };
         using var game = GameContext.Open(options, progress);
         if (game.MissingPlugins.Count > 0) throw new InvalidOperationException("Enabled plugins are missing: " + string.Join(", ", game.MissingPlugins.Take(10)));
+        if (game.MissingMasters.Count > 0)
+            throw new InvalidOperationException("Enabled plugins need a master that is not enabled: " + string.Join(", ", game.MissingMasters.Take(10).Select(m => $"{m.Plugin} needs {m.Master}"))
+                + ". Enable the master, or disable the plugin that needs it.");
         var runtime = RuntimeFormIds.FromLoadOrder(game.LoadOrder);
         var worlds = game.LoadOrder.PriorityOrder.Worldspace().WinningOverrides()
             .Where(w => !w.IsDeleted && !string.IsNullOrEmpty(w.EditorID)).ToArray();

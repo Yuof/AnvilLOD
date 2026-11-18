@@ -4,7 +4,7 @@ using PenguLOD.Textures.Bc;
 namespace PenguLOD.Textures.Dds;
 
 /// <summary>
-/// Minimal DDS reader/writer: 2D textures, BC1/2/3/4/5/7 and 16/24/32-bit uncompressed, legacy or DX10 headers.
+/// Minimal DDS reader/writer: 2D textures, BC1/2/3/4/5/7, 16/24/32-bit uncompressed and 8/16-bit luminance or alpha, legacy or DX10 headers.
 /// Reading decodes the top mip to RGBA8; writing produces BC7 (DX10 header) with a full mip chain.
 /// </summary>
 public static class DdsFile
@@ -12,7 +12,9 @@ public static class DdsFile
     private const uint Magic = 0x20534444; // "DDS "
     private const int HeaderSize = 124;
 
-    public sealed record Info(int Width, int Height, int MipCount, BcFormat Format, bool Uncompressed, bool Bgra, int DataOffset, int DxgiFormat, int BitsPerPixel = 32);
+    /// <param name="Luminance">A legacy luminance or alpha-only format (L8, A8L8, A8): one grey value and/or alpha per texel.</param>
+    public sealed record Info(int Width, int Height, int MipCount, BcFormat Format, bool Uncompressed, bool Bgra, int DataOffset, int DxgiFormat, int BitsPerPixel = 32,
+        bool Luminance = false);
 
     public static Info ReadInfo(ReadOnlySpan<byte> file)
     {
@@ -61,6 +63,9 @@ public static class DdsFile
                 default: throw new NotSupportedException($"DDS FourCC '{cc}' is not supported.");
             }
         }
+        // DDPF_LUMINANCE (L8, A8L8) and DDPF_ALPHA (A8), as some older landscape and mod textures are saved.
+        if ((pfFlags & (0x20000 | 0x2)) != 0 && bitCount is 8 or 16)
+            return new(width, height, mips, BcFormat.None, true, false, offset, 0, bitCount, Luminance: true);
         if (bitCount == 32)
             return new(width, height, mips, BcFormat.None, true, rMask == 0x00FF0000, offset, rMask == 0x00FF0000 ? 87 : 28);
         if (bitCount is 16 or 24 && (pfFlags & 0x40) != 0)
@@ -78,7 +83,7 @@ public static class DdsFile
         if (info.BitsPerPixel == 24 || info.DxgiFormat is 88 or 85) return false;
         if (info.DataOffset != 4 + HeaderSize) return true;
         uint pfFlags = BinaryPrimitives.ReadUInt32LittleEndian(file[80..]), aMask = BinaryPrimitives.ReadUInt32LittleEndian(file[104..]);
-        return (pfFlags & 1) != 0 && aMask != 0;
+        return (pfFlags & (info.Luminance ? 0x3u : 0x1u)) != 0 && aMask != 0;   // DDPF_ALPHAPIXELS, or DDPF_ALPHA for A8
     }
 
     /// <summary>Channel masks of a 16- or 24-bit packed format: from the legacy header, or implied by a DXGI format.
@@ -99,6 +104,38 @@ public static class DdsFile
         var data = file.AsSpan(info.DataOffset);
         if (info.Uncompressed)
         {
+            if (info.Luminance)
+            {
+                int size = info.BitsPerPixel / 8;
+                int pitch = checked(info.Width * size);
+                if ((BinaryPrimitives.ReadUInt32LittleEndian(file.AsSpan(8)) & 8) != 0)
+                    pitch = BinaryPrimitives.ReadInt32LittleEndian(file.AsSpan(20));
+                if (pitch < info.Width * size || (long)pitch * info.Height > data.Length)
+                    throw new InvalidDataException($"Truncated or invalid {info.BitsPerPixel}-bit DDS rows.");
+                uint lMask = BinaryPrimitives.ReadUInt32LittleEndian(file.AsSpan(92)), aMask = HasAlpha(file, info) ? BinaryPrimitives.ReadUInt32LittleEndian(file.AsSpan(104)) : 0;
+                uint limit = size == 1 ? 0xffu : 0xffffu;
+                if (lMask > limit || aMask > limit || (lMask == 0 && aMask == 0)) throw new InvalidDataException($"Invalid {info.BitsPerPixel}-bit DDS channel mask.");
+                static byte Value(uint pixel, uint mask)
+                {
+                    int shift = System.Numerics.BitOperations.TrailingZeroCount(mask);
+                    uint max = mask >> shift;
+                    return (byte)((((pixel & mask) >> shift) * 255UL + max / 2) / max);
+                }
+                var grey = new byte[checked(info.Width * info.Height * 4)];
+                for (int y = 0; y < info.Height; y++)
+                {
+                    PenguLOD.Core.Pipeline.RunLimits.Check();
+                    for (int x = 0; x < info.Width; x++)
+                    {
+                        int src = y * pitch + x * size, dst = (y * info.Width + x) * 4;
+                        uint pixel = size == 1 ? data[src] : (uint)(data[src] | data[src + 1] << 8);
+                        byte l = lMask == 0 ? (byte)255 : Value(pixel, lMask);   // A8: white with the stored alpha
+                        grey[dst] = grey[dst + 1] = grey[dst + 2] = l;
+                        grey[dst + 3] = aMask == 0 ? (byte)255 : Value(pixel, aMask);
+                    }
+                }
+                return (grey, info.Width, info.Height, info);
+            }
             if (info.BitsPerPixel is 16 or 24)
             {
                 int size = info.BitsPerPixel / 8;
