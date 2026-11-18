@@ -4,6 +4,7 @@ Versions follow SemVer. Alpha and beta versions are pre-releases.
 
 ## [Unreleased]
 
+- Changed the help for **Use generated grass cache for LOD** and the Skyrim VR grass cache error to say how to use a grass cache installed as a mod.
 - Fixed terrain generation failing when a selected worldspace has no landscape or existing terrain. It is skipped with a warning, and the error for a worldspace that does fail names it.
 - Fixed terrain generation stopping on landscape textures saved as 8-bit luminance (L8), A8L8 or A8. They are read as grey.
 - Changed the error for a landscape texture that cannot be read to name the texture.
