@@ -2,33 +2,35 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
-## [Unreleased]
+## [0.6.0-beta.6] - 2026-11-17
 
-- Changed the help for **Use generated grass cache for LOD** and the Skyrim VR grass cache error to say how to use a grass cache installed as a mod.
-- Fixed terrain generation failing when a selected worldspace has no landscape or existing terrain. It is skipped with a warning, and the error for a worldspace that does fail names it.
-- Fixed terrain generation stopping on landscape textures saved as 8-bit luminance (L8), A8L8 or A8. They are read as grey.
-- Changed the error for a landscape texture that cannot be read to name the texture.
+Regenerate object LOD, including `Occlusion.esp`.
+
 - Added a check for enabled plugins whose master is not enabled. The check names both; it is an error when grass caching is selected.
-- Changed the error for a missing grass cache to say that **Use generated grass cache for LOD** can be turned off.
-- Fixed a DynDOLOD preset used as the custom rule file giving every object its most detailed LOD mesh at LOD 32. Its LOD 32 rules are used only when the preset has Level32 ticked.
 - Added **High**, **Balanced** and **Performance** presets on Overview and Object LOD. They set DynDOLOD's mesh rules and the texture sizes, light and occlusion quality DynDOLOD and TexGen ship with.
 - Added **Screen** for the presets. **From the game** reads the game's resolution from its settings, as TexGen does.
 - Added **DynDOLOD defaults** on Overview, which also sets what a new DynDOLOD and TexGen have ticked.
 - Added saved presets on Overview: save the generation settings under a name, load or delete them, or load a preset file.
 - Added **Import DynDOLOD settings…** on Overview, which reads a preset saved by DynDOLOD or TexGen.
-- Changed the Object LOD buttons: **Balanced preset** and **High quality** are replaced by the new presets, and **Reset options** restores the defaults.
 - Added **Cells to update** (`--occlusion-mode`) for `Occlusion.esp`, with DynDOLOD's occlusion modes. The default follows DynDOLOD: Tamriel gets data for the cells of its border region only. Regenerate `Occlusion.esp`.
+- Added **Leave grass to Grass Optimizations** (`--cs-grass-only`), off by default. With Community Shaders' Grass Optimizations installed, grass is left out of the LOD blocks.
+- Changed the help for **Use generated grass cache for LOD** and the Skyrim VR grass cache error to say how to use a grass cache installed as a mod.
+- Changed the error for a landscape texture that cannot be read to name the texture.
+- Changed the error for a missing grass cache to say that **Use generated grass cache for LOD** can be turned off.
+- Changed the Object LOD buttons: **Balanced preset** and **High quality** are replaced by the new presets, and **Reset options** restores the defaults.
 - Changed `Occlusion.esp` to give walled cities the occlusion data of the parent worldspace's cell.
 - Changed `Occlusion.esp` to leave out worldspaces with the Small World flag, and to read `OcclusionMode` and `Occlusion_<worldspace>` from `DynDOLOD_SSE.ini` in the primary resource folder.
-- Fixed buildings and other statics without object bounds disappearing in loaded cells while `Occlusion.esp` is active. `Occlusion.esp` gives them their model's bounds. Regenerate it.
 - Changed `Occlusion.esp` to keep each cell's own max-height data. Cells without any get the bare landscape.
+- Changed the error for a mod chosen as a resource folder to say which folder to choose: the DynDOLOD program folder, not the DynDOLOD Resources mod.
+- Changed the resource pack guide to say what the primary resource folder is for.
+- Fixed terrain generation failing when a selected worldspace has no landscape or existing terrain. It is skipped with a warning, and the error for a worldspace that does fail names it.
+- Fixed terrain generation stopping on landscape textures saved as 8-bit luminance (L8), A8L8 or A8. They are read as grey.
+- Fixed a DynDOLOD preset used as the custom rule file giving every object its most detailed LOD mesh at LOD 32. Its LOD 32 rules are used only when the preset has Level32 ticked.
+- Fixed buildings and other statics without object bounds disappearing in loaded cells while `Occlusion.esp` is active. `Occlusion.esp` gives them their model's bounds. Regenerate it.
 - Fixed every stage stopping with "Invalid stitching dimensions or colour settings" on a texture rule file it cannot read, such as DynDOLOD's Majestic Mountains rules. The rule is skipped with a warning.
 - Fixed object LOD failing with "Merged LOD shape has conflicting full textures" or "Alternate texture is ambiguous". The shape keeps its LOD model's texture and a warning names it.
 - Fixed a finished build being lost on Windows when the move into place is refused. The move is tried again for two minutes, and a build that still cannot be published is kept.
-- Changed the error for a mod chosen as a resource folder to say which folder to choose: the DynDOLOD program folder, not the DynDOLOD Resources mod.
-- Changed the resource pack guide to say what the primary resource folder is for.
 - Fixed rebuilt recipe atlases being too bright with **PBR object LOD** on. A tile taken from a PBR albedo is converted like other PBR LOD textures. Regenerate object LOD.
-- Added **Leave grass to Grass Optimizations** (`--cs-grass-only`), off by default. With Community Shaders' Grass Optimizations installed, grass is left out of the LOD blocks.
 
 ## [0.6.0-beta.5] - 2026-11-16
 
