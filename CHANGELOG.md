@@ -2,6 +2,10 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
+## [Unreleased]
+
+- Fixed object LOD stopping with "Unexpected trailing grass cache data" on a grass cache installed as a mod. Installed caches are read as the game reads them, and a cache file that cannot be read is named.
+
 ## [0.6.0-beta.6] - 2026-11-17
 
 Regenerate object LOD, including `Occlusion.esp`.
