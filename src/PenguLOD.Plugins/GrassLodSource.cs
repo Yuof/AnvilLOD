@@ -175,7 +175,9 @@ public sealed class GrassLodSource : ISyntheticMeshSource
             bytes = ms.ToArray();
         }
 
-        var types = GrassCache.Read(bytes);
+        IReadOnlyList<GrassCacheType> types;
+        try { types = GrassCache.Read(bytes); }
+        catch (InvalidDataException e) { throw Unreadable(cache, e); }
         GrassCache.TryParseFileName(GamePath.GetFileName(cache), out _, out int x, out int y, out _);
         var origin = new Vector3(x * CellCoord.CellSize, y * CellCoord.CellSize, 0);
 
@@ -189,6 +191,9 @@ public sealed class GrassLodSource : ISyntheticMeshSource
         }
         return GrassPatchBuilder.Build(path, origin, withBillboards, Math.Min(1f, _density * densityMul), _sizeScale * sizeMul, _top, _bottom, PenguLOD.Core.Lod.LodLayers.GrassTiers);
     }
+
+    private static InvalidDataException Unreadable(string path, Exception e) => new(
+        $"Grass cache {path} cannot be read: {e.Message} Inspect asset precedence on Diagnostics names the mod it comes from; regenerate or remove that cache.", e);
 
     private GrassBillboard? FindBillboard(string model, uint runtimeId, bool record = true)
     {
@@ -370,9 +375,12 @@ public sealed class GrassLodSource : ISyntheticMeshSource
         {
             RunLimits.Check();
             if (!_assets.TryOpen(path, out var stream)) throw new FileNotFoundException("Grass cache disappeared: " + path);
+            IReadOnlyList<GrassCacheTypeInfo> types;
             using (stream)
-                foreach (var type in GrassCacheValidation.ReadTypes(stream, RunLimits.Parallel().CancellationToken))
-                    if (type.Instances > 0) required.Add((NormalizeModel(type.Model), type.RuntimeFormId));
+                try { types = GrassCacheValidation.ReadTypes(stream, RunLimits.Parallel().CancellationToken); }
+                catch (Exception e) when (e is InvalidDataException or EndOfStreamException) { throw Unreadable(path, e); }
+            foreach (var type in types)
+                if (type.Instances > 0) required.Add((NormalizeModel(type.Model), type.RuntimeFormId));
             if (++inspected % 256 == 0) progress?.Report($"Grass atlas: inspected {inspected:N0}/{_atlasCaches.Count:N0} cache files...");
         }
         progress?.Report($"Grass atlas: resolving {required.Count:N0} cached grass types.");

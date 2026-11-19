@@ -60,7 +60,9 @@ public static partial class GrassCache
         {
             int len = (int)U32(d, ref p);
             if (len <= 0 || len > 1024 || p + len > d.Length) throw new InvalidDataException("Bad model string.");
-            var model = Encoding.ASCII.GetString(d.Slice(p, len)).TrimEnd('\0');
+            var path = d.Slice(p, len);
+            int nul = path.IndexOf((byte)0);
+            var model = Encoding.ASCII.GetString(nul < 0 ? path : path[..nul]);   // up to the first NUL, as ReadTypes and the game read it
             p += len;
             p += 4; // float, meaning unknown
             uint formId = U32(d, ref p);

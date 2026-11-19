@@ -91,9 +91,35 @@ public sealed class GrassAtlasInputTests
         using var streaming = new CountingStream(bytes, false);
         Assert.Equal(types, GrassCacheValidation.ReadTypes(streaming));
         Assert.Throws<EndOfStreamException>(() => GrassCacheValidation.ReadTypes(new MemoryStream(bytes[..^1])));
-        Assert.Throws<InvalidDataException>(() => GrassCacheValidation.ReadTypes(new MemoryStream([..bytes, 1])));
+        Assert.Equal(types, GrassCacheValidation.ReadTypes(new MemoryStream([..bytes, 1])));   // bytes after the last type are not read
         using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
         Assert.Throws<OperationCanceledException>(() => GrassCacheValidation.ReadTypes(new MemoryStream(bytes), cancelled.Token));
+    }
+
+    [Fact]
+    public void AnInstalledCacheIsReadAsTheGameReadsIt()
+    {
+        // A tester's cache installed as a mod stopped object LOD with "Unexpected trailing grass cache data". The game, FasterNGIO
+        // and the blade reader read only the types a file declares; caches made in game or by other tools can also have blades of
+        // another size and a model path padded with NULs.
+        var trailing = (byte[])[.. Cache((@"grass\a.nif", 17, 3)), .. new byte[64]];
+        Assert.Equal(3, Assert.Single(GrassCacheValidation.ReadTypes(new MemoryStream(trailing))).Instances);
+        Assert.Equal(3, Assert.Single(GrassCacheValidation.ReadTypes(new CountingStream(trailing, false))).Instances);
+        Assert.Equal(3, Assert.Single(GrassCache.Read(trailing)).Instances.Count);
+        Assert.Throws<InvalidDataException>(() => GrassCacheValidation.Inspect(new MemoryStream(trailing)));   // PenguLOD's own output stays strict
+
+        using var bytes = new MemoryStream(); using var w = new BinaryWriter(bytes);
+        w.Write(1); byte[] model = Encoding.ASCII.GetBytes(@"grass\b.nif" + "\0\0\0"); w.Write(model.Length); w.Write(model);
+        w.Write(1f); w.Write(19u); w.Write(new byte[] { 1, 1, 0 }); w.Write(1);
+        for (int i = 0; i < 7; i++) w.Write(0f); w.Write(2); w.Write(14);
+        for (int i = 0; i < 2 * 14; i++) w.Write((Half)(i % 14 is 3 or 4 ? 1 : 0));
+        var fourteen = bytes.ToArray();
+        var type = Assert.Single(GrassCacheValidation.ReadTypes(new MemoryStream(fourteen)));
+        Assert.Equal((@"grass\b.nif", 19u, 2L), (type.Model, type.RuntimeFormId, type.Instances));
+        Assert.Equal(type.Instances, Assert.Single(GrassCacheValidation.ReadTypes(new CountingStream(fourteen, false))).Instances);
+        var blades = Assert.Single(GrassCache.Read(fourteen));
+        Assert.Equal((@"grass\b.nif", 2), (blades.Model, blades.Instances.Count));
+        Assert.ThrowsAny<Exception>(() => GrassCacheValidation.Inspect(new MemoryStream(fourteen)));   // padded path and 14 half floats: not PenguLOD's output
     }
 
     private static byte[] Cache(params (string Model, uint Id, int Count)[] types)
