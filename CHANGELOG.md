@@ -2,7 +2,7 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
-## [Unreleased]
+## [0.6.0-beta.7] - 2026-11-18
 
 - Fixed object LOD stopping with "Unexpected trailing grass cache data" on a grass cache installed as a mod. Installed caches are read as the game reads them, and a cache file that cannot be read is named.
 

@@ -9,7 +9,7 @@ PenguLOD generates the distant scenery (LOD) for Skyrim SE, AE and VR: terrain, 
 trees and grass, the textures they use, and the grass cache. It is available for Linux and
 Windows and works with Mod Organizer 2 and Vortex.
 
-**Current version: 0.6.0-beta.6**
+**Current version: 0.6.0-beta.7**
 
 ## Install
 
