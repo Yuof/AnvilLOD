@@ -28,6 +28,8 @@ public sealed class VirtualDataIndex
     /// <summary>Mods with folders that differ only in case ("meshes" and "Meshes"), as "mod: folder, folder". Their files are merged.</summary>
     public IReadOnlyList<string> CaseConflicts { get; private init; } = [];
     private IReadOnlyList<string> _indexedRoots = [];
+    // Amethyst file rules per layer (null where files land as they are), parallel to Layers.
+    private IReadOnlyList<AmethystLayerRules?> _rules = [];
 
     private VirtualDataIndex(IReadOnlyList<string> layers, Dictionary<string, string> root,
         Dictionary<string, string> loose, TimeSpan time, int missing)
@@ -51,7 +53,7 @@ public sealed class VirtualDataIndex
         int missing = 0;
         foreach (var mod in profile.EnabledModsLowToHigh)
         {
-            var dir = GamePath.ResolveExisting(inst.ModsFolder, mod) ?? Path.Combine(inst.ModsFolder, mod);
+            var dir = GamePath.ResolveExisting(profile.ModsFolder, mod) ?? Path.Combine(profile.ModsFolder, mod);
             if ((exclude is not null && HostPath.Canonical(dir) == HostPath.Canonical(exclude))
                 || (excludeFolders?.Any(p => HostPath.Canonical(dir) == HostPath.Canonical(p)) ?? false))
             {
@@ -61,11 +63,14 @@ public sealed class VirtualDataIndex
             if (Directory.Exists(dir)) layers.Add(dir);
             else missing++;
         }
-        if (Directory.Exists(inst.OverwriteFolder)) layers.Add(inst.OverwriteFolder);
+        if (Directory.Exists(profile.OverwriteFolder)) layers.Add(profile.OverwriteFolder);
+        var rules = layers.Select((l, i) => i == 0 ? null : profile.LayerRules(l)).ToArray();
 
         // Enumerate every layer in parallel, then merge in priority order.
         var perLayer = new (List<KeyValuePair<string, string>> Root, List<KeyValuePair<string, string>> Loose, List<string> Conflicts)[layers.Count];
-        Parallel.For(0, layers.Count, RunLimits.Parallel(), i => perLayer[i] = ScanLayer(layers[i], looseRoots, inst.SkipDirectories));
+        Parallel.For(0, layers.Count, RunLimits.Parallel(), i => perLayer[i] = rules[i] is { } r
+            ? ScanRuledLayer(layers[i], r, looseRoots, inst.SkipDirectories)
+            : ScanLayer(layers[i], looseRoots, inst.SkipDirectories));
 
         var root = new Dictionary<string, string>(StringComparer.Ordinal);
         var loose = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -80,7 +85,48 @@ public sealed class VirtualDataIndex
             ExcludedLayer = excluded,
             CaseConflicts = perLayer.SelectMany(p => p.Conflicts).ToArray(),
             _indexedRoots = looseRoots.Select(r => r.Replace('/', '\\').Trim('\\').ToLowerInvariant() + "\\").ToList(),
+            _rules = rules,
         };
+    }
+
+    /// <summary>
+    /// A layer whose Amethyst rules move or leave out files: every file is walked, mapped to where it lands in Data, and kept when
+    /// that is the Data root or under an indexed root.
+    /// </summary>
+    private static (List<KeyValuePair<string, string>>, List<KeyValuePair<string, string>>, List<string>) ScanRuledLayer(
+        string layer, AmethystLayerRules rules, IReadOnlyCollection<string> looseRoots, IReadOnlySet<string> skipDirs)
+    {
+        var root = new List<KeyValuePair<string, string>>();
+        var loose = new List<KeyValuePair<string, string>>();
+        var prefixes = looseRoots.Select(r => r.Replace('/', '\\').Trim('\\').ToLowerInvariant() + "\\").ToArray();
+        var options = new EnumerationOptions { IgnoreInaccessible = true, RecurseSubdirectories = false };
+        var stack = new Stack<(string Dir, string Raw)>();
+        stack.Push((layer, ""));
+        try
+        {
+            while (stack.Count > 0)
+            {
+                var (d, raw) = stack.Pop();
+                foreach (var f in Directory.EnumerateFiles(d, "*", options))
+                {
+                    var file = Path.GetFileName(f);
+                    if (file.EndsWith(".mohidden", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (rules.Map(raw + file.ToLowerInvariant()) is not { } mapped) continue;
+                    var key = mapped.Replace('/', '\\');
+                    if (!key.Contains('\\')) root.Add(new(key, f));
+                    else if (prefixes.Any(p => key.StartsWith(p, StringComparison.Ordinal))) loose.Add(new(key, f));
+                }
+                foreach (var s in Directory.EnumerateDirectories(d, "*", options))
+                {
+                    var n = Path.GetFileName(s);
+                    if (skipDirs.Contains(n) || n.EndsWith(".mohidden", StringComparison.OrdinalIgnoreCase)) continue;
+                    stack.Push((s, raw + n.ToLowerInvariant() + "/"));
+                }
+            }
+        }
+        catch (DirectoryNotFoundException) { }
+        catch (UnauthorizedAccessException) { }
+        return (root, loose, []);
     }
 
     private static (List<KeyValuePair<string, string>>, List<KeyValuePair<string, string>>, List<string>) ScanLayer(
@@ -176,6 +222,18 @@ public sealed class VirtualDataIndex
             if (key.StartsWith(r, StringComparison.Ordinal)) return null;
         for (int i = Layers.Count - 1; i >= 0; i--)
         {
+            if (i < _rules.Count && _rules[i] is { } rules)
+            {
+                // The file can come from any path the layer's rules map to it.
+                var mapped = key.Replace('\\', '/');
+                foreach (var source in rules.Sources(mapped))
+                {
+                    if (rules.Map(source) != mapped) continue;
+                    var found = GamePath.ResolveAllExisting(Layers[i], source.Replace('/', '\\')).LastOrDefault(File.Exists);
+                    if (found is not null && !File.Exists(found + ".mohidden")) return found;
+                }
+                continue;
+            }
             // Same rule as the index: of case variants within one layer, the last in ordinal order wins.
             var full = GamePath.ResolveAllExisting(Layers[i], key).LastOrDefault(File.Exists);
             if (full is not null && !File.Exists(full + ".mohidden")) return full;

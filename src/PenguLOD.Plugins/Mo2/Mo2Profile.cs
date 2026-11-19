@@ -21,12 +21,34 @@ public sealed class Mo2Profile
 
     public bool UsesLocalInis { get; }
 
+    /// <summary>The folder the profile's mods are in: the instance's, or for an Amethyst profile with its own mods, the profile's.</summary>
+    public string ModsFolder { get; }
+    public string OverwriteFolder { get; }
+
+    /// <summary>For an Amethyst profile: how it changes where each mod's files land. Null for MO2.</summary>
+    public AmethystProfileRules? AmethystRules { get; }
+
+    /// <summary>Enabled Amethyst mods left out because their separator deploys them somewhere other than Data.</summary>
+    public IReadOnlyList<string> RoutedElsewhere { get; } = [];
+
+    /// <summary>The folder the profile's local INIs are in: MO2 keeps them in the profile, Amethyst in its "ini files" subfolder.</summary>
+    public string LocalIniFolder => _iniFolder;
+    private readonly string _iniFolder;
+
     /// <summary>The folders of the enabled mods that exist on disk, plus Overwrite (lowest priority first, Overwrite last).</summary>
     public IReadOnlyList<string> EnabledModFolders()
     {
-        var folders = EnabledModsLowToHigh.Select(m => GamePath.ResolveExisting(Instance.ModsFolder, m)).OfType<string>().Where(Directory.Exists).ToList();
-        if (Directory.Exists(Instance.OverwriteFolder)) folders.Add(Instance.OverwriteFolder);
+        var folders = EnabledModsLowToHigh.Select(m => GamePath.ResolveExisting(ModsFolder, m)).OfType<string>().Where(Directory.Exists).ToList();
+        if (Directory.Exists(OverwriteFolder)) folders.Add(OverwriteFolder);
         return folders;
+    }
+
+    /// <summary>The Amethyst file rules of one layer (a mod folder or Overwrite), or null when its files land as they are.</summary>
+    public AmethystLayerRules? LayerRules(string layer)
+    {
+        if (AmethystRules is null) return null;
+        string name = HostPath.Canonical(layer) == HostPath.Canonical(OverwriteFolder) ? AmethystStaging.OverwriteName : Path.GetFileName(Path.TrimEndingDirectorySeparator(layer));
+        return AmethystRules.For(name, layer);
     }
 
     /// <summary>Plugins ticked in plugins.txt. Base masters and Skyrim.ccc entries are implicit and may legitimately be absent.</summary>
@@ -40,8 +62,24 @@ public sealed class Mo2Profile
         Instance = instance;
         Name = name;
         Folder = folder;
-        EnabledModsLowToHigh = ReadModList(Path.Combine(folder, "modlist.txt"));
-        UsesLocalInis = ReadLocalSettingsFlag(Path.Combine(folder, "settings.ini"));
+        ModsFolder = instance.ModsFolder;
+        OverwriteFolder = instance.OverwriteFolder;
+        _iniFolder = folder;
+        if (instance.Amethyst is { } amethyst)
+        {
+            var rules = AmethystRules = AmethystProfileRules.Read(folder);
+            if (rules.ProfileSpecificMods) { ModsFolder = Path.Combine(folder, "mods"); OverwriteFolder = Path.Combine(folder, "overwrite"); }
+            var routed = new List<string>();
+            EnabledModsLowToHigh = ReadModList(Path.Combine(folder, "modlist.txt"), amethyst: true, rules.RoutedSeparators, routed);
+            RoutedElsewhere = routed;
+            _iniFolder = Path.Combine(folder, "ini files");
+            UsesLocalInis = amethyst.ProfileIniFiles && Directory.Exists(_iniFolder);
+        }
+        else
+        {
+            EnabledModsLowToHigh = ReadModList(Path.Combine(folder, "modlist.txt"));
+            UsesLocalInis = ReadLocalSettingsFlag(Path.Combine(folder, "settings.ini"));
+        }
         EnabledPlugins = ReadPlugins(folder, instance.GamePath, out var explicitSet);
         ExplicitlyEnabled = explicitSet;
     }
@@ -50,23 +88,33 @@ public sealed class Mo2Profile
     {
         var folder = Path.Combine(instance.ProfilesFolder, name);
         if (!File.Exists(Path.Combine(folder, "modlist.txt")))
-            throw new DirectoryNotFoundException($"MO2 profile \"{name}\" not found in {instance.ProfilesFolder}.");
+            throw new DirectoryNotFoundException($"{(instance.Amethyst is null ? "MO2" : "Amethyst")} profile \"{name}\" not found in {instance.ProfilesFolder}.");
         return new Mo2Profile(instance, name, folder);
     }
 
     /// <summary>
     /// modlist.txt is written highest priority first. "+" = enabled mod, "-" = disabled,
     /// "*" = unmanaged (DLC/CC already in the game Data folder). Separators end in "_separator".
+    /// <para>Amethyst writes the same format, with two differences: "*" is an enabled mod that cannot be switched off, and a
+    /// separator can deploy the mods listed after it (until the next separator) somewhere other than Data. Those are left out and
+    /// listed in <paramref name="routedElsewhere"/>.</para>
     /// </summary>
-    internal static List<string> ReadModList(string path)
+    internal static List<string> ReadModList(string path, bool amethyst = false, IReadOnlySet<string>? routedSeparators = null, List<string>? routedElsewhere = null)
     {
         var enabledHighToLow = new List<string>();
+        bool routed = false;
         foreach (var raw in File.ReadLines(path))
         {
             var line = raw.TrimEnd();
-            if (line.Length < 2 || line[0] != '+') continue;
+            if (line.Length < 2) continue;
             var name = line[1..];
-            if (name.EndsWith("_separator", StringComparison.OrdinalIgnoreCase)) continue;
+            if (name.EndsWith("_separator", StringComparison.OrdinalIgnoreCase))
+            {
+                routed = amethyst && routedSeparators?.Contains(name) == true;
+                continue;
+            }
+            if (line[0] != '+' && !(amethyst && line[0] == '*')) continue;
+            if (routed) { routedElsewhere?.Add(name); continue; }
             enabledHighToLow.Add(name);
         }
         enabledHighToLow.Reverse();
@@ -148,8 +196,8 @@ public sealed class Mo2Profile
         var candidates = new List<string>();
         if (UsesLocalInis)
         {
-            candidates.Add(Path.Combine(Folder, "skyrimcustom.ini"));
-            candidates.Add(Path.Combine(Folder, "skyrim.ini"));
+            candidates.Add(GamePath.ResolveExisting(_iniFolder, "skyrimcustom.ini") ?? Path.Combine(_iniFolder, "skyrimcustom.ini"));
+            candidates.Add(GamePath.ResolveExisting(_iniFolder, "skyrim.ini") ?? Path.Combine(_iniFolder, "skyrim.ini"));
         }
         foreach (var docs in HostPath.GameDocuments(Instance.WinePrefix, vr))
         {

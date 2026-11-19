@@ -27,13 +27,22 @@ public sealed class Mo2Instance
 {
     public string InstanceFolder { get; }
     public string GamePath { get; }
-    public string GameDataFolder => AssetPath.ResolveExisting(GamePath, "Data") ?? Path.Combine(GamePath, "Data");
+    /// <summary>
+    /// The game's own Data folder. For an Amethyst staging folder after a deploy, that is <c>Data_Core</c>: the deploy moved the
+    /// game's files there and rebuilt Data from links to them and to the mods it deployed, which may not be today's mod list.
+    /// </summary>
+    public string GameDataFolder => Amethyst is not null && AssetPath.ResolveExisting(GamePath, AmethystStaging.CoreDataFolder) is { } core && Directory.Exists(core)
+        ? core
+        : AssetPath.ResolveExisting(GamePath, "Data") ?? Path.Combine(GamePath, "Data");
+
+    /// <summary>Set when the folder is an Amethyst Mod Manager staging folder rather than an MO2 instance.</summary>
+    public AmethystStaging? Amethyst { get; private init; }
     public string ModsFolder { get; }
     public string ProfilesFolder { get; }
     public string OverwriteFolder { get; }
-    public string? SelectedProfile { get; }
+    public string? SelectedProfile { get; private init; }
     public string? GameName { get; }
-    public string? WinePrefix { get; }
+    public string? WinePrefix { get; private init; }
 
     /// <summary>Directory names MO2 is told to ignore inside mods (Settings/skip_directories).</summary>
     public IReadOnlySet<string> SkipDirectories { get; }
@@ -83,6 +92,7 @@ public sealed class Mo2Instance
     public static Mo2Instance Open(string instanceFolder, Mo2Locations? typed = null)
     {
         var iniPath = AssetPath.ResolveExisting(instanceFolder, "ModOrganizer.ini") ?? Path.Combine(instanceFolder, "ModOrganizer.ini");
+        if (!File.Exists(iniPath) && AmethystStaging.IsStaging(instanceFolder)) return OpenAmethyst(instanceFolder, typed);
         Dictionary<string, Dictionary<string, string>> ini;
         if (File.Exists(iniPath)) ini = ReadIni(iniPath);
         else if (typed is { CanStandAlone: true }) ini = new(StringComparer.OrdinalIgnoreCase);
@@ -92,6 +102,33 @@ public sealed class Mo2Instance
         var instance = new Mo2Instance(Path.GetFullPath(instanceFolder), ini, typed);
         if (!Directory.Exists(instance.GameDataFolder))
             throw new DirectoryNotFoundException($"The game folder \"{instance.GamePath}\" has no Data folder. Type the folder that holds SkyrimSE.exe under Locations.");
+        return instance;
+    }
+
+    /// <summary>
+    /// An Amethyst Mod Manager staging folder, read like an MO2 instance: the game folder and Wine prefix come from Amethyst's
+    /// settings, the profile is the one Amethyst has open. Typed locations still win.
+    /// </summary>
+    internal static Mo2Instance OpenAmethyst(string folder, Mo2Locations? typed, IEnumerable<string>? configFolders = null)
+    {
+        var staging = AmethystStaging.Read(folder, configFolders);
+        string game = typed?.GamePath is { Length: > 0 } g ? g
+            : staging.GamePath ?? throw new InvalidDataException($"\"{folder}\" is an Amethyst Mod Manager staging folder, but its game folder was not found in Amethyst's settings "
+                                                                 + $"({string.Join(", ", AmethystStaging.ConfigFolders())}). Type the game folder under Locations.");
+        var locations = new Mo2Locations(game,
+            typed?.ModsFolder is { Length: > 0 } m ? m : Path.Combine(folder, "mods"),
+            typed?.ProfilesFolder is { Length: > 0 } p ? p : Path.Combine(folder, "profiles"),
+            typed?.OverwriteFolder is { Length: > 0 } o ? o : Path.Combine(folder, "overwrite"),
+            typed?.WinePrefix is { Length: > 0 } w ? w : staging.WinePrefix);
+        var profiles = Path.Combine(folder, "profiles");
+        var instance = new Mo2Instance(Path.GetFullPath(folder), new(StringComparer.OrdinalIgnoreCase), locations)
+        {
+            Amethyst = staging,
+            SelectedProfile = staging.LastProfile is { } last && File.Exists(Path.Combine(profiles, last, "modlist.txt")) ? last
+                : File.Exists(Path.Combine(profiles, "default", "modlist.txt")) ? "default" : null,
+        };
+        if (!Directory.Exists(instance.GameDataFolder))
+            throw new DirectoryNotFoundException($"The game folder \"{instance.GamePath}\" in Amethyst's settings has no Data folder. Type the folder that holds SkyrimSE.exe under Locations.");
         return instance;
     }
 
@@ -107,7 +144,7 @@ public sealed class Mo2Instance
 
     public Mo2Profile OpenProfile(string? name = null)
     {
-        name ??= SelectedProfile ?? throw new InvalidDataException("No profile selected in ModOrganizer.ini; choose one.");
+        name ??= SelectedProfile ?? throw new InvalidDataException(Amethyst is null ? "No profile selected in ModOrganizer.ini; choose one." : "No Amethyst profile is open; choose one.");
         return Mo2Profile.Open(this, name);
     }
 

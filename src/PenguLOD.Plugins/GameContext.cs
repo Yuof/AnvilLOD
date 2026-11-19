@@ -247,8 +247,15 @@ public sealed class GameContext : IDisposable
         var warnings = new List<string>();
         var instance = Mo2Instance.Open(o.Mo2InstanceFolder.Trim(), o.Mo2Locations);
         var profile = instance.OpenProfile(string.IsNullOrWhiteSpace(o.Mo2Profile) ? null : o.Mo2Profile.Trim());
-        progress?.Report($"MO2 instance {instance.InstanceFolder}, profile \"{profile.Name}\": " +
+        string kind = instance.Amethyst is null ? "MO2 instance" : "Amethyst staging folder";
+        progress?.Report($"{kind} {instance.InstanceFolder}, profile \"{profile.Name}\": " +
                          $"{profile.EnabledModsLowToHigh.Count:N0} enabled mods, {profile.EnabledPlugins.Count:N0} enabled plugins");
+        if (instance.Amethyst is not null)
+        {
+            progress?.Report($"Amethyst: game folder {instance.GamePath}, game files read from {instance.GameDataFolder}");
+            if (profile.RoutedElsewhere.Count > 0)
+                warnings.Add($"{profile.RoutedElsewhere.Count:N0} enabled mods are left out because their separator deploys them outside Data (first: {string.Join(", ", profile.RoutedElsewhere.Take(5))}).");
+        }
 
         if (GamePath.ResolveExisting(instance.GameDataFolder, "Skyrim.esm") is not { } master || !File.Exists(master))
             throw new DirectoryNotFoundException($"Skyrim.esm not found in the instance's game Data folder: {instance.GameDataFolder}");
@@ -261,7 +268,7 @@ public sealed class GameContext : IDisposable
         if (vdi.ExcludedLayer is not null)
             progress?.Report($"Skipping PenguLOD's own output folder as input: {vdi.ExcludedLayer}");
         if (vdi.MissingModFolders > 0)
-            warnings.Add($"{vdi.MissingModFolders} enabled mods in modlist.txt have no folder in {instance.ModsFolder}.");
+            warnings.Add($"{vdi.MissingModFolders} enabled mods in modlist.txt have no folder in {profile.ModsFolder}.");
         foreach (var conflict in vdi.CaseConflicts.Take(20))
             warnings.Add($"Folders that differ only in case were merged (rename one to avoid ambiguity): {conflict}");
         if (vdi.CaseConflicts.Count > 20) warnings.Add($"{vdi.CaseConflicts.Count - 20} more mods have folders that differ only in case.");
@@ -308,7 +315,7 @@ public sealed class GameContext : IDisposable
 
         return new GameContext(
             release, loadOrder, linkCache, instance.GameDataFolder,
-            $"MO2 instance {instance.InstanceFolder} (profile \"{profile.Name}\")",
+            $"{kind} {instance.InstanceFolder} (profile \"{profile.Name}\")",
             BuildAssets, warnings, loadOrder)
         {
             _rootFiles = () => vdi.RootFileNames.Select(n => (n, vdi.ResolveRootFile(n)!)),

@@ -187,13 +187,34 @@ These inputs are shared by all generation stages.
 | --- | --- |
 | Source | **Mod Organizer 2** reads an MO2 instance and its enabled mods. **Data folder / Vortex** reads the deployed game files. |
 | Game edition | Choose **SE / AE** or **VR**. |
-| Mod Organizer 2 instance | The folder containing `ModOrganizer.ini`. |
+| Mod Organizer 2 instance | The folder containing `ModOrganizer.ini`, or an Amethyst Mod Manager staging folder. |
 | Profile | The profile to read. Blank uses the selected instance profile. **Read profiles** fills the list. |
 | Game / Data folder | For a deployed installation, choose the game folder or its `Data` folder. |
 | plugins.txt | The enabled-plugin list for a deployed installation. An empty file is valid for a vanilla game. |
 | Primary resource folder (optional) | Recipes, rules and render models outside enabled mods. Usually the DynDOLOD program folder, the one that holds `DynDOLODx64.exe`; not the DynDOLOD Resources mod, which belongs in the mod manager. See [resource packs](RESOURCE-PACKS.md). |
 | Additional resource folders · one per line | Later external folders take precedence over earlier ones. Enabled mods take precedence over external packs. |
 | Custom rule file | An optional override file for object LOD rules. |
+
+### Amethyst Mod Manager
+
+An Amethyst staging folder (`~/Games/Amethyst/<game>`, with `mods`, `overwrite`, `profiles` and
+`Root_Folder`) is read like an MO2 instance, from its files, without Amethyst deploying it.
+
+- The game folder and Wine prefix come from Amethyst's settings for the game
+  (`~/.config/AmethystModManager/games/<game>/paths.json`, or the Flatpak's config folder).
+  **Game folder override** and **Wine / Proton prefix** replace them.
+- Without a profile chosen, the profile Amethyst has open is read.
+- After an Amethyst deploy, the game's own files are read from `Data_Core`, where the deploy
+  moved them, not from the deployed Data folder.
+- Each profile's mod list, plugin order and `profile_state.json` apply: mods locked on (`*`),
+  profiles with their own mods folder, a top-level `Data` folder in a mod, folders promoted
+  with **Top Level**, files set to **Disable** or **Root**, and profile INI files.
+- Mods under a separator that deploys to a custom folder are left out, with a warning.
+- Not applied: Amethyst's custom routing rules and the per-profile game folder or prefix of a
+  non-default profile.
+
+Put PenguLOD's output folders in the staging folder's `mods` folder, then enable them in
+Amethyst.
 
 ### Advanced source paths
 

@@ -2,6 +2,10 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
+## [Unreleased]
+
+- Added Amethyst Mod Manager as a game source: choose **Mod Organizer 2** and an Amethyst staging folder. Its mod list, profiles and file rules are read without a deploy.
+
 ## [0.6.0-beta.7] - 2026-11-18
 
 - Fixed object LOD stopping with "Unexpected trailing grass cache data" on a grass cache installed as a mod. Installed caches are read as the game reads them, and a cache file that cannot be read is named.
