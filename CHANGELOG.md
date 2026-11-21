@@ -2,6 +2,15 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
+## [0.6.0-beta.8] - 2026-11-21
+
+Regenerate object LOD.
+
+- Changed the trunk cards of hybrid 3D trees to use one shared atlas.
+- Changed **Pack object texture atlases** to leave a surface on its own texture when cutting it at texture tile edges would add more than a tenth to its triangles.
+- Fixed objects with a world map LOD mesh (`name_lod_4.nif`, such as FOLIP's road chunks) showing it at the levels they have no mesh for. It is used for LOD 32 only.
+- Fixed a plain `name_lod.nif` next to numbered LOD meshes being used for LOD 8 and 16. It fills only a missing level 0, as in DynDOLOD.
+
 ## [0.6.0-beta.7] - 2026-11-18
 
 - Fixed object LOD stopping with "Unexpected trailing grass cache data" on a grass cache installed as a mod. Installed caches are read as the game reads them, and a cache file that cannot be read is named.
