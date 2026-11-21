@@ -44,6 +44,10 @@ public sealed class Tree3DSource : ISyntheticMeshSource
 {
     public const string Prefix = "~pengulod-tree3d|";
     private const int Version = 9; // NIF tangent frame for generated tangents and trunk cards
+    /// <summary>The atlas of trunk card images, and its normal maps in the same layout.</summary>
+    public const string TrunkAtlasDiffuse = "textures\\pengulod\\trees\\trunks.dds", TrunkAtlasNormal = "textures\\pengulod\\trees\\trunks_n.dds";
+    /// <summary>Largest side a trunk image keeps in the atlas. Trunk images are rendered at a few world units per pixel and are rarely larger.</summary>
+    public const int TrunkAtlasTile = 512;
 
     private readonly AssetIndex _assets;
     private readonly float _brightness;
@@ -56,6 +60,86 @@ public sealed class Tree3DSource : ISyntheticMeshSource
         int FoliageTrianglesRemoved = 0, float FoliageCoverageLoss = 0);
     private readonly ConcurrentDictionary<string, Lazy<LodMesh?>> _raw = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, LodMesh?> _built = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyDictionary<string, AtlasRect>? _trunkRects;
+    private string _trunkHash = "-";
+
+    /// <summary>What the trunk atlas holds, for the log (null until <see cref="PrepareTrunkAtlas"/> has built one).</summary>
+    public TreeCardAtlasSummary? TrunkAtlas { get; private set; }
+
+    /// <summary>
+    /// Packs the trunk card images of every model selected so far into <see cref="TrunkAtlasDiffuse"/> and a normal-map atlas with
+    /// the same layout, in the output folder, and moves those cards onto it. A hybrid tree model has two trunk cards, each with its
+    /// own small texture, so a block drew two shapes per tree type for a handful of triangles; on one atlas the cards of all tree
+    /// types share a material. Call it once every tree has been given its model (after <see cref="ToReferences"/>) and before
+    /// blocks are built. A trunk card whose image is not in the atlas keeps its own texture.
+    /// </summary>
+    public void PrepareTrunkAtlas(string outputFolder)
+    {
+        if (_trunkRects is not null) return;
+        var tiles = new List<BillboardAtlas.Tile>();
+        foreach (string texture in _built.Values.OfType<LodMesh>().SelectMany(m => m.Parts).Select(TrunkCardTexture).OfType<string>()
+                     .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase))
+        {
+            string normal = texture[..^4] + "_n.dds";
+            tiles.Add(new(texture, texture, _assets.Exists(normal) ? normal : null));
+        }
+        if (tiles.Count < 2) return;                    // nothing to share a material with
+        byte[]? Read(string texture)
+        {
+            if (!_assets.TryOpen(texture, out var stream)) return null;
+            using (stream) { using var buffer = new MemoryStream(); stream.CopyTo(buffer); return buffer.ToArray(); }
+        }
+        if (BillboardAtlas.Build(tiles, Read, TrunkAtlasTile) is not { } atlas) return;
+        BillboardAtlas.Write(atlas, outputFolder, TrunkAtlasDiffuse, TrunkAtlasNormal);
+        _trunkRects = atlas.Rects; _trunkHash = atlas.Hash;
+        TrunkAtlas = new(atlas.Rects.Count, atlas.Size, atlas.SizeCap, atlas.Reduced, atlas.Skipped);
+        foreach (string path in _built.Keys.ToArray())
+            if (_built.TryGetValue(path, out var mesh) && mesh is not null) _built[path] = OnTrunkAtlas(mesh);
+    }
+
+    /// <summary>
+    /// The colour texture of a part that is a trunk card, as a normalized game path, or null for any other part. A trunk card is a
+    /// flat alpha-tested picture of the trunk: its texture is a rendered trunk billboard (<c>…_trunk.dds</c>, <c>…_trunk_1.dds</c>,
+    /// <c>…_trunk_2.dds</c>, or one made here for a native hybrid tree) and it shows that picture once, without repeating it.
+    /// </summary>
+    private static string? TrunkCardTexture(LodMeshPart part)
+    {
+        var m = part.Material;
+        if (!m.HasAlpha || m.Textures.Count == 0 || string.IsNullOrWhiteSpace(m.Textures[0]) || part.UVs.Length == 0) return null;
+        if (m.Passthru is { } shader && (shader.UvOffsetX != 0 || shader.UvOffsetY != 0 || shader.UvScaleX != 1 || shader.UvScaleY != 1)) return null;
+        string texture = m.Textures[0].Replace('/', '\\').TrimStart('\\');
+        if (!texture.StartsWith("textures\\", StringComparison.OrdinalIgnoreCase)) texture = "textures\\" + texture;
+        texture = GamePath.Normalize(texture);
+        bool trunk = texture.EndsWith("_trunk.dds", StringComparison.Ordinal) || texture.EndsWith("_trunk_1.dds", StringComparison.Ordinal)
+            || texture.EndsWith("_trunk_2.dds", StringComparison.Ordinal) || texture.StartsWith("textures\\pengulod\\hybrid\\", StringComparison.Ordinal);
+        if (!trunk) return null;
+        const float edge = 0.002f;                      // rounding of half-precision texture coordinates
+        foreach (var uv in part.UVs)
+            if (!(uv.X >= -edge && uv.X <= 1 + edge && uv.Y >= -edge && uv.Y <= 1 + edge)) return null;
+        return texture;
+    }
+
+    /// <summary>The mesh with every trunk card that the atlas holds moved onto it.</summary>
+    private LodMesh OnTrunkAtlas(LodMesh mesh)
+    {
+        if (_trunkRects is not { } rects) return mesh;
+        LodMeshPart[]? parts = null;
+        for (int i = 0; i < mesh.Parts.Count; i++)
+        {
+            var part = mesh.Parts[i];
+            if (TrunkCardTexture(part) is not { } texture || !rects.TryGetValue(texture, out var rect)) continue;
+            var slots = part.Material.Textures.ToArray();
+            slots[0] = TrunkAtlasDiffuse;
+            if (slots.Length > 1) slots[1] = TrunkAtlasNormal;
+            parts ??= [.. mesh.Parts];
+            parts[i] = part with
+            {
+                Material = part.Material with { Textures = slots },
+                UVs = part.UVs.Select(uv => new Vector2(rect.U0 + Math.Clamp(uv.X, 0, 1) * (rect.U1 - rect.U0), rect.V0 + Math.Clamp(uv.Y, 0, 1) * (rect.V1 - rect.V0))).ToArray(),
+            };
+        }
+        return parts is null ? mesh : new LodMesh { Path = mesh.Path, Parts = parts, Warnings = mesh.Warnings, NoShapesInFile = mesh.NoShapesInFile };
+    }
 
     public Tree3DSource(AssetIndex assets, float brightness = 1f, Tree3DSettings? settings = null)
     {
@@ -83,7 +167,7 @@ public sealed class Tree3DSource : ISyntheticMeshSource
 
     public string? Fingerprint(string path)
         => Owns(path) ? FormattableString.Invariant($"t{Version}|b{_brightness:F3}|{_settings.Fingerprint}|{_assets.Fingerprint(SourcePath(path))}")
-            + _fingerprints.GetValueOrDefault(path, "") : null;
+            + _fingerprints.GetValueOrDefault(path, "") + "|trunks:" + _trunkHash : null;
 
     public LodMesh? Build(string path) => _built.GetOrAdd(path, p => Process(p, Raw(SourcePath(p))));
 
@@ -311,6 +395,6 @@ public sealed class Tree3DSource : ISyntheticMeshSource
 
             parts.Add(part with { Normals = normals, Colors = colors });
         }
-        return new LodMesh { Path = path, Parts = parts, Warnings = raw.Warnings };
+        return OnTrunkAtlas(new LodMesh { Path = path, Parts = parts, Warnings = raw.Warnings });
     }
 }

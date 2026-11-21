@@ -29,7 +29,7 @@ public static partial class GrassGeneration
     public static void Validate(GrassGenerationRequest req)
     {
         if (req.Game.Release != Mutagen.Bethesda.GameRelease.SkyrimSE)
-            throw new ArgumentException("The bundled FasterNGIO backend targets Skyrim SE / AE. VR cache generation has not been validated.");
+            throw new ArgumentException("Grass caching uses FasterNGIO, which supports Skyrim SE and AE only. For Skyrim VR, make the grass cache in game with NGIO and turn off 'Use generated grass cache for LOD': grass LOD then reads the cache from your enabled mods.");
         if (req.Placement is not ("smooth" or "vanilla") || req.Rejection is not ("auto" or "cpu" or "gpu") || req.Seasons is not ("auto" or "on" or "off"))
             throw new ArgumentException("Invalid grass placement, rejection, or seasons setting.");
         if (req.Threads is < 0 or > 1024 || req.Writers is < 1 or > 64 || req.Radius is < 0 or > 32

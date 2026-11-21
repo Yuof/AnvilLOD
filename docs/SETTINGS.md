@@ -324,12 +324,14 @@ folder. Generating heightmaps does not change the game's shader settings.
 A grass cache records placements. Grass billboard textures and distant grass LOD
 are separate outputs. The bundled generator creates the cache without launching
 Skyrim; install it as a mod and keep the appropriate NGIO setup for the game.
+The bundled generator is for Skyrim SE and AE only. For Skyrim VR, make the cache in
+game with NGIO and leave **Use generated grass cache for LOD** off.
 
 | Setting | What it does |
 | --- | --- |
 | Grass cache output | Destination for the cache mod. PenguLOD creates its `grass` subfolder. |
 | Worldspaces | `all`, or world editor IDs separated by commas. Independent of the terrain and object LOD worldspaces. |
-| Use generated grass cache for LOD | Makes later LOD jobs read this cache folder. The combined pipeline passes a completed full cache automatically. |
+| Use generated grass cache for LOD | Makes later LOD jobs read the cache PenguLOD generated in this output folder. Turned on after a complete grass cache run. Turn it off to use a cache installed as a mod, such as one made in game with NGIO: grass LOD then reads `grass\*.cgid` from the enabled mods. |
 | Placement | **Smooth** blends placement across cell and texture boundaries. **Vanilla** follows the game's placement style. Default Smooth. |
 | Collision rejection | Prevents grass growing through obstructing geometry. **Auto** selects an available method; **CPU** uses the bundled method. **GPU** requires a compatible external FasterNGIO build. |
 | Seasons | **Auto** detects seasonal configuration; **On** requests seasonal cache generation; **Off** generates the ordinary cache. Independent of the Seasonal LOD switch. |
@@ -497,7 +499,7 @@ generation. The runtime features need the [SKSE plugin](PROVENANCE.md#game-runti
 
 | Setting | What it does |
 | --- | --- |
-| Pack object texture atlases | Combines compatible object textures into sheets so more surfaces can be drawn together; textures used in the same places share a sheet. Off by default. Unsupported surfaces keep separate textures. |
+| Pack object texture atlases | Combines compatible object textures into sheets so more surfaces can be drawn together; textures used in the same places share a sheet. Off by default. Unsupported surfaces keep separate textures, and so does a surface the texture repeats over when cutting it at tile edges would add more than a tenth to its triangles. |
 | Atlas cell size | Texture detail allotted to each atlas entry, including its border. Default `256`; smaller values use less texture space but may blur surfaces. |
 | Optimize object LOD textures | Creates compressed, size-limited LOD copies for surfaces outside atlases. Off by default. Leaves full-model source textures unchanged. |
 | Maximum standalone LOD texture size | Resolution cap for those separate LOD copies. Default `1024`; smaller values save texture memory but can soften large or repeating surfaces. |

@@ -139,6 +139,19 @@ public class ExpandedObjectAtlasTests
     }
 
     [Fact]
+    public void A_part_that_cutting_would_grow_too_much_keeps_its_own_texture()
+    {
+        // The texture repeated 6 x 6 times over a card: each triangle covers 36 tiles, within the per-triangle limit, but cutting
+        // would add far more than the card has.
+        var card = TextureFixture.Card("rock", "red.dds");
+        var repeated = Change(card, uvs: card.Positions.Select(p => new Vector2(p.X / 400, 1 - p.Z / 400) * 6 + new Vector2(.5f, .5f)).ToArray());
+        Assert.True(ObjectAtlasStage.CutTriangles(repeated) > ObjectAtlasStage.MaxCutTriangles(2));
+        Assert.Equal("cutting at tile edges adds too many triangles", ObjectAtlasStage.Ineligible(repeated));
+        Assert.Equal(64, ObjectAtlasStage.MaxCutTriangles(2));
+        Assert.Equal(100, ObjectAtlasStage.MaxCutTriangles(1000));
+    }
+
+    [Fact]
     public void A_triangle_that_crosses_a_tile_edge_is_cut_at_the_edge_and_shows_the_same_texture()
     {
         // A 400 x 400 card with the texture repeated 2.5 times across and 1.5 times down, starting part-way into a tile.
@@ -191,9 +204,11 @@ public class ExpandedObjectAtlasTests
         });
 
         // An axis that clamps is never cut, and neither is a triangle the texture repeats over more than 64 times.
+        // (Cutting the card at 8 x 8 repeats works, but adds more than a part may gain to be packed.)
         Assert.NotNull(ObjectAtlasStage.Ineligible(Change(part, part.Material with { ClampMode = 0 })));
-        Assert.Null(ObjectAtlasStage.Ineligible(Change(card, uvs: card.UVs.Select(v => v * 8).ToArray())));
-        Assert.NotNull(ObjectAtlasStage.Ineligible(Change(card, uvs: card.UVs.Select(v => v * 9).ToArray())));
+        Assert.True(ObjectAtlasStage.CutTriangles(Change(card, uvs: card.UVs.Select(v => v * 8).ToArray())) > 0);
+        Assert.Equal(0, ObjectAtlasStage.CutTriangles(Change(card, uvs: card.UVs.Select(v => v * 9).ToArray())));
+        Assert.Equal("tiling or invalid UVs", ObjectAtlasStage.Ineligible(Change(card, uvs: card.UVs.Select(v => v * 9).ToArray())));
     }
 
     private static LodMeshPart Change(LodMeshPart p, LodMaterial? material = null, Vector2[]? uvs = null) => new()

@@ -83,6 +83,66 @@ public sealed class TrunkTextureTests
             Assert.True(assets.Exists(texture), "Generated block has an unresolved texture: " + texture);
     }
 
+    [Fact]
+    public void Trunk_cards_of_a_hybrid_tree_are_drawn_from_one_atlas()
+    {
+        using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
+        Setup(f);
+        // Trunk cards are alpha-tested, as in every hybrid tree model.
+        LodMeshPart Card(string texture, float left, float right, float bottom, float top, bool side)
+        {
+            var quad = Quad(texture, left, right, bottom, top, side);
+            return quad with { Material = quad.Material with { HasAlpha = true, AlphaFlags = 0x12EC, AlphaThreshold = 128 } };
+        }
+        TextureFixture.Put(f.Data, Hybrid, LodNifWriter.Write("FlatTrunk", [
+            Card(Target + "_1.dds", -50, 150, -40, 360, false), Card(Target + "_2.dds", -150, 150, -50, 450, true),
+            Quad(@"textures\green.dds", -100, 100, 300, 500, false) ]));
+        var assets = AssetIndex.Build(GameRelease.SkyrimSE, f.Data);
+        Assert.True(TextureGeneration.Run(Request(f)).Published);
+        TextureGenerationManifest.Read(f.Output, true)!.Attach(assets, f.Output);
+        var source = new Tree3DSource(assets);
+        var tree = new TreeReference("000123:Skyrim.esm", "Tamriel", new(100, 100, 0), .4f, 1, 0x123, new("unused.dds", 200, 400, 0), Model3D: Hybrid);
+        var references = source.ToReferences([tree], new Tree3DSettings(Enabled: true)).ToArray();
+        string model = references[0].Meshes.Lod4!, lod = Path.Combine(f.Root, "LOD");
+        var own = source.Build(model)!;
+        Assert.Equal(3, own.Parts.Select(p => p.Material.Key).Distinct().Count());          // two trunk cards and the crown, three shapes
+        string before = source.Fingerprint(model)!;
+
+        source.PrepareTrunkAtlas(lod);
+        Assert.Equal(2, source.TrunkAtlas!.Tiles);
+        var atlas = TextureImages.Decode(File.ReadAllBytes(GamePath.ToFileSystemPath(lod, Tree3DSource.TrunkAtlasDiffuse)));
+        Assert.True(File.Exists(GamePath.ToFileSystemPath(lod, Tree3DSource.TrunkAtlasNormal)));
+        var packed = source.Build(model)!;
+        Assert.NotEqual(before, source.Fingerprint(model));                                 // the atlas is part of what the model is built from
+        var cards = packed.Parts.Where(p => p.Material.Textures[0] == Tree3DSource.TrunkAtlasDiffuse).ToArray();
+        Assert.Equal(2, cards.Length);
+        Assert.Equal(cards[0].Material.Key, cards[1].Material.Key);                         // one material, so a block draws both in one shape
+        Assert.All(cards, c => Assert.Equal(Tree3DSource.TrunkAtlasNormal, c.Material.Textures[1]));
+        Assert.Equal(@"textures\green.dds", Assert.Single(packed.Parts, p => !cards.Contains(p)).Material.Textures[0]);   // the crown is left alone
+        for (int i = 0; i < 2; i++) Assert.Equal(own.Parts[i].Positions, cards[i].Positions);
+        // Each card shows its own picture: the front is red on the left and green in the middle, the side blue then yellow.
+        (byte R, byte G, byte B, byte A) Shown(LodMeshPart card, float x, float y)
+        {
+            float u0 = card.UVs.Min(v => v.X), u1 = card.UVs.Max(v => v.X), v0 = card.UVs.Min(v => v.Y), v1 = card.UVs.Max(v => v.Y);
+            Assert.True(u0 >= 0 && u1 <= 1 && v0 >= 0 && v1 <= 1 && u1 - u0 < 1);
+            return Pixel(atlas, u0 + x * (u1 - u0), v0 + y * (v1 - v0));
+        }
+        AssertRed(Shown(cards[0], .1f, .5f)); AssertGreen(Shown(cards[0], .55f, .5f));
+        var blue = Shown(cards[1], .3f, .5f); var yellow = Shown(cards[1], .7f, .5f);
+        Assert.True(blue.B > 160 && blue.R < 30); Assert.True(yellow.R > 160 && yellow.G > 160 && yellow.B < 30);
+
+        // The block is written with the atlas: one shape for both cards, with textures that are in the output.
+        var quad = new QuadKey("Tamriel", LodLevel.Lod4, 0, 0);
+        var emitted = new LodGenerator(assets, synthetic: source).Generate(
+            new Dictionary<QuadKey, IReadOnlyList<LodReference>> { [quad] = references }, [quad], lod);
+        Assert.Equal(1, emitted.BlocksWritten); Assert.Equal(0, emitted.BlocksFailed); Assert.Empty(emitted.MeshErrors);
+        var block = PenguLOD.Meshes.Nif.NifGeometryReader.Read(quad.RelativePath, File.ReadAllBytes(GamePath.ToFileSystemPath(lod, quad.RelativePath)), passthru: true);
+        var trunks = Assert.Single(block.Parts, p => p.Material.Textures[0].Equals(Tree3DSource.TrunkAtlasDiffuse, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(4, trunks.TriangleCount);
+        foreach (var texture in trunks.Material.Textures.Where(p => p.Length > 0))
+            Assert.True(File.Exists(GamePath.ToFileSystemPath(lod, texture)), "The trunk shape names a texture that is not in the output: " + texture);
+    }
+
     [Theory]
     [InlineData(@"render\skyrim\billboards\", false)]
     [InlineData(@"render\billboards\", false)]

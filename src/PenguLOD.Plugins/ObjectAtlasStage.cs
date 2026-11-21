@@ -14,7 +14,7 @@ namespace PenguLOD.Plugins;
 /// <summary>Packs shader-compatible object surfaces; unsupported materials retain their original sampling.</summary>
 public static class ObjectAtlasStage
 {
-    public const int Version = 5; // triangles that cross a tile edge are cut at it, so surfaces a texture repeats over are packed too
+    public const int Version = 6; // triangles that cross a tile edge are cut at it, unless that adds more than MaxCutTriangles
     /// <summary>Largest page side in pixels, the largest texture the texture code makes. At the default cell size a page holds up to 256 materials.</summary>
     public const int PageSize = 4096;
     public sealed record Report(int PackedMaterials, int Pages, int EligibleParts, int SkippedParts,
@@ -37,10 +37,11 @@ public static class ObjectAtlasStage
             || (m.ShaderFlags2 & (1u << 24)) != 0) return "non-affine shader sampling";
         if (m.HasAlpha && ObjectTextureAssets.AlphaCutoff(m) is null) return "unsupported alpha blend/test";
         if (Tiles(part) is not { } tiled || FoldedVertices(tiled.Part, tiled.Shifts) > ushort.MaxValue) return "tiling or invalid UVs";
+        if (tiled.Part.TriangleCount - part.TriangleCount > MaxCutTriangles(part.TriangleCount)) return "cutting at tile edges adds too many triangles";
         return null;
     }
 
-    /// <summary>Triangles that cutting at tile edges adds to a part that can be packed; 0 when it needs no cut or cannot be packed.</summary>
+    /// <summary>Triangles that cutting at tile edges adds to a part; 0 when it needs no cut or its coordinates cannot be packed.</summary>
     public static int CutTriangles(LodMeshPart part) => Tiles(part) is { } tiled ? tiled.Part.TriangleCount - part.TriangleCount : 0;
 
     /// <summary>How far a triangle may reach past its tile, in tiles: the rounding of half-precision texture coordinates near a tile edge.</summary>
@@ -50,6 +51,13 @@ public static class ObjectAtlasStage
     /// tiled across many times; cutting it would turn one triangle into hundreds.
     /// </summary>
     public const int MaxTilesPerTriangle = 64;
+
+    /// <summary>
+    /// Most triangles cutting at tile edges may add to a part for it to be packed: a tenth of its own, or 64 for a small part. A part
+    /// that needs more keeps its own texture. On a rock face or another surface the texture repeats over many times, cutting adds far
+    /// more triangles than packing saves in draw calls.
+    /// </summary>
+    public static int MaxCutTriangles(int triangles) => Math.Max(64, triangles / 10);
 
     /// <summary>
     /// The part with every triangle inside one tile of its texture, and the whole-tile shift that brings each triangle's texture

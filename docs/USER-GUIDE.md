@@ -71,7 +71,8 @@ Each stage has a **Settings** button. The defaults are a reasonable start. For a
 - On **Overview**, under **Presets**, click **Balanced**. It sets DynDOLOD's Medium mesh rules and the texture sizes TexGen and DynDOLOD choose for your game's resolution. **High** and **Performance** use the High and Low rules.
 - Turn on **3D tree LOD** if you want 3D trees in the nearest LOD band. It costs more to draw.
 - Leave **Grass billboard LOD** on only if you have a grass cache, from this run or an
-  earlier one.
+  earlier one. To use a cache you already have installed as a mod, turn off **Use generated
+  grass cache for LOD** on **Grass cache**; PenguLOD then reads the cache from your mods.
 - Leave **Build missing object LOD models** off unless you want objects that have no LOD
   model to get one. It adds scenery and drawing cost.
 - Turn on seasonal and PBR options only if your setup uses them.
