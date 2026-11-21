@@ -1,13 +1,24 @@
-param([ValidateSet('1','17','vr')][string]$Line = '1')
+param([ValidateSet('1','17','vr')][string]$Line = '1',
+    # MSVC toolset for the plugin and its dependencies, such as '14.44'. Empty uses the newest one installed.
+    # Releases name one, so that an update of the build machine does not change the compiler unnoticed.
+    [string]$Toolset = '')
 . "$PSScriptRoot/windows-env.ps1"
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
 $visualStudio = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $visualStudio) { throw 'Install Visual Studio C++ build tools and the Windows SDK.' }
 Import-Module (Join-Path $visualStudio 'Common7/Tools/Microsoft.VisualStudio.DevShell.dll')
-Enter-VsDevShell -VsInstallPath $visualStudio -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+$toolsets = (Get-ChildItem (Join-Path $visualStudio 'VC/Tools/MSVC') -Directory).Name
+$devShell = '-arch=x64 -host_arch=x64'
+if ($Toolset) {
+    if (-not ($toolsets | Where-Object { $_.StartsWith("$Toolset.") })) {
+        throw "MSVC toolset $Toolset is not installed (installed: $($toolsets -join ', ')). Install it, or build without -Toolset."
+    }
+    $devShell += " -vcvars_ver=$Toolset"
+}
+Enter-VsDevShell -VsInstallPath $visualStudio -SkipAutomaticLocation -DevCmdArguments $devShell
 # Recorded in the build log: a new compiler changes the DLL even when the source has not changed.
-$toolsets = (Get-ChildItem (Join-Path $visualStudio 'VC/Tools/MSVC') -Directory).Name -join ', '
-Write-Host "MSVC toolset in use: $env:VCToolsVersion (installed: $toolsets)"
+Write-Host "MSVC toolset in use: $env:VCToolsVersion (installed: $($toolsets -join ', '))"
+if ($Toolset -and -not "$env:VCToolsVersion".StartsWith("$Toolset.")) { throw "Asked for MSVC toolset $Toolset, got $env:VCToolsVersion." }
 
 $manifestDir = switch ($Line) { '1' { 'skse' } '17' { 'skse/cmake/manifest-17' } 'vr' { 'skse/cmake/manifest-vr' } }
 $manifest = Get-Content "$manifestDir/vcpkg.json" -Raw | ConvertFrom-Json
@@ -29,6 +40,14 @@ $options = @("-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake",
     '-DVCPKG_TARGET_TRIPLET=x64-windows-static-md', '-DCMAKE_BUILD_TYPE=Release',
     "-DPENGULOD_RUNTIME_LINE=$runtimeLine")
 if ($Line -ne '1') { $options += "-DVCPKG_OVERLAY_PORTS=$PenguLODRoot/skse/cmake/ports-$Line" }
+if ($Toolset) {
+    # vcpkg picks its own compiler for the dependencies, which are most of the DLL. This copy of the stock triplet names the toolset.
+    $triplets = Join-Path $PenguLODRoot ".tools/runtime-triplets-$Line"
+    New-Item -ItemType Directory -Force $triplets | Out-Null
+    Set-Content "$triplets/x64-windows-static-md.cmake" @('set(VCPKG_TARGET_ARCHITECTURE x64)', 'set(VCPKG_CRT_LINKAGE dynamic)',
+        'set(VCPKG_LIBRARY_LINKAGE static)', "set(VCPKG_PLATFORM_TOOLSET_VERSION $Toolset)")
+    $options += "-DVCPKG_OVERLAY_TRIPLETS=$triplets"
+}
 # Configuring installs the dependencies with vcpkg.
 Invoke-WithRetry { cmake -S skse -B $build -G Ninja @options } 'Installing the plugin dependencies'
 cmake --build $build --parallel 3
