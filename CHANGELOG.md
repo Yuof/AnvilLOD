@@ -2,6 +2,12 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
+## [0.6.0-beta.9] - 2026-11-21
+
+- Added Amethyst Mod Manager as a game source: choose **Mod Organizer 2** and an Amethyst staging folder. Its mod list, profiles and file rules are read without a deploy.
+- Added version information to the game plugin DLLs: product, description, version and source. A DLL without it is no longer packaged.
+- Changed **Pack object texture atlases** to put materials used in the same places on the same page.
+
 ## [0.6.0-beta.8] - 2026-11-21
 
 Regenerate object LOD.
