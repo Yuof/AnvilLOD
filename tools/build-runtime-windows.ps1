@@ -29,7 +29,8 @@ $options = @("-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake",
     '-DVCPKG_TARGET_TRIPLET=x64-windows-static-md', '-DCMAKE_BUILD_TYPE=Release',
     "-DPENGULOD_RUNTIME_LINE=$runtimeLine")
 if ($Line -ne '1') { $options += "-DVCPKG_OVERLAY_PORTS=$PenguLODRoot/skse/cmake/ports-$Line" }
-cmake -S skse -B $build -G Ninja @options
+# Configuring installs the dependencies with vcpkg.
+Invoke-WithRetry { cmake -S skse -B $build -G Ninja @options } 'Installing the plugin dependencies'
 cmake --build $build --parallel 3
 $folder = switch ($Line) { '1' { '1.5.97-1.6.1170' } '17' { '1.7.x' } 'vr' { '1.4.15-VR' } }
 $out = Join-Path $PenguLODRoot "dist/runtime/$folder"
