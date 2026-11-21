@@ -1,0 +1,45 @@
+name: VirusTotal check
+# Started by hand: asks VirusTotal for a fresh analysis of the plugin DLLs of a release or of a pull request's build.
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: A release tag (v0.6.0-beta.9) or a pull request number (103)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+jobs:
+  check:
+    name: Analyse the plugin DLLs again
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the SKSE package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE: ${{ inputs.source }}
+        run: |
+          if [[ "$SOURCE" == v* ]]; then
+            gh release download "$SOURCE" --repo "$GITHUB_REPOSITORY" --pattern '*-SKSE.zip' --dir packages
+          elif [[ "$SOURCE" =~ ^[0-9]+$ ]]; then
+            commit="$(gh pr view "$SOURCE" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)"
+            run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow linux.yml --commit "$commit" --event pull_request --json databaseId --jq '.[0].databaseId')"
+            test -n "$run" || { echo "No build of pull request $SOURCE at $commit." >&2; exit 1; }
+            gh run download "$run" --repo "$GITHUB_REPOSITORY" --name PenguLOD-SKSE --dir packages
+          else
+            echo 'Give a release tag such as v0.6.0-beta.9, or a pull request number.' >&2; exit 2
+          fi
+      - name: Check the DLLs
+        env:
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+        run: |
+          test -n "$VIRUSTOTAL_API_KEY" || { echo 'The VIRUSTOTAL_API_KEY secret is not set.' >&2; exit 1; }
+          python3 tools/virustotal-scan.py packages/*.zip --reanalyse --summary "$GITHUB_STEP_SUMMARY"

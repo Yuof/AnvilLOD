@@ -26,7 +26,12 @@ change for a PenguLOD release.
    xvfb-run -a bash tools/native-smoke.sh
    ```
 
-4. Open a pull request, wait for every check to pass, and merge it.
+4. Open a pull request and wait for every check to pass. **VirusTotal check of the plugin DLLs**
+   lists the engines that flag a game plugin DLL; Nexus blocks an upload that is flagged. A first
+   result can change within hours, so before merging run **Actions → VirusTotal check** with the
+   pull request number, which has the DLLs analysed again. The DLLs are built reproducibly with a
+   named compiler (`MSVC_TOOLSET` in the workflow), so the ones checked are the ones released.
+   Then merge the pull request.
 5. Tag the merge commit and push only the tag:
 
    ```bash
@@ -46,6 +51,21 @@ existing release.
   source archives, because mod sites reject uploads that contain them.
 - `PenguLOD-<version>-source.tar.gz`
 - `SHA256SUMS`
+
+## The VirusTotal check
+
+`tools/virustotal-scan.py` needs the repository secret `VIRUSTOTAL_API_KEY` (**Settings → Secrets
+and variables → Actions**). Keep the key out of files, issues and chat. Without it nothing is
+checked, and builds of forks, which do not get secrets, still pass.
+
+- On a pull request the check fails when any engine flags a DLL. On `main` and on a tag it only
+  reports.
+- A flagged DLL has so far meant a generic signature that matches what one compiler version
+  produces, not something in the plugin: the same source built by MSVC 14.51 was clean and built
+  by 14.52 was flagged. Changing `MSVC_TOOLSET` is the first thing to try, and a false-positive
+  report to the vendor the second.
+- **Actions → VirusTotal check** takes a release tag or a pull request number and has the DLLs
+  analysed again.
 
 ## Upload a release to Nexus Mods
 
