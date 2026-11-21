@@ -49,6 +49,11 @@ Open **Game & resources** and choose the game edition and the source.
   `ModOrganizer.ini`. Click **Read profiles** and choose your profile.
 - **Data folder / Vortex:** choose the game's Data folder and its `plugins.txt`. Only mods
   deployed to that folder are read.
+- **Amethyst Mod Manager:** choose **Mod Organizer 2** and browse to Amethyst's staging folder
+  for the game, the one that holds `mods`, `overwrite` and `profiles` (by default
+  `~/Games/Amethyst/Skyrim Special Edition`). Click **Read profiles** and choose a profile.
+  The game folder and Wine prefix come from Amethyst's settings, and Amethyst does not need
+  to deploy first. See [Amethyst Mod Manager](SETTINGS.md#amethyst-mod-manager).
 
 On Linux, if the mod manager stores Windows paths such as `C:\...`, open **Advanced source
 paths** and set **Wine / Proton prefix** to the game's `pfx` folder.

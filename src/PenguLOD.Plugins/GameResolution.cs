@@ -27,7 +27,7 @@ public static class GameResolution
             if (options.Mode == GameSourceMode.Mo2Instance && options.Mo2InstanceFolder is { } instanceFolder)
             {
                 var profile = Mo2Instance.Open(P(instanceFolder)!, options.Mo2Locations).OpenProfile(options.Mo2Profile);
-                if (profile.UsesLocalInis) settingsFolders.Add(profile.Folder);
+                if (profile.UsesLocalInis) settingsFolders.Add(profile.LocalIniFolder);
                 modFolders.AddRange(profile.EnabledModFolders().Reverse());
                 modFolders.Add(Path.Combine(profile.Instance.GamePath, "Data"));
             }
