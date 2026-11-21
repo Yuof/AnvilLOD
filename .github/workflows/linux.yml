@@ -40,6 +40,7 @@ jobs:
           bash tools/test-runtime.sh
           python3 tools/test-runtime-packaging.py
           python3 tools/test-nexus-upload.py
+          python3 tools/test-virustotal-scan.py
       - name: Build optional texture compute backend
         run: bash tools/build-texture-compute.sh
       - name: Engine and rendered UI tests
@@ -220,6 +221,10 @@ jobs:
     name: SKSE runtime (${{ matrix.line }})
     runs-on: windows-2025-vs2026
     timeout-minutes: 60
+    env:
+      # The toolset the plugin and its dependencies are built with. The image's newest one changes without notice, and
+      # scanners that passed the DLLs of one compiler have flagged the same source built by the next.
+      MSVC_TOOLSET: '14.44'
     strategy:
       fail-fast: false
       matrix:
@@ -231,9 +236,8 @@ jobs:
         id: msvc
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          $file = Join-Path $vs 'VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt'
-          $toolset = if (Test-Path $file) { (Get-Content $file -Raw).Trim() }
-                     else { (Get-ChildItem (Join-Path $vs 'VC/Tools/MSVC') -Directory | Sort-Object { [version]$_.Name } | Select-Object -Last 1).Name }
+          $toolset = (Get-ChildItem (Join-Path $vs 'VC/Tools/MSVC') -Directory -Filter "$env:MSVC_TOOLSET.*" | Sort-Object { [version]$_.Name } | Select-Object -Last 1).Name
+          if (-not $toolset) { throw "MSVC toolset $env:MSVC_TOOLSET is not on this image." }
           "toolset=$toolset" >> $env:GITHUB_OUTPUT
       - name: Restore runtime dependencies and matching source
         id: runtime-cache
@@ -244,7 +248,7 @@ jobs:
             .tools/runtime-vcpkg-${{ matrix.line }}/buildtrees/commonlibsse-ng/src
           key: skse-vs2026-v2-${{ matrix.line }}-${{ steps.msvc.outputs.toolset }}-${{ hashFiles('skse/vcpkg*.json', 'skse/cmake/**') }}
       - name: Build game runtime and collect licenses
-        run: ./tools/build-runtime-windows.ps1 -Line '${{ matrix.line }}'
+        run: ./tools/build-runtime-windows.ps1 -Line '${{ matrix.line }}' -Toolset $env:MSVC_TOOLSET
       - name: Save runtime dependencies and matching source
         # Only a complete set: a cache saved after a failed build is never replaced under the same key.
         if: ${{ success() && steps.runtime-cache.outputs.cache-hit != 'true' }}
@@ -280,6 +284,27 @@ jobs:
           path: |
             dist/PenguLOD-*-SKSE.zip
             dist/SHA256SUMS-RUNTIME
+  virustotal:
+    name: VirusTotal check of the plugin DLLs
+    needs: runtime-package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: PenguLOD-SKSE
+          path: dist
+      # A pull request fails when an engine flags a DLL, so that it is seen before a release is tagged; known DLLs are
+      # analysed again, because a first result can change within hours. Other builds only report. Without the secret
+      # (a pull request from a fork) nothing is checked.
+      - name: Check the DLLs
+        env:
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+          SCAN_OPTIONS: ${{ github.event_name == 'pull_request' && '--reanalyse' || '--report-only' }}
+        run: python3 tools/virustotal-scan.py dist/PenguLOD-*-SKSE.zip $SCAN_OPTIONS --summary "$GITHUB_STEP_SUMMARY"
   release:
     name: Publish tagged release
     if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'opteron-x86/PenguLOD'

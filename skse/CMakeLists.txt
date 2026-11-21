@@ -70,3 +70,8 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE PENGULOD_RUNTIME_LINE=${PENGU
 target_precompile_headers(${PROJECT_NAME} PRIVATE src/PCH.h)
 target_include_directories(${PROJECT_NAME} PRIVATE src)
 target_compile_options(${PROJECT_NAME} PRIVATE /W4 /permissive- /Zc:preprocessor /utf-8)
+# Reproducible output: the linker writes a hash of the DLL's contents where it would write the build time, so the same
+# source built by the same compiler gives the same file. The DLLs scanned from a pull request's build are then the ones a
+# release ships, not rebuilt copies with another hash.
+target_compile_options(${PROJECT_NAME} PRIVATE /Brepro)
+target_link_options(${PROJECT_NAME} PRIVATE /Brepro)
