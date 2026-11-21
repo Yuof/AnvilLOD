@@ -2,6 +2,10 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
+## [Unreleased]
+
+- Changed the game plugin DLLs to be built reproducibly: the same source and compiler give the same files.
+
 ## [0.6.0-beta.9] - 2026-11-21
 
 - Added Amethyst Mod Manager as a game source: choose **Mod Organizer 2** and an Amethyst staging folder. Its mod list, profiles and file rules are read without a deploy.
