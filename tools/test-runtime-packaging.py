@@ -68,6 +68,10 @@ class RuntimeLicenseTests(unittest.TestCase):
 
 
 class RuntimePackageTests(unittest.TestCase):
+    @staticmethod
+    def version_information(version):
+        return ('VS_VERSION_INFO' + 'ProductVersion' + version).encode('utf-16-le')
+
     def fixture(self, root):
         repo = tools.parent
         for file in ['VERSION', 'LICENSE.txt', 'packaging/README-SKSE.md', 'packaging/PenguLOD.ini', 'assets/pengulod-256.png']:
@@ -77,7 +81,8 @@ class RuntimePackageTests(unittest.TestCase):
         for line in runtime.LINES:
             build = root / 'dist/runtime' / line
             (build / 'SKSE/Plugins').mkdir(parents=True)
-            (build / 'SKSE/Plugins/PenguLOD.dll').write_bytes(b'MZ' + line.encode())
+            (build / 'SKSE/Plugins/PenguLOD.dll').write_bytes(
+                b'MZ' + line.encode() + self.version_information((root / 'VERSION').read_text().strip()))
             (build / 'licenses').mkdir()
             (build / 'licenses/commonlibsse-ng.txt').write_text('notice')
             # Left by a build made before sources were dropped from the package.
@@ -114,6 +119,15 @@ class RuntimePackageTests(unittest.TestCase):
             (root / 'dist/runtime/1.7.x/SKSE/Plugins/PenguLOD.dll').write_bytes(b'not a dll')
             with self.assertRaises(SystemExit):
                 runtime.package(root)
+
+    def test_a_dll_without_this_versions_information_stops_packaging(self):
+        for content in [b'MZ', b'MZ' + self.version_information('0.0.1-other')]:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = pathlib.Path(tmp)
+                self.fixture(root)
+                (root / 'dist/runtime/1.4.15-VR/SKSE/Plugins/PenguLOD.dll').write_bytes(content)
+                with self.assertRaises(SystemExit):
+                    runtime.package(root)
 
 
 if __name__ == '__main__':

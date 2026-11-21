@@ -2,6 +2,10 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
+## [Unreleased]
+
+- Added version information to the game plugin DLLs: product, description, version and source. A DLL without it is no longer packaged.
+
 ## [0.6.0-beta.8] - 2026-11-21
 
 Regenerate object LOD.
