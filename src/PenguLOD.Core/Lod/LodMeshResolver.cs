@@ -97,8 +97,8 @@ public sealed class LodMeshResolver
             }
             else if (named?[l] is { } n) { levels[l] = n; usedNamed = true; }
         }
-        // Same fallback as for named meshes: a missing lower level uses the next higher one.
-        for (int l = 2; l >= 0; l--) levels[l] ??= levels[l + 1];
+        // Same fallback as for named meshes: a missing lower level uses the next higher one. A name_lod_4.nif is the LOD32 file only.
+        for (int l = 2; l >= 0; l--) levels[l] ??= l == 2 && IsLod4(levels[3]) ? null : levels[l + 1];
 
         string? Level(int index)
         {
@@ -120,6 +120,8 @@ public sealed class LodMeshResolver
         else if (ModelFallback is not null && !set.HasAny && !rule.IsGridObject && ModelFallback(fullModelPath, WantsLod(rule)) is { HasAny: true } made) set = made;
         return new Resolution(set, rule, usedNamed, usedMnam);
     }
+
+    private static bool IsLod4(string? path) => path is not null && path.EndsWith("_lod_4.nif", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The rule asks for a LOD mesh at some level (as opposed to leaving the object out of LOD).</summary>
     private static bool WantsLod(LodRule r) =>
