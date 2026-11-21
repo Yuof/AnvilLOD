@@ -499,7 +499,7 @@ generation. The runtime features need the [SKSE plugin](PROVENANCE.md#game-runti
 
 | Setting | What it does |
 | --- | --- |
-| Pack object texture atlases | Combines compatible object textures into sheets so more surfaces can be drawn together. Off by default. Unsupported surfaces keep separate textures, and so does a surface the texture repeats over when cutting it at tile edges would add more than a tenth to its triangles. |
+| Pack object texture atlases | Combines compatible object textures into sheets so more surfaces can be drawn together; textures used in the same places share a sheet. Off by default. Unsupported surfaces keep separate textures, and so does a surface the texture repeats over when cutting it at tile edges would add more than a tenth to its triangles. |
 | Atlas cell size | Texture detail allotted to each atlas entry, including its border. Default `256`; smaller values use less texture space but may blur surfaces. |
 | Optimize object LOD textures | Creates compressed, size-limited LOD copies for surfaces outside atlases. Off by default. Leaves full-model source textures unchanged. |
 | Maximum standalone LOD texture size | Resolution cap for those separate LOD copies. Default `1024`; smaller values save texture memory but can soften large or repeating surfaces. |

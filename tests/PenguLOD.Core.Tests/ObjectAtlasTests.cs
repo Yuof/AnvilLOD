@@ -12,6 +12,19 @@ namespace PenguLOD.Core.Tests;
 public class ObjectAtlasTests
 {
     [Fact]
+    public void Materials_drawn_in_the_same_blocks_share_an_atlas_page()
+    {
+        // Eight materials, two per page. a/e are drawn in block 0, b/f in block 1, c/g in block 2, d/h in block 3. In key order the
+        // pages would be (a, b), (c, d), ... and every block would draw from two pages; by place each block draws from one.
+        string[] keys = ["a", "b", "c", "d", "e", "f", "g", "h"];
+        var usage = keys.Select((k, i) => (k, bits: new[] { 1UL << (i % 4) })).ToDictionary(t => t.k, t => t.bits);
+        var group = keys.Select(k => KeyValuePair.Create(k, 0)).ToList();
+        var pages = ObjectAtlasStage.Batches(group, 2, usage).Select(p => string.Concat(p.Select(kv => kv.Key))).ToList();
+        Assert.Equal(["ae", "bf", "cg", "dh"], pages.Order().ToList());
+        Assert.Equal(["ab", "cd", "ef", "gh"], ObjectAtlasStage.Batches(group, 2, null).Select(p => string.Concat(p.Select(kv => kv.Key))).ToList());
+    }
+
+    [Fact]
     public void PagesAreDeterministicPairedAndKeepSeparateMaterialsAtMipEdges()
     {
         var red=TextureImages.Decode(TextureFixture.Solid(240,8,8));var green=TextureImages.Decode(TextureFixture.Solid(8,240,8));
