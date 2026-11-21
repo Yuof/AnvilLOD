@@ -95,12 +95,15 @@ public class HybridTreeAuthorTests
         foreach (string block in blocks)
         {
             var mesh = NifGeometryReader.Read(block, File.ReadAllBytes(block), passthru: true);
-            var cards = mesh.Parts.Where(p => p.Material.Textures[0].Contains(@"pengulod\hybrid\", StringComparison.OrdinalIgnoreCase)).ToArray();
-            Assert.Equal(2, cards.Length);
+            var cards = mesh.Parts.Where(p => p.Material.Textures[0].Contains(@"pengulod\hybrid\", StringComparison.OrdinalIgnoreCase)
+                || p.Material.Textures[0].Equals(Tree3DSource.TrunkAtlasDiffuse, StringComparison.OrdinalIgnoreCase)).ToArray();
+            Assert.Equal(4, cards.Sum(p => p.TriangleCount));                              // two cards, on their own textures or together on the trunk atlas
             foreach (string path in cards.SelectMany(p => p.Material.Textures.Take(2)))
-            { Assert.True(File.Exists(GamePath.ToFileSystemPath(output, path))); textures.Add(path); }
+            { Assert.True(File.Exists(GamePath.ToFileSystemPath(output, path)), path); textures.Add(path); }
         }
-        Assert.Equal(8, textures.Count);
+        // The tree of the base block is on the trunk atlas; the seasonal replacement is chosen later and keeps its own textures.
+        Assert.Contains(Tree3DSource.TrunkAtlasDiffuse, textures); Assert.Contains(Tree3DSource.TrunkAtlasNormal, textures);
+        Assert.Equal(6, textures.Count);
         var second = GenerationPipeline.Run(request, cache); Assert.True(second.Success, second.Error); Assert.All(second.Journal.Stages, s => Assert.True(s.Reused));
     }
 
