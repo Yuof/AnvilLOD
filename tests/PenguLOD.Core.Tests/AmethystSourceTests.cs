@@ -1,3 +1,4 @@
+using System.Text.Json;
 using PenguLOD.Plugins.Mo2;
 using Xunit;
 
@@ -51,8 +52,11 @@ public sealed class AmethystSourceTests : IDisposable
             }
             """);
         Put(Path.Combine(Staging, "profiles", "default", "modlist.txt"), "");
-        Put(Path.Combine(Config, "games", "Skyrim Special Edition", "paths.json"),
-            $$"""{"game_path": "{{Game}}", "prefix_path": "{{Path.Combine(_root, "pfx")}}", "staging_path": "{{Staging}}", "deploy_mode": "symlink"}""");
+        // Serialized, not interpolated: a Windows path has backslashes, which JSON needs escaped.
+        Put(Path.Combine(Config, "games", "Skyrim Special Edition", "paths.json"), JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["game_path"] = Game, ["prefix_path"] = Path.Combine(_root, "pfx"), ["staging_path"] = Staging, ["deploy_mode"] = "symlink",
+        }));
         Put(Path.Combine(Config, "amethyst.ini"), "[session]\nlast_game = Skyrim Special Edition\nlast_profile = test\n");
     }
 
@@ -105,6 +109,12 @@ public sealed class AmethystSourceTests : IDisposable
 
         // Without Amethyst's settings the game folder has to be typed; typed folders win over the settings.
         Assert.Throws<InvalidDataException>(() => Mo2Instance.OpenAmethyst(Staging, null, [Path.Combine(_root, "nothing")]));
+        // A settings file that is not valid JSON is named, instead of being reported as a missing game folder.
+        string broken = Path.Combine(_root, "broken");
+        Put(Path.Combine(broken, "games", "Skyrim Special Edition", "paths.json"), "{\"game_path\": \"C:\\Games\\Skyrim\"");
+        var unreadable = Assert.Throws<InvalidDataException>(() => Mo2Instance.OpenAmethyst(Staging, null, [broken]));
+        Assert.Contains("paths.json", unreadable.Message);
+        Assert.Contains("not valid JSON", unreadable.Message);
         string other = Path.Combine(_root, "Other Game");
         Put(Path.Combine(other, "Data", "Skyrim.esm"));
         Assert.Equal(other, Mo2Instance.OpenAmethyst(Staging, new Mo2Locations(GamePath: other), [Config]).GamePath);

@@ -11,6 +11,9 @@ namespace PenguLOD.Plugins.Mo2;
 /// </summary>
 public sealed record AmethystStaging(string Folder, string? GameName, string? GamePath, string? WinePrefix, string? LastProfile, bool ProfileIniFiles)
 {
+    /// <summary>Amethyst settings files (<c>paths.json</c>) that exist but are not valid JSON, so their game could not be matched.</summary>
+    public IReadOnlyList<string> UnreadableSettings { get; init; } = [];
+
     /// <summary>Amethyst's name for its Overwrite folder in per-mod settings.</summary>
     public const string OverwriteName = "[Overwrite]";
 
@@ -40,6 +43,7 @@ public sealed record AmethystStaging(string Folder, string? GameName, string? Ga
     public static AmethystStaging Read(string folder, IEnumerable<string>? configFolders = null)
     {
         string staging = HostPath.Canonical(folder);
+        var unreadable = new List<string>();
         foreach (string config in (configFolders ?? ConfigFolders()).Where(Directory.Exists).Distinct())
         {
             string games = Path.Combine(config, "games");
@@ -50,7 +54,7 @@ public sealed record AmethystStaging(string Folder, string? GameName, string? Ga
                 if (!File.Exists(pathsFile)) continue;
                 JsonElement paths;
                 try { using var doc = JsonDocument.Parse(File.ReadAllText(pathsFile)); paths = doc.RootElement.Clone(); }
-                catch (JsonException) { continue; }
+                catch (JsonException) { unreadable.Add(pathsFile); continue; }
                 string game = Path.GetFileName(gameFolder);
                 string? stagingPath = Text(paths, "staging_path");
                 // An empty staging path is the older default: <config>/Profiles/<game>, or ~/Games/Amethyst/Profiles/<game>.
@@ -60,10 +64,11 @@ public sealed record AmethystStaging(string Folder, string? GameName, string? Ga
                 if (!candidates.Any(c => HostPath.Canonical(c) == staging)) continue;
                 bool cleared = paths.TryGetProperty("prefix_path_cleared", out var c) && c.ValueKind == JsonValueKind.True;
                 return new(folder, game, Text(paths, "game_path"), cleared ? null : Text(paths, "prefix_path"),
-                    OpenProfile(config, game), paths.TryGetProperty("profile_ini_files", out var ini) && ini.ValueKind == JsonValueKind.True);
+                    OpenProfile(config, game), paths.TryGetProperty("profile_ini_files", out var ini) && ini.ValueKind == JsonValueKind.True)
+                    { UnreadableSettings = unreadable };
             }
         }
-        return new(folder, null, null, null, null, false);
+        return new(folder, null, null, null, null, false) { UnreadableSettings = unreadable };
     }
 
     private static string? Text(JsonElement e, string name) =>

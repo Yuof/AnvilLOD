@@ -113,8 +113,11 @@ public sealed class Mo2Instance
     {
         var staging = AmethystStaging.Read(folder, configFolders);
         string game = typed?.GamePath is { Length: > 0 } g ? g
-            : staging.GamePath ?? throw new InvalidDataException($"\"{folder}\" is an Amethyst Mod Manager staging folder, but its game folder was not found in Amethyst's settings "
-                                                                 + $"({string.Join(", ", AmethystStaging.ConfigFolders())}). Type the game folder under Locations.");
+            : staging.GamePath ?? throw new InvalidDataException(staging.UnreadableSettings.Count > 0
+                ? $"\"{folder}\" is an Amethyst Mod Manager staging folder, but Amethyst's settings could not be read: {string.Join(", ", staging.UnreadableSettings)} "
+                  + "is not valid JSON. Type the game folder under Locations."
+                : $"\"{folder}\" is an Amethyst Mod Manager staging folder, but its game folder was not found in Amethyst's settings "
+                  + $"({string.Join(", ", AmethystStaging.ConfigFolders())}). Type the game folder under Locations.");
         var locations = new Mo2Locations(game,
             typed?.ModsFolder is { Length: > 0 } m ? m : Path.Combine(folder, "mods"),
             typed?.ProfilesFolder is { Length: > 0 } p ? p : Path.Combine(folder, "profiles"),
