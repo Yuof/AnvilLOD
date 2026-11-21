@@ -196,7 +196,7 @@ public sealed partial class MainWindow : Window
     {
         var source = Choice("Source", nameof(DesktopSettings.SourceMode), ["Mod Organizer 2", "Data folder / Vortex"]);
         var profileRow = Row(Button("Read profiles", LoadProfiles), _profiles);
-        var prefix = PathField("Wine / Proton prefix", nameof(DesktopSettings.WinePrefix), hint: "Optional pfx folder; resolves C: and custom drive mappings from MO2's INI.");
+        var prefix = PathField("Wine / Proton prefix", nameof(DesktopSettings.WinePrefix), hint: "Optional pfx folder; resolves C: and custom drive mappings from MO2's INI. Amethyst's own prefix is used when this is empty.");
         prefix.IsVisible = !OperatingSystem.IsWindows();
         var advanced = new Expander { Header = "Advanced source paths", HorizontalAlignment = HorizontalAlignment.Stretch,
             Content = Stack(10,
@@ -205,7 +205,8 @@ public sealed partial class MainWindow : Window
                 PathField("Profiles folder override", nameof(DesktopSettings.ProfilesFolder)),
                 PathField("Overwrite folder override", nameof(DesktopSettings.OverwriteFolder)),
                 PathField("Skyrim.ini override", nameof(DesktopSettings.GameIni), file: true)) };
-        var mo2 = Stack(12, PathField("Mod Organizer 2 instance", nameof(DesktopSettings.Instance)),
+        var mo2 = Stack(12, PathField("Mod Organizer 2 instance", nameof(DesktopSettings.Instance),
+                hint: "The folder with ModOrganizer.ini. An Amethyst Mod Manager staging folder (such as ~/Games/Amethyst/Skyrim Special Edition) works too; Amethyst does not need to deploy first."),
             Field("Profile", nameof(DesktopSettings.Profile)), profileRow);
         var data = Stack(12, PathField("Game / Data folder", nameof(DesktopSettings.GameFolder)),
             PathField("plugins.txt", nameof(DesktopSettings.PluginsFile), file: true, hint: "Choose an explicit plugin list; an empty file works for a vanilla game."));

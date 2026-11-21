@@ -19,6 +19,11 @@ def package(root: pathlib.Path) -> pathlib.Path:
             dll = source / 'SKSE/Plugins/PenguLOD.dll'
             if not dll.is_file() or dll.read_bytes()[:2] != b'MZ':
                 raise SystemExit(f'Missing or invalid Windows DLL: {dll}')
+            # Version information is stored as UTF-16. A DLL without it, or built from another
+            # version, is not shipped: virus scanners treat an unlabelled DLL as more suspicious.
+            content = dll.read_bytes()
+            if 'VS_VERSION_INFO'.encode('utf-16-le') not in content or version.encode('utf-16-le') not in content:
+                raise SystemExit(f'No version information for {version} in {dll}')
             # Only the DLL and license notices are shipped. Mod sites reject uploads that
             # contain source archives; the source is published in the repository instead.
             (stage / line / 'SKSE/Plugins').mkdir(parents=True)

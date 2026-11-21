@@ -17,8 +17,10 @@ git -C $vcpkg fetch --depth 1 origin $manifest.'builtin-baseline'
 git -C $vcpkg checkout --detach FETCH_HEAD
 & "$vcpkg/bootstrap-vcpkg.bat" -disableMetrics
 $installed = Join-Path $PenguLODRoot '.tools/windows-deps'
-& "$vcpkg/vcpkg.exe" install --triplet x64-windows-static --host-triplet x64-windows-static `
-    "--x-manifest-root=$PenguLODRoot/tools/windows" "--x-install-root=$installed" --disable-metrics
+Invoke-WithRetry {
+    & "$vcpkg/vcpkg.exe" install --triplet x64-windows-static --host-triplet x64-windows-static `
+        "--x-manifest-root=$PenguLODRoot/tools/windows" "--x-install-root=$installed" --disable-metrics
+} 'Installing the native dependencies'
 $cmakeDependencies = @(
     "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake",
     '-DVCPKG_MANIFEST_MODE=OFF', "-DVCPKG_INSTALLED_DIR=$installed",

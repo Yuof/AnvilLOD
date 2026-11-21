@@ -7,9 +7,9 @@
 
 PenguLOD generates the distant scenery (LOD) for Skyrim SE, AE and VR: terrain, objects,
 trees and grass, the textures they use, and the grass cache. It is available for Linux and
-Windows and works with Mod Organizer 2 and Vortex.
+Windows and works with Mod Organizer 2, Vortex and Amethyst Mod Manager.
 
-**Current version: 0.6.0-beta.8**
+**Current version: 0.6.0-beta.9**
 
 ## Install
 
@@ -36,6 +36,8 @@ or XWayland. If Windows blocks the program, see
 1. Open **Game & resources**. Choose **Mod Organizer 2**, browse to the folder that holds
    `ModOrganizer.ini`, click **Read profiles** and pick your profile. For Vortex or a plain
    install, choose **Data folder / Vortex** and select the Data folder and `plugins.txt`.
+   For Amethyst Mod Manager, choose **Mod Organizer 2** and browse to Amethyst's staging folder,
+   such as `~/Games/Amethyst/Skyrim Special Edition`.
 2. In your mod manager, disable any object LOD you generated before, including its plugins.
 3. Open **Overview**. Tick the stages you want and give each one its own empty output
    folder, outside the game and mod folders.

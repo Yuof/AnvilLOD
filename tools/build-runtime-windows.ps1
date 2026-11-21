@@ -5,6 +5,9 @@ $visualStudio = & $vswhere -latest -products '*' -requires Microsoft.VisualStudi
 if (-not $visualStudio) { throw 'Install Visual Studio C++ build tools and the Windows SDK.' }
 Import-Module (Join-Path $visualStudio 'Common7/Tools/Microsoft.VisualStudio.DevShell.dll')
 Enter-VsDevShell -VsInstallPath $visualStudio -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+# Recorded in the build log: a new compiler changes the DLL even when the source has not changed.
+$toolsets = (Get-ChildItem (Join-Path $visualStudio 'VC/Tools/MSVC') -Directory).Name -join ', '
+Write-Host "MSVC toolset in use: $env:VCToolsVersion (installed: $toolsets)"
 
 $manifestDir = switch ($Line) { '1' { 'skse' } '17' { 'skse/cmake/manifest-17' } 'vr' { 'skse/cmake/manifest-vr' } }
 $manifest = Get-Content "$manifestDir/vcpkg.json" -Raw | ConvertFrom-Json
@@ -26,7 +29,8 @@ $options = @("-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake",
     '-DVCPKG_TARGET_TRIPLET=x64-windows-static-md', '-DCMAKE_BUILD_TYPE=Release',
     "-DPENGULOD_RUNTIME_LINE=$runtimeLine")
 if ($Line -ne '1') { $options += "-DVCPKG_OVERLAY_PORTS=$PenguLODRoot/skse/cmake/ports-$Line" }
-cmake -S skse -B $build -G Ninja @options
+# Configuring installs the dependencies with vcpkg.
+Invoke-WithRetry { cmake -S skse -B $build -G Ninja @options } 'Installing the plugin dependencies'
 cmake --build $build --parallel 3
 $folder = switch ($Line) { '1' { '1.5.97-1.6.1170' } '17' { '1.7.x' } 'vr' { '1.4.15-VR' } }
 $out = Join-Path $PenguLODRoot "dist/runtime/$folder"

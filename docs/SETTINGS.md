@@ -187,13 +187,34 @@ These inputs are shared by all generation stages.
 | --- | --- |
 | Source | **Mod Organizer 2** reads an MO2 instance and its enabled mods. **Data folder / Vortex** reads the deployed game files. |
 | Game edition | Choose **SE / AE** or **VR**. |
-| Mod Organizer 2 instance | The folder containing `ModOrganizer.ini`. |
+| Mod Organizer 2 instance | The folder containing `ModOrganizer.ini`, or an Amethyst Mod Manager staging folder. |
 | Profile | The profile to read. Blank uses the selected instance profile. **Read profiles** fills the list. |
 | Game / Data folder | For a deployed installation, choose the game folder or its `Data` folder. |
 | plugins.txt | The enabled-plugin list for a deployed installation. An empty file is valid for a vanilla game. |
 | Primary resource folder (optional) | Recipes, rules and render models outside enabled mods. Usually the DynDOLOD program folder, the one that holds `DynDOLODx64.exe`; not the DynDOLOD Resources mod, which belongs in the mod manager. See [resource packs](RESOURCE-PACKS.md). |
 | Additional resource folders · one per line | Later external folders take precedence over earlier ones. Enabled mods take precedence over external packs. |
 | Custom rule file | An optional override file for object LOD rules. |
+
+### Amethyst Mod Manager
+
+An Amethyst staging folder (`~/Games/Amethyst/<game>`, with `mods`, `overwrite`, `profiles` and
+`Root_Folder`) is read like an MO2 instance, from its files, without Amethyst deploying it.
+
+- The game folder and Wine prefix come from Amethyst's settings for the game
+  (`~/.config/AmethystModManager/games/<game>/paths.json`, or the Flatpak's config folder).
+  **Game folder override** and **Wine / Proton prefix** replace them.
+- Without a profile chosen, the profile Amethyst has open is read.
+- After an Amethyst deploy, the game's own files are read from `Data_Core`, where the deploy
+  moved them, not from the deployed Data folder.
+- Each profile's mod list, plugin order and `profile_state.json` apply: mods locked on (`*`),
+  profiles with their own mods folder, a top-level `Data` folder in a mod, folders promoted
+  with **Top Level**, files set to **Disable** or **Root**, and profile INI files.
+- Mods under a separator that deploys to a custom folder are left out, with a warning.
+- Not applied: Amethyst's custom routing rules and the per-profile game folder or prefix of a
+  non-default profile.
+
+Put PenguLOD's output folders in the staging folder's `mods` folder, then enable them in
+Amethyst.
 
 ### Advanced source paths
 
@@ -499,7 +520,7 @@ generation. The runtime features need the [SKSE plugin](PROVENANCE.md#game-runti
 
 | Setting | What it does |
 | --- | --- |
-| Pack object texture atlases | Combines compatible object textures into sheets so more surfaces can be drawn together. Off by default. Unsupported surfaces keep separate textures, and so does a surface the texture repeats over when cutting it at tile edges would add more than a tenth to its triangles. |
+| Pack object texture atlases | Combines compatible object textures into sheets so more surfaces can be drawn together; textures used in the same places share a sheet. Off by default. Unsupported surfaces keep separate textures, and so does a surface the texture repeats over when cutting it at tile edges would add more than a tenth to its triangles. |
 | Atlas cell size | Texture detail allotted to each atlas entry, including its border. Default `256`; smaller values use less texture space but may blur surfaces. |
 | Optimize object LOD textures | Creates compressed, size-limited LOD copies for surfaces outside atlases. Off by default. Leaves full-model source textures unchanged. |
 | Maximum standalone LOD texture size | Resolution cap for those separate LOD copies. Default `1024`; smaller values save texture memory but can soften large or repeating surfaces. |
