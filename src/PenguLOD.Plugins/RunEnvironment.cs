@@ -108,7 +108,7 @@ public static class RunEnvironment
 
     /// <summary>
     /// A plain account of a read that failed because the storage under an open file went away or changed, or null for any
-    /// other failure. Missing files, denied access and a full disk have their own messages.
+    /// other failure. Missing files and denied access have their own messages, and a full disk has <see cref="DescribeFullDisk"/>.
     /// </summary>
     public static string? DescribeLostStorage(Exception error)
     {
@@ -129,13 +129,45 @@ public static class RunEnvironment
         }
     }
 
+    /// <summary>A plain account of a write that failed because the disk is full or a quota is used up, or null for any other failure.</summary>
+    public static string? DescribeFullDisk(Exception error)
+    {
+        if (Find(error) is not { } io) return null;
+        return $"The disk is full: {io.Message.TrimEnd('.')}. Free space on that drive, then run the same selection again; finished stages are reused. "
+            + "\"PenguLOD clean --input <output folder>\" lists previous outputs and unfinished builds that can be removed, "
+            + "and Previous outputs to keep under Run options sets how many earlier copies stay beside each output.";
+        static IOException? Find(Exception? e)
+        {
+            for (int depth = 0; e is not null && depth < 16; depth++)
+            {
+                if (e is AggregateException many) return many.InnerExceptions.Select(Find).FirstOrDefault(found => found is not null);
+                if (e is IOException io && FullDisk(io)) return io;
+                e = e.InnerException;
+            }
+            return null;
+        }
+    }
+
+    /// <summary>True for the operating system's "no space left" and "quota exceeded" errors.</summary>
+    internal static bool FullDisk(IOException error) => OperatingSystem.IsWindows()
+        ? Win32Code(error.HResult) is
+            39        // ERROR_HANDLE_DISK_FULL
+            or 112    // ERROR_DISK_FULL
+            or 1295   // ERROR_DISK_QUOTA_EXCEEDED
+        : error.HResult is
+            28        // ENOSPC
+            or 122;   // EDQUOT on Linux
+
+    /// <summary>The Win32 error code an HRESULT carries (0x8007xxxx), or -1 for any other HRESULT.</summary>
+    internal static int Win32Code(int hresult) => unchecked((uint)hresult) >> 16 == 0x8007 ? hresult & 0xFFFF : -1;
+
     /// <summary>True for the operating system's "the device or connection behind this file is gone" errors.</summary>
     internal static bool LostStorage(IOException error)
     {
         if (error is FileNotFoundException or DirectoryNotFoundException or PathTooLongException or EndOfStreamException or DriveNotFoundException) return false;
         // On Unix an unmapped errno is the HResult itself; on Windows the Win32 code is the low word of 0x8007xxxx.
         if (OperatingSystem.IsWindows())
-            return (error.HResult & 0xFFFF0000) == unchecked((int)0x80070000) && (error.HResult & 0xFFFF) is
+            return Win32Code(error.HResult) is
                 21      // ERROR_NOT_READY
                 or 55   // ERROR_DEV_NOT_EXIST
                 or 59   // ERROR_UNEXP_NET_ERR

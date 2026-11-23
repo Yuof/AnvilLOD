@@ -104,7 +104,7 @@ public static class GenerationPipeline
             if (request.Preflight)
             {
                 active = "preflight";
-                diagnostics = PipelineDiagnostics.Run(request with { Grass = grass, Textures = textures, Terrain = terrain, Lod = lod }, progress: progress, ct: ct);
+                diagnostics = PipelineDiagnostics.Run(request with { Grass = grass, Textures = textures, Terrain = terrain, Lod = lod }, progress: progress, ct: ct, cacheFolder: cache);
                 diagnostics.Write(Path.Combine(job.Folder, "diagnostics.json"));
                 if (!diagnostics.CanGenerate) throw new InvalidDataException("Preflight found blocking issues: " + string.Join("; ", diagnostics.Issues.Where(i => i.Severity == "Error").Select(i => i.Message)));
             }
@@ -215,8 +215,9 @@ public static class GenerationPipeline
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            // A read that failed because its storage went away gets a plain account; the stack trace says nothing more.
-            string? plain = RunEnvironment.DescribeLostStorage(e);
+            // A read that failed because its storage went away, or a write to a full disk, gets a plain account; the stack
+            // trace says nothing more.
+            string? plain = RunEnvironment.DescribeLostStorage(e) ?? RunEnvironment.DescribeFullDisk(e);
             error = plain ?? e.Message;
             progress?.Report("Pipeline stopped at " + active + ": " + (plain ?? e.ToString()));
         }

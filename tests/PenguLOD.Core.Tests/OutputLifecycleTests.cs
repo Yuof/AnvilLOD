@@ -17,6 +17,7 @@ public sealed class OutputLifecycleTests : IDisposable
     public void Dispose()
     {
         StagedOutput.DisableExchange = false; StagedOutput.MoveOverride = null; StagedOutput.MoveRetry = TimeSpan.FromSeconds(120);
+        DiskSpace.Override = null;
         if (Directory.Exists(_root)) Directory.Delete(_root, true);
     }
 
@@ -229,6 +230,76 @@ public sealed class OutputLifecycleTests : IDisposable
         Assert.False(Directory.Exists(old)); Assert.True(Directory.Exists(recent));
         Assert.Contains(messages, m => m.Contains("replaced more than 14 days ago"));
         Assert.Throws<ArgumentOutOfRangeException>(() => GenerationPipeline.Run(request with { PreviousDays = -1 }, cache));
+    }
+
+    [Theory]
+    [InlineData(1, 0)] [InlineData(2, 1)] [InlineData(0, 0)]
+    public void WithTooLittleSpaceThePreviousCopiesABuildWouldReplaceAreRemovedBeforeIt(int keep, int left)
+    {
+        string output = Path_("out");
+        using var retention = OutputRetention.Enter(keep);
+        using (OutputRetention.Enter(2))
+            for (int i = 0; i < 3; i++) { Publish(output, "version " + i); Thread.Sleep(20); }
+        Assert.Equal(2, OutputRetention.PreviousCopies(output).Count);
+        long size = new FileInfo(Path.Combine(output, "PenguLOD.esm")).Length;
+
+        // Enough room for a build the size of the output: nothing is removed until the build is published.
+        DiskSpace.Override = _ => new("volume", size * 2);
+        using (new StagedOutput(output, seedPrevious: false)) Assert.Equal(2, OutputRetention.PreviousCopies(output).Count);
+
+        DiskSpace.Override = _ => new("volume", size / 2);
+        var messages = new List<string>();
+        using (var staged = new StagedOutput(output, seedPrevious: false, new Progress(messages)))
+        {
+            // The copies this publication keeps, and the output, are still there while it builds.
+            Assert.Equal(left, OutputRetention.PreviousCopies(output).Count);
+            Assert.Equal("version 2", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
+            Assert.Contains(messages, m => m.StartsWith("Low disk space") && m.Contains($"Removed {2 - left} previous output(s) before building"));
+            Put(Path.Combine(staged.Payload, "PenguLOD.esm"), "version 3");
+            staged.Commit();
+        }
+        Assert.Equal(keep, OutputRetention.PreviousCopies(output).Count);
+        if (keep > 0) Assert.Equal("version 2", File.ReadAllText(Path.Combine(OutputRetention.PreviousCopies(output)[0], "PenguLOD.esm")));
+        // When the free space cannot be read, nothing is removed early.
+        DiskSpace.Override = _ => null;
+        using (OutputRetention.Enter(1)) using (new StagedOutput(output, seedPrevious: false)) Assert.Equal(keep, OutputRetention.PreviousCopies(output).Count);
+    }
+
+    [Fact]
+    public void SpaceNeededIsTheLargestBuildOnTopOfTheCopiesThatStay()
+    {
+        // Grass gains a previous copy (10 stays), textures replaces one (5 only while building),
+        // terrain builds 40 beside its output and keeps 40 in the cache on another drive, LOD builds 30.
+        var peak = DiskSpace.Peak([[new("a", 10, 10)], [new("a", 5, 0)], [new("a", 40, 0), new("b", 40, 0)], [new("a", 30, 30)]]);
+        Assert.Equal(50, peak["a"]); Assert.Equal(40, peak["b"]);
+        // With the cache on the output's drive both copies of the terrain are there at once.
+        Assert.Equal(80, DiskSpace.Peak([[new("a", 40, 0), new("a", 40, 0)]])["a"]);
+        Assert.Empty(DiskSpace.Peak([]));
+        Assert.NotNull(DiskSpace.Of(_root)); Assert.True(DiskSpace.Of(Path_("not", "yet", "there"))!.Free > 0);
+        Put(Path_("sized", "a", "b.bin"), "12345"); Assert.Equal(5, DiskSpace.SizeOf(Path_("sized"))); Assert.Equal(0, DiskSpace.SizeOf(Path_("absent")));
+    }
+
+    [Fact]
+    public void PreflightWarnsWhenAVolumeHasLessFreeThanTheRunNeeds()
+    {
+        using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
+        string cache = Path.Combine(f.Root, "cache");
+        var request = new GenerationPipelineRequest(Textures: f.Request);
+        var first = GenerationPipeline.Run(request, cache);
+        Assert.True(first.Success, first.Error);
+        Assert.DoesNotContain(first.Diagnostics!.Issues, i => i.Code == "low-disk-space");   // nothing to estimate from yet
+        long size = DiskSpace.SizeOf(f.Output);
+
+        DiskSpace.Override = _ => new("/fixture", size - 1);
+        var report = PipelineDiagnostics.Run(request);
+        Assert.Contains(report.Estimates, e => e.Name == "Space needed on /fixture" && e.Value == size);
+        var issue = Assert.Single(report.Issues, i => i.Code == "low-disk-space");
+        Assert.Equal("Warning", issue.Severity); Assert.Contains("/fixture has", issue.Message); Assert.True(report.CanGenerate);
+
+        DiskSpace.Override = _ => new("/fixture", size);
+        Assert.DoesNotContain(PipelineDiagnostics.Run(request).Issues, i => i.Code == "low-disk-space");
+        DiskSpace.Override = _ => null;
+        Assert.Contains(PipelineDiagnostics.Run(request).Issues, i => i.Code == "free-space-unavailable");
     }
 
     [Fact]
