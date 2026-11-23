@@ -208,6 +208,26 @@ public sealed class OutputLifecycleTests : IDisposable
     }
 
     [Fact]
+    public void PublishedTerrainTileCachesKeepOnlyTheirReceipts()
+    {
+        string tiles = Path_("terrain-tiles"), tile = Path.Combine(tiles, new string('A', 64), new string('B', 64)), unrelated = Path.Combine(tiles, "notes", "keep.txt");
+        Put(Path.Combine(tile, "entry.json"), "{}");
+        Put(Path.Combine(tile, "meshes", "terrain", "World", "World.4.0.0.btr"), "mesh");
+        Put(Path.Combine(tile, "textures", "terrain", "World", "World.4.0.0.dds"), "texture");
+        Put(unrelated, "x");
+        var messages = new List<string>();
+        Assert.Equal(11, TerrainTileCache.Trim(tiles, new Progress(messages)));
+        Assert.Equal(["entry.json"], Directory.GetFileSystemEntries(tile).Select(Path.GetFileName));
+        Assert.True(File.Exists(unrelated));
+        Assert.Contains(messages, m => m.Contains("2 terrain tile checkpoint files"));
+        // A trimmed cache is marked and not read through again.
+        Assert.True(File.Exists(Path.Combine(tiles, new string('A', 64), TerrainTileCache.TrimmedMarker)));
+        Put(Path.Combine(tile, "late.dds"), "x");
+        Assert.Equal(0, TerrainTileCache.Trim(tiles));
+        Assert.Equal(0, TerrainTileCache.Trim(Path_("absent")));
+    }
+
+    [Fact]
     public void RetentionIsAPresetAndCliSetting()
     {
         using var f = new TextureFixture();
