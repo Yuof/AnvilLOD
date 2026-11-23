@@ -53,6 +53,7 @@ public sealed class StagedOutput : IDisposable
         {
             SweepOrphans(Output, progress);
             _existed = Directory.Exists(Output); _original = Inventory(Output, ct);
+            if (_existed) MakeRoom(progress);
             if (!_existed && OutputRetention.PreviousCopies(Output) is [var only])
                 progress?.Report($"The output folder is missing, but a previous copy exists: {only}. An earlier publication may have been interrupted. "
                     + $"This run creates a new output; to restore the old one instead, cancel and rename that folder to \"{Path.GetFileName(Output)}\" "
@@ -84,6 +85,28 @@ public sealed class StagedOutput : IDisposable
             _blocksSeeded = _deferredBlocks.Count == 0;
         }
         catch { Dispose(); throw; }
+    }
+
+    /// <summary>
+    /// A build is about the size of the output it replaces. With less free space than that, the previous copies this
+    /// publication would remove afterwards are removed now. The output itself stays until the build is published.
+    /// </summary>
+    private void MakeRoom(IProgress<string>? progress)
+    {
+        var replaced = OutputRetention.PreviousCopies(Output).Skip(Math.Max(0, _keepPrevious - 1)).ToArray();
+        if (replaced.Length == 0 || DiskSpace.Of(Output) is not { } volume) return;
+        long size = _original.Values.Sum(f => f.Length);
+        if (volume.Free >= size + size / 10) return;
+        var removed = new List<string>();
+        foreach (string old in replaced)
+        {
+            try { Directory.Delete(old, recursive: true); removed.Add(Path.GetFileName(old)); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            { progress?.Report("Could not remove previous output " + old + ": " + e.Message); }
+        }
+        if (removed.Count > 0)
+            progress?.Report($"Low disk space: {DiskSpace.Text(volume.Free)} free where the output is, and the current output is {DiskSpace.Text(size)}. "
+                + $"Removed {removed.Count} previous output(s) before building instead of after: {string.Join(", ", removed)}");
     }
 
     /// <summary>Keep unchanged and out-of-scope blocks; avoid copying blocks that will be replaced or removed.</summary>

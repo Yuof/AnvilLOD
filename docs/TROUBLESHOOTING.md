@@ -37,6 +37,24 @@ Data folder. A drive that disconnects does the same.
 Close the game and run the same selection again. Do not start or close the game until the
 run finishes.
 
+## "The disk is full"
+
+A stage is built in a folder beside its output and replaces the output only when it is
+complete, so for a while both are on the drive. Each output also keeps a previous copy
+beside it, and the terrain stage keeps its finished tiles in the cache folder until it
+has published.
+
+**Check setup** warns when a drive has less free space than the run is estimated to need.
+The estimate comes from the size of the current outputs, so there is none for a first run.
+When a stage starts with less free space than the size of its current output, it removes
+the previous copies it would replace before it builds instead of after, and says so in the
+log.
+
+To free space, close Skyrim and run `PenguLOD clean --input <output folder>` to list the
+previous copies and unfinished builds beside an output; `--apply` removes them. Set
+**Previous outputs to keep** under **Overview → Run options** to 0 to keep none. Then run
+the same selection again. Finished stages are reused.
+
 ## "The build finished but could not be published"
 
 Another program was using the output folder or the finished build when PenguLOD moved it

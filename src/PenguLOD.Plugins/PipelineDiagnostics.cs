@@ -27,9 +27,11 @@ public sealed record DiagnosticReport(string Application,string OperatingSystem,
 /// <summary>Read-only pipeline checks. Reports contain metadata, never game assets or absolute source paths.</summary>
 public static class PipelineDiagnostics
 {
+    /// <param name="cacheFolder">Where the run keeps its saved job. Null uses the folder of the current job, if one is running.</param>
     public static DiagnosticReport Run(GenerationPipelineRequest request,bool deepScan=false,bool verifyOutputs=false,string? inspectAsset=null,
-        IProgress<string>? progress=null,CancellationToken ct=default)
+        IProgress<string>? progress=null,CancellationToken ct=default,string? cacheFolder=null)
     {
+        cacheFolder??=RunLimits.CacheDirectory;
         IReadOnlyList<SeasonalSwapCoverage> seasons=[]; bool seasonal=SeasonalCoverage.Requested(request);
         var clock=Stopwatch.StartNew();var issues=new List<DiagnosticIssue>();var estimates=new List<DiagnosticEstimate>();
         var source=request.Grass?.Game??request.Textures?.Game??request.Terrain?.Game??request.Lod?.Game??throw new ArgumentException("Select at least one pipeline stage.");
@@ -38,6 +40,7 @@ public static class PipelineDiagnostics
         void Add(string severity,string code,string message,string action,string? asset=null,string? origin=null)
         { issues.Add(new(severity,code,redact.Apply(message),redact.Apply(action),asset is null?null:redact.Apply(asset),origin is null?null:redact.Apply(origin))); }
         progress?.Report("Preflight: checking selected outputs and profile...");
+        var space=new List<IReadOnlyList<SpaceNeed>>();var volumes=new Dictionary<string,DiskSpace.Volume>(StringComparer.Ordinal);
         foreach(var output in outputs)
         {
             ct.ThrowIfCancellationRequested();
@@ -48,18 +51,26 @@ public static class PipelineDiagnostics
                 foreach(var f in Directory.EnumerateFiles(output,"*",new EnumerationOptions{RecurseSubdirectories=true,AttributesToSkip=FileAttributes.ReparsePoint,IgnoreInaccessible=false}))
                 {ct.ThrowIfCancellationRequested();bytes+=new FileInfo(f).Length;}
                 estimates.Add(new("Existing "+redact.Apply(output),bytes,"bytes","Measured current output size; replacement and retained backups require additional space."));
-                try
-                {
-                    var drive=DriveInfo.GetDrives().Where(d=>HostPath.IsWithin(output,d.Name)).OrderByDescending(d=>d.Name.Length).FirstOrDefault();
-                    if(drive is not null)
-                    {
-                        estimates.Add(new("Free space for "+redact.Apply(output),drive.AvailableFreeSpace,"bytes","Filesystem free space at preflight time."));
-                        if(request.Lod is {CleanOutput:false} lod && HostPath.Canonical(output)==HostPath.Canonical(lod.OutputFolder!) && drive.AvailableFreeSpace<bytes)
-                            Add("Error","insufficient-staging-space","There is not enough free space to clone the existing LOD output into staging.","Free space or select another output filesystem.");
-                    }
-                }
-                catch(IOException e){Add("Warning","free-space-unavailable",e.Message,"Check destination free space before generation.");}
+                if(DiskSpace.Of(output) is not {} volume){Add("Warning","free-space-unavailable","Free space where "+output+" is could not be read.","Check destination free space before generation.");continue;}
+                volumes[volume.Name]=volume;
+                estimates.Add(new("Free space for "+redact.Apply(output),volume.Free,"bytes","Filesystem free space at preflight time."));
+                if(request.Lod is {CleanOutput:false} lod && HostPath.Canonical(output)==HostPath.Canonical(lod.OutputFolder!) && volume.Free<bytes)
+                    Add("Error","insufficient-staging-space","There is not enough free space to clone the existing LOD output into staging.","Free space or select another output filesystem.");
+                // A stage is built beside its output and then replaces it. The replaced output stays as one more previous
+                // copy unless the kept number is already there, in which case the oldest goes.
+                var needs=new List<SpaceNeed>{new(volume.Name,bytes,OutputRetention.PreviousCopies(output).Count<request.KeepPrevious?bytes:0)};
+                // Terrain also keeps every finished tile in the cache folder until it has published.
+                if(request.Terrain is {} terrain && HostPath.Canonical(output)==HostPath.Canonical(terrain.OutputFolder) && cacheFolder is not null && DiskSpace.Of(cacheFolder) is {} cacheVolume)
+                { volumes[cacheVolume.Name]=cacheVolume;needs.Add(new(cacheVolume.Name,bytes,0)); }
+                space.Add(needs);
             }
+        }
+        foreach(var (name,needed) in DiskSpace.Peak(space))
+        {
+            estimates.Add(new("Space needed on "+name,needed,"bytes","Estimated from the current output sizes: each stage is built beside its output before replacing it, and terrain keeps finished tiles in the cache folder until it has published."));
+            if(volumes[name].Free<needed)
+                Add("Warning","low-disk-space",$"{name} has {DiskSpace.Text(volumes[name].Free)} free, and this run needs about {DiskSpace.Text(needed)} more there than it holds now.",
+                    "Free space on that drive, or choose output folders or a cache folder on another one. A stage that starts with too little space first removes the previous outputs it would replace.");
         }
         source=source with{ExcludeFolders=(source.ExcludeFolders??[]).Concat(outputs).Distinct().ToArray(),ExtraLooseRoots=(source.ExtraLooseRoots??[]).Concat(seasonal ? ["seasons","grass"] : Array.Empty<string>()).Concat(new[]{"dyndolod"}).Concat(deepScan || inspectAsset is {Length:>0} ? ["skse","textures"] : new[]{"skse"})
             .Concat(request.Terrain is null ? [] : new[]{"textures","meshes","lodsettings","seasons"}).Distinct().ToArray()};

@@ -40,6 +40,26 @@ public sealed class RunEnvironmentTests
     }
 
     [Fact]
+    public void AFullDiskIsExplainedAndOtherFailuresAreNot()
+    {
+        var full = new IOException("No space left on device : '/mnt/mods/Output/meshes/a.bto'", OperatingSystem.IsWindows() ? unchecked((int)0x80070070) : 28);
+        // Writers run on worker threads, so the failure usually arrives wrapped.
+        string? text = RunEnvironment.DescribeFullDisk(new AggregateException(new InvalidOperationException("block"), new InvalidDataException("stage", full)));
+        Assert.NotNull(text);
+        Assert.StartsWith("The disk is full: No space left on device : '/mnt/mods/Output/meshes/a.bto'. Free space", text);
+        Assert.Contains("run the same selection again", text); Assert.Contains("PenguLOD clean", text);
+        Assert.Null(RunEnvironment.DescribeLostStorage(full));
+        Assert.Null(RunEnvironment.DescribeFullDisk(new IOException("Input/output error", OperatingSystem.IsWindows() ? unchecked((int)0x8007045D) : 5)));
+        Assert.Null(RunEnvironment.DescribeFullDisk(new FileNotFoundException("Missing landscape texture: a.dds", "a.dds")));
+        Assert.Null(RunEnvironment.DescribeFullDisk(new InvalidDataException("Texture output is incomplete.")));
+        if (!OperatingSystem.IsLinux()) return;
+        // The kernel's own answer: /dev/full accepts no bytes.
+        using var device = File.OpenHandle("/dev/full", FileMode.Open, FileAccess.Write);
+        var real = Assert.ThrowsAny<IOException>(() => RandomAccess.Write(device, new byte[16], 0));
+        Assert.True(RunEnvironment.FullDisk(real), $"HResult {real.HResult}: {real.Message}");
+    }
+
+    [Fact]
     public void AReadWhoseStorageWentAwayIsExplainedAndOtherFailuresAreNot()
     {
         Assert.Null(RunEnvironment.DescribeLostStorage(new FileNotFoundException("Missing landscape texture: a.dds", "a.dds")));
