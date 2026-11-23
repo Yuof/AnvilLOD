@@ -55,7 +55,7 @@ public static class TerrainGeneration
     /// <param name="beforePublish">Called with the staged folder and its file hashes just before publication, e.g. to write the output receipt.</param>
     internal static TerrainGenerationResult RunWithCheckpoints(TerrainGenerationRequest request,string folder,string fingerprint,bool reuse,IProgress<string>? progress,CancellationToken ct,
         Action<string,OutputSnapshot>? beforePublish=null)
-        => RunCore(request,progress,ct,new TerrainTileCache(folder,fingerprint,reuse,progress,ct),beforePublish);
+        => RunCore(request,progress,ct,new TerrainTileCache(folder,fingerprint,reuse,progress,ct,request.OutputFolder),beforePublish);
     private static TerrainGenerationResult RunCore(TerrainGenerationRequest request,IProgress<string>? progress,CancellationToken ct,TerrainTileCache? cache,
         Action<string,OutputSnapshot>? beforePublish)
     {

@@ -37,6 +37,32 @@ public sealed class PersistentPipelineTests : IDisposable
     }
 
     [Fact]
+    public void IdleJobsLoseTheirCheckpointDataButKeepTheirJournal()
+    {
+        string cache = Path.Combine(_root, "cache"), tiles;
+        PersistentPipeline Other() => new(cache, [new("terrain", "Terrain", Output("terrain"), [])]);
+        using (var other = Other())
+        {
+            tiles = Path.Combine(other.Folder, "terrain-tiles"); Directory.CreateDirectory(Path.Combine(tiles, "tile"));
+            File.WriteAllText(Path.Combine(tiles, "tile", "a.btr"), "x");
+            using var running = Open();
+            // Not idle yet; and a job that is running is left alone however old its journal is.
+            Assert.Equal(0, running.RemoveFromIdleJobs("terrain-tiles", TimeSpan.FromDays(30)));
+            Assert.Equal(0, running.RemoveFromIdleJobs("terrain-tiles", TimeSpan.FromDays(30), DateTime.UtcNow.AddDays(31)));
+            Assert.True(Directory.Exists(tiles));
+        }
+        using (var job = Open())
+        {
+            Directory.CreateDirectory(Path.Combine(job.Folder, "terrain-tiles"));
+            Assert.Equal(1, job.RemoveFromIdleJobs("terrain-tiles", TimeSpan.FromDays(30), DateTime.UtcNow.AddDays(31)));
+            Assert.False(Directory.Exists(tiles));
+            Assert.True(File.Exists(Path.Combine(Path.GetDirectoryName(tiles)!, "job.json")));
+            Assert.True(Directory.Exists(Path.Combine(job.Folder, "terrain-tiles")));   // its own
+        }
+        using (Other()) { }   // the journal is still read
+    }
+
+    [Fact]
     public void ChangedSettingsInvalidateOnlyDependentStages()
     {
         using (var job = Open())

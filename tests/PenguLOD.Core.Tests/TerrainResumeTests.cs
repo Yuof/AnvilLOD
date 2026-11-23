@@ -27,6 +27,10 @@ public class TerrainResumeTests
         Assert.Equal(2,resumed.Terrain.Tiles.Count);Assert.Contains(resumed.Terrain.Tiles,t=>t.Season=="WIN");
         Assert.True(resumed.Journal.Stages.Single().Timings["terrain-cache-verification"]>0);
         Assert.True(resumed.Terrain.Performance.Timings["terrain-sampling"]>0);
+        // The published terrain holds the tiles now, so the cache keeps the two receipts and no tile files.
+        Assert.Equal(["entry.json","entry.json",TerrainTileCache.TrimmedMarker],
+            Directory.GetFiles(cache,"*",SearchOption.AllDirectories).Where(p=>p.Contains("terrain-tiles")).Select(Path.GetFileName).Order());
+        var again=GenerationPipeline.Run(request,cache);Assert.True(again.Success,again.Error);Assert.True(again.Journal.Stages.Single().Reused);
     }
 
     [Theory]
@@ -40,19 +44,21 @@ public class TerrainResumeTests
         string metadata=Directory.GetFiles(cache,"entry.json",SearchOption.AllDirectories).First();
         var entry=JsonSerializer.Deserialize<TerrainTileReceipt>(File.ReadAllText(metadata))!;
         string relative=entry.Output.Files.Keys.First(k=>k.EndsWith(".dds"));
-        string cached=OutputSnapshot.Resolve(Path.GetDirectoryName(metadata)!,relative);
+        // Once published, the tile's files are in the output only, and a repair verifies them there.
+        string cached=OutputSnapshot.Resolve(Path.GetDirectoryName(metadata)!,relative),published=OutputSnapshot.Resolve(f.Output,relative);
+        Assert.False(File.Exists(cached));Assert.True(File.Exists(published));
         string sentinel=Path.Combine(f.Root,"sentinel");File.WriteAllText(sentinel,"untouched");
+        // Each case changes one tile and makes the stage run again: a published file changed, but the source profile did not.
         switch(damage)
         {
-            case "contents": File.WriteAllBytes(cached,[1,2,3]);break;
-            case "missing": File.Delete(cached);break;
+            case "contents": File.WriteAllBytes(published,[1,2,3]);break;
+            case "missing": File.Delete(published);break;
             case "manifest":
                 entry.Output.Files.Clear();entry.Output.Files["../sentinel"]="bad";
-                File.WriteAllText(metadata,JsonSerializer.Serialize(entry));break;
-            case "link": File.Delete(cached);File.CreateSymbolicLink(cached,sentinel);break;
+                File.WriteAllText(metadata,JsonSerializer.Serialize(entry));File.Delete(published);break;
+            case "link":
+                Directory.CreateDirectory(Path.GetDirectoryName(cached)!);File.CreateSymbolicLink(cached,sentinel);File.Delete(published);break;
         }
-        // Force stage repair: a published output disappeared, but the source profile is unchanged.
-        File.Delete(Directory.GetFiles(f.Output,"*.dds",SearchOption.AllDirectories).First());
         var repaired=GenerationPipeline.Run(request,cache);
         Assert.True(repaired.Success,repaired.Error);Assert.False(repaired.Journal.Stages.Single().Reused);
         Assert.Equal(1,repaired.Terrain!.Performance!.BuiltTiles);Assert.Equal(1,repaired.Terrain.Performance.ReusedTiles);
@@ -60,6 +66,7 @@ public class TerrainResumeTests
         foreach(var (path,hash) in first.Terrain!.Output.Files.Where(p=>p.Key!=TerrainGeneration.ManifestName))
             Assert.Equal(hash,repaired.Terrain.Output.Files[path]);
         repaired.Terrain.Output.Verify(f.Output);
+        Assert.DoesNotContain(Directory.GetFiles(cache,"*",SearchOption.AllDirectories),p=>p.EndsWith(".dds")||p.EndsWith(".btr"));
     }
 
     [Fact]
@@ -84,8 +91,9 @@ public class TerrainResumeTests
             PenguLOD.Meshes.TerrainTileBuilder.Build(new("FixtureWorld",LodLevel.Lod4,-4,-4),(_,_)=>0,(_,_)=>64).Bytes);
         TextureFixture.Put(f.Textures.Data,@"textures\terrain\FixtureWorld\FixtureWorld.4.-4.-4.dds",TextureFixture.Solid(40,50,60));
         var request=new GenerationPipelineRequest(Terrain:f.Request);var first=GenerationPipeline.Run(request,cache);Assert.True(first.Success,first.Error);
-        File.Delete(Directory.GetFiles(f.Output,"*.dds",SearchOption.AllDirectories).First());
-        var restored=GenerationPipeline.Run(request,cache);Assert.True(restored.Success,restored.Error);
+        // The stage runs again because a published file other than the tile's changed; the tile is restored from its receipt.
+        File.AppendAllText(Path.Combine(f.Output,TerrainGeneration.ManifestName)," ");
+        var restored=GenerationPipeline.Run(request,cache);Assert.True(restored.Success,restored.Error);Assert.False(restored.Journal.Stages.Single().Reused);
         Assert.Equal(1,restored.Terrain!.Performance!.ReusedTiles);Assert.Equal(0,restored.Terrain.Performance.BuiltTiles);
         Assert.Equal(first.Terrain!.Worlds,restored.Terrain.Worlds);Assert.Equal(first.Terrain.Materials,restored.Terrain.Materials);
         Assert.Equal(first.Terrain.Warnings.Order(),restored.Terrain.Warnings.Order());

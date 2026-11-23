@@ -21,6 +21,10 @@ public sealed record GenerationPipelineResult(string JobFolder, PipelineInputSna
 /// <summary>Shared persistent orchestration for desktop and CLI. Generated inputs are explicit dependencies.</summary>
 public static class GenerationPipeline
 {
+    private const string TerrainTiles = "terrain-tiles";
+    /// <summary>Tile checkpoints of an unfinished terrain run are removed when its job has not run for this long.</summary>
+    public static readonly TimeSpan IdleCheckpointAge = TimeSpan.FromDays(30);
+
     public static GenerationPipelineResult Run(GenerationPipelineRequest request, string cache,
         IProgress<string>? progress = null, CancellationToken ct = default)
     {
@@ -80,6 +84,10 @@ public static class GenerationPipeline
         if (terrain is not null) plan.Add(new(StageIds.Terrain, "Terrain and water", terrain.OutputFolder, []));
         if (lod is not null) plan.Add(new(StageIds.Lod, "LOD", lod.OutputFolder!, plan.Select(p => p.Id).ToArray()));
         using var job = new PersistentPipeline(cache, plan, request.Resume, progress, ct);
+        // A terrain run that stopped keeps its finished tiles for the next attempt. Other stage selections have their own
+        // job folder; one that was not picked up again would keep those tiles for good.
+        if (job.RemoveFromIdleJobs(TerrainTiles, IdleCheckpointAge) is > 0 and var idle)
+            progress?.Report($"Removed terrain tile checkpoints of {idle} job(s) not run for {IdleCheckpointAge.Days} days.");
         var inputs = PipelineInputs.Capture(source, outputs, [], request.VerifySourceContents, progress, ct);
         File.WriteAllText(Path.Combine(job.Folder, "inputs.json"), JsonSerializer.Serialize(inputs, PersistentPipeline.Json));
         File.WriteAllText(Path.Combine(job.Folder, "request.json"), JsonSerializer.Serialize(request, PersistentPipeline.Json));
@@ -128,9 +136,12 @@ public static class GenerationPipeline
                 active = StageIds.Terrain;
                 string terrainFingerprint=Fingerprint(terrain);
                 OutputSnapshot? terrainOutput = null;
+                string terrainTiles = Path.Combine(job.Folder, TerrainTiles);
                 terrainResult = job.Run(StageIds.Terrain, terrainFingerprint, () => TerrainGeneration.RunWithCheckpoints(terrain,
-                    Path.Combine(job.Folder,"terrain-tiles"),terrainFingerprint,request.Resume,progress,ct,
+                    terrainTiles,terrainFingerprint,request.Resume,progress,ct,
                     (payload, snapshot) => terrainOutput = Record(StageIds.Terrain, payload, snapshot)), _ => terrainOutput!);
+                // The terrain is published and recorded (or verified as it was). The tile checkpoints were a second copy of it.
+                TerrainTileCache.Trim(terrainTiles, progress, ct);
             }
             if (lod is not null)
             {
