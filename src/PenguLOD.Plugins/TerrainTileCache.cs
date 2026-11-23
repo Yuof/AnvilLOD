@@ -46,15 +46,17 @@ internal sealed class TerrainTileCache
     internal static long Trim(string folder,IProgress<string>? progress=null,CancellationToken ct=default)
     {
         if(!Directory.Exists(folder) || new DirectoryInfo(folder).LinkTarget is not null)return 0;
-        long bytes=0;int files=0,failed=0;
+        long bytes=0;int files=0,failed=0;bool told=false;
         foreach(var root in new DirectoryInfo(folder).EnumerateDirectories())
         {
             if(!IsHash(root.Name) || root.LinkTarget is not null || File.Exists(Path.Combine(root.FullName,TrimmedMarker)))continue;
             int failedBefore=failed;
+            // A cache filled by an earlier version holds every tile of the terrain, and removing that takes a while.
+            if(!told){told=true;progress?.Report("Removing terrain tile checkpoint files: the terrain is published...");}
             foreach(var tile in root.EnumerateDirectories())
             {
                 if(tile.LinkTarget is not null)continue;
-                foreach(var entry in tile.EnumerateFileSystemInfos())
+                foreach(var entry in tile.EnumerateFileSystemInfos().ToArray())
                 {
                     ct.ThrowIfCancellationRequested();
                     try
