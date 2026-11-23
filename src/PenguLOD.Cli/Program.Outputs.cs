@@ -73,9 +73,26 @@ public static partial class Program
             found += items.Count;
             if (a.Has("apply") && items.Count > 0) removed += OutputCleanup.Apply(input, items, new SyncProgress(Console.WriteLine));
         }
+        if (a.Has("leftovers"))
+        {
+            // A previous copy beside an output folder that still exists is that output's to keep or remove: name it with --input.
+            var others = OutputStorage.Survey(inputs, null, Cancellation)
+                .Where(i => i.Kind == StorageKinds.OtherBuild || (i.Kind == StorageKinds.OtherPrevious && !Directory.Exists(i.Output))).ToArray();
+            Console.WriteLine($"Left by other output folders: {others.Length} folder(s), {others.Sum(i => i.Bytes) / 1048576.0:N0} MiB");
+            foreach (var item in others) Console.WriteLine($"  {item.Kind}: {item.Path} ({item.Bytes / 1048576.0:N0} MiB)");
+            found += others.Length;
+            if (a.Has("apply") && others.Length > 0) removed += OutputStorage.Remove(others, new SyncProgress(Console.WriteLine), Cancellation);
+        }
         if (!a.Has("apply")) Console.WriteLine(found == 0 ? "Nothing to remove." : "Nothing was removed. Add --apply to remove these folders.");
         else Console.WriteLine($"Removed {removed} of {found} folder(s).");
         return a.Has("apply") && removed < found ? 1 : 0;
+    }
+
+    private static int RunRestore(CliArgs a)
+    {
+        if (a.GetAll("input") is not { Count: 1 } inputs) throw new CliArgException("restore needs one --input <output folder>.");
+        StagedOutput.Restore(inputs.Single(), a.Get("previous"), new SyncProgress(Console.WriteLine), Cancellation);
+        return 0;
     }
 
     private static int PlanGeneration(CliArgs a)
