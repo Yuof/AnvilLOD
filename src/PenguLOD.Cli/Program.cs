@@ -86,9 +86,10 @@ public static partial class Program
           PenguLOD plan-generation --settings <preset.json> --report <scope-plan.json>
                                          Review the scope needed to retain existing worlds and levels.
                                          --expand-output-scope explicitly permits the expanded generation.
-          PenguLOD clean --input <output folder> [--input ...] [--keep-previous <n>] [--apply]
-                                         List previous copies beyond the newest n (default 1) and unfinished build
-                                         folders beside each output. --apply removes them. Run it while no job is running.
+          PenguLOD clean --input <output folder> [--input ...] [--keep-previous <n>] [--previous-days <n>] [--apply]
+                                         List previous copies beyond the newest n (default 1) or replaced more than
+                                         --previous-days ago (default 14), and unfinished build folders beside each
+                                         output. --apply removes them. Run it while no job is running.
 
         Options:
           --pbr-waterfalls      Use full PBR-patched waterfall models independently of --pbr-lod
@@ -99,6 +100,7 @@ public static partial class Program
           --cache-folder <path>  Override the generated tree-billboard cache location
           --threads <n>          Worker limit (0 = available processors minus one)
           --keep-previous <n>    Earlier copies of each output kept beside it after publication, 0-100 (default 1)
+          --previous-days <n>    Days an earlier copy is kept after it was replaced, 0-3650 (default 14; 0 = no limit)
           --profile <name>       MO2 profile (default: the instance's selected profile)
           --data <path>          Skyrim Data folder (default: auto-detect / MO2 VFS)
           --plugins <path>       plugins.txt to use (requires --data)
@@ -392,6 +394,7 @@ public static partial class Program
         return request with {Resume=!a.Has("no-resume")&&request.Resume,VerifySourceContents=a.Has("verify-source-contents")||request.VerifySourceContents,
             ExpandOutputScope=a.Has("expand-output-scope")||request.ExpandOutputScope,
             KeepPrevious=a.Integer("keep-previous",request.KeepPrevious,0,OutputRetention.Maximum),
+            PreviousDays=a.Integer("previous-days",request.PreviousDays,0,OutputRetention.MaximumDays),
             Preflight=!a.Has("no-preflight")&&request.Preflight,TextureCompute=a.Get("texture-compute")??request.TextureCompute};
     }
 
@@ -572,7 +575,8 @@ public static partial class Program
         if(generate)
         {
             var generated=GenerationPipeline.Run(new(Lod:req,Resume:!a.Has("no-resume"),VerifySourceContents:a.Has("verify-source-contents"),Preflight:!a.Has("no-preflight"),TextureCompute:a.Get("texture-compute")??"Cpu",ExpandOutputScope:a.Has("expand-output-scope"),
-                KeepPrevious:a.Integer("keep-previous",OutputRetention.Default,0,OutputRetention.Maximum)),
+                KeepPrevious:a.Integer("keep-previous",OutputRetention.Default,0,OutputRetention.Maximum),
+                PreviousDays:a.Integer("previous-days",OutputRetention.DefaultDays,0,OutputRetention.MaximumDays)),
                 CacheFolder(a),sync,Cancellation);
             Console.WriteLine("Saved job: "+generated.JobFolder);
             jobFolder = generated.JobFolder;

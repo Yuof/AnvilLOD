@@ -297,6 +297,9 @@ public sealed class DesktopSettings : ObservableObject
     private decimal _keepPreviousOutputs = PenguLOD.Core.Pipeline.OutputRetention.Default;
     /// <summary>Earlier copies of each output kept beside it after publication (".previous-*"). 0 removes them.</summary>
     public decimal KeepPreviousOutputs { get => _keepPreviousOutputs; set => Set(ref _keepPreviousOutputs, value); }
+    private decimal _previousOutputDays = PenguLOD.Core.Pipeline.OutputRetention.DefaultDays;
+    /// <summary>Days an earlier copy of an output is kept after it was replaced. 0 keeps it until newer copies take its place.</summary>
+    public decimal PreviousOutputDays { get => _previousOutputDays; set => Set(ref _previousOutputDays, value); }
     private bool _verifySourceContents;
     public bool VerifySourceContents { get => _verifySourceContents; set => Set(ref _verifySourceContents, value); }
     private bool _pipelineGrass = true;

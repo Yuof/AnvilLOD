@@ -63,10 +63,11 @@ public static partial class Program
     {
         var inputs = a.GetAll("input") ?? throw new CliArgException("clean needs --input <output folder> (repeatable).");
         int keep = a.Integer("keep-previous", OutputRetention.Default, 0, OutputRetention.Maximum);
+        int days = a.Integer("previous-days", OutputRetention.DefaultDays, 0, OutputRetention.MaximumDays);
         int found = 0, removed = 0;
         foreach (string input in inputs)
         {
-            var items = OutputCleanup.Find(input, keep, Cancellation);
+            var items = OutputCleanup.Find(input, keep, Cancellation, days);
             Console.WriteLine($"{input}: {items.Count} folder(s), {items.Sum(i => i.Bytes) / 1048576.0:N0} MiB");
             foreach (var item in items) Console.WriteLine($"  {item.Reason}: {item.Path} ({item.Bytes / 1048576.0:N0} MiB)");
             found += items.Count;

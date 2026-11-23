@@ -101,6 +101,26 @@ public sealed partial class MainWindow : Window
         BuildShell();
         if (loadIssue is not null) Notice(loadIssue);
         else if (_store.MigratedFrom is { } source) Notice($"Imported settings from {source}.");
+        Opened += (_, _) => _ = ExpirePreviousOutputs();
+    }
+
+    /// <summary>Removes previous outputs that are past their age limit. A run does the same for its own outputs when it starts.</summary>
+    internal async Task ExpirePreviousOutputs()
+    {
+        try
+        {
+            var s = _settings.Snapshot();
+            int days = RequestFactory.PreviousDays(s); string[] outputs = RequestFactory.StageOutputs(s);
+            var removed = await Task.Run(() => PenguLOD.Plugins.OutputCleanup.ExpirePrevious(outputs, days));
+            if (removed.Count == 0) return;
+            string text = $"Removed {removed.Count} previous output(s) replaced more than {days} days ago: " + string.Join(", ", removed.Select(Path.GetFileName))
+                + ". Run options → Days to keep previous outputs sets the limit.";
+            _messages.Enqueue(text);
+            // A notice about the settings file stays; this one is in the log as well.
+            if (!_notice.IsVisible) Notice(text);
+        }
+        // Housekeeping only: a setting that is not valid yet or a folder that cannot be read is reported when a run starts.
+        catch (Exception e) when (e is ArgumentException or IOException or UnauthorizedAccessException) { }
     }
 
     private bool _saveAllowed = true;

@@ -50,12 +50,21 @@ public static class RequestFactory
     public static GenerationPipelineRequest Stages(DesktopSettings s, bool grass = false, bool textures = false, bool terrain = false, bool lod = false) => new(
         grass ? Grass(s) : null, textures ? Textures(s) : null,
         lod ? Scan(s, true) : null, s.ResumeCompletedStages, s.VerifySourceContents,
-        terrain ? Terrain(s) : null, s.PipelinePreflight, s.TextureCompute, s.ExpandOutputScope, KeepPrevious(s));
+        terrain ? Terrain(s) : null, s.PipelinePreflight, s.TextureCompute, s.ExpandOutputScope, KeepPrevious(s), PreviousDays(s));
 
     public static int KeepPrevious(DesktopSettings s) =>
         s.KeepPreviousOutputs == decimal.Truncate(s.KeepPreviousOutputs) && s.KeepPreviousOutputs is >= 0 and <= PenguLOD.Core.Pipeline.OutputRetention.Maximum
             ? (int)s.KeepPreviousOutputs
             : throw new ArgumentException($"Previous outputs to keep must be a whole number from 0 to {PenguLOD.Core.Pipeline.OutputRetention.Maximum}.");
+
+    public static int PreviousDays(DesktopSettings s) =>
+        s.PreviousOutputDays == decimal.Truncate(s.PreviousOutputDays) && s.PreviousOutputDays is >= 0 and <= PenguLOD.Core.Pipeline.OutputRetention.MaximumDays
+            ? (int)s.PreviousOutputDays
+            : throw new ArgumentException($"Days to keep previous outputs must be a whole number from 0 to {PenguLOD.Core.Pipeline.OutputRetention.MaximumDays}.");
+
+    /// <summary>The stage output folders named in the settings, whether or not their stage is selected.</summary>
+    public static string[] StageOutputs(DesktopSettings s) =>
+        new[] { s.GrassOutput, s.TextureGenOutput, s.TerrainOutput, s.OutputFolder }.Select(Optional).OfType<string>().Select(p => PathValue(p, s)).ToArray();
 
     public static IReadOnlyList<GenerationScopeStage> OutputScope(DesktopSettings s)
     {
