@@ -34,6 +34,8 @@ public sealed partial class MainWindow
             Help(Check("Keep existing worlds and levels", nameof(DesktopSettings.ExpandOutputScope)), "Expands the run when needed to preserve the existing output's coverage."),
             Help(Number("Previous outputs to keep", nameof(DesktopSettings.KeepPreviousOutputs), 0, PenguLOD.Core.Pipeline.OutputRetention.Maximum),
                 "Each publication moves the replaced output beside the new one (\".previous-\" folders). Older copies beyond this number are removed. 0 keeps none."),
+            Help(Number("Days to keep previous outputs", nameof(DesktopSettings.PreviousOutputDays), 0, PenguLOD.Core.Pipeline.OutputRetention.MaximumDays),
+                "A previous output is removed this many days after it was replaced. This is checked when a run starts and when PenguLOD opens. 0 sets no limit."),
             Button("Review output scope", ReviewOutputScope),
             Help(Check("Verify all source files", nameof(DesktopSettings.VerifySourceContents)), "Reads every source file instead of checking file sizes and modification times. This can take longer on large mod lists."),
             Button("Export run configuration", ExportPipelineRequest)) },

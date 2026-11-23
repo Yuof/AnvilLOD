@@ -8,7 +8,7 @@ namespace PenguLOD.Plugins;
 
 public sealed record GenerationPipelineRequest(GrassGenerationRequest? Grass = null, TextureGenerationRequest? Textures = null,
     ScanRequest? Lod = null, bool Resume = true, bool VerifySourceContents = false, TerrainGenerationRequest? Terrain = null, bool Preflight = true, string TextureCompute = "Cpu", bool ExpandOutputScope = false,
-    int KeepPrevious = OutputRetention.Default);
+    int KeepPrevious = OutputRetention.Default, int PreviousDays = OutputRetention.DefaultDays);
 public sealed record LodStageReceipt(string OutputFolder, int Files, int BlocksWritten, int BlocksUnchanged,
     long Triangles, IReadOnlyList<string> Warnings, string? PreviousOutput);
 public sealed record GenerationPipelineResult(string JobFolder, PipelineInputSnapshot Inputs, PipelineJournal Journal,
@@ -31,7 +31,7 @@ public static class GenerationPipeline
             progress?.Report(scope.Summary()); request = scope.Request;
         }
         using var compute = PenguLOD.Textures.TextureCompute.Enter(request.TextureCompute, progress);
-        using var retention = OutputRetention.Enter(request.KeepPrevious);
+        using var retention = OutputRetention.Enter(request.KeepPrevious, request.PreviousDays);
         var source = request.Grass?.Game ?? request.Textures?.Game ?? request.Lod?.Game ?? request.Terrain?.Game
             ?? throw new ArgumentException("Select at least one pipeline stage.");
         GenerationDestination.ValidateCache(source,cache);
@@ -80,6 +80,8 @@ public static class GenerationPipeline
         if (terrain is not null) plan.Add(new(StageIds.Terrain, "Terrain and water", terrain.OutputFolder, []));
         if (lod is not null) plan.Add(new(StageIds.Lod, "LOD", lod.OutputFolder!, plan.Select(p => p.Id).ToArray()));
         using var job = new PersistentPipeline(cache, plan, request.Resume, progress, ct);
+        // The job holds every output's lock. A stage that is reused publishes nothing, so the age limit is applied here as well.
+        foreach (var output in outputs) OutputRetention.Expire(output, request.PreviousDays, progress);
         var inputs = PipelineInputs.Capture(source, outputs, [], request.VerifySourceContents, progress, ct);
         File.WriteAllText(Path.Combine(job.Folder, "inputs.json"), JsonSerializer.Serialize(inputs, PersistentPipeline.Json));
         File.WriteAllText(Path.Combine(job.Folder, "request.json"), JsonSerializer.Serialize(request, PersistentPipeline.Json));

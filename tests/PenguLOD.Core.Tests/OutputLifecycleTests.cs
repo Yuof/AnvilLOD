@@ -155,6 +155,82 @@ public sealed class OutputLifecycleTests : IDisposable
         if (keep > 0) Assert.Equal("v2", File.ReadAllText(Path.Combine(previous[0], "PenguLOD.esm")));
     }
 
+    /// <summary>A previous copy of <paramref name="output"/> named as if it was replaced <paramref name="daysAgo"/> days ago.</summary>
+    private static string Aged(string output, double daysAgo, string content = "old")
+    {
+        string copy = OutputRetention.PreviousName(output, DateTime.Now.AddDays(-daysAgo));
+        Put(Path.Combine(copy, "PenguLOD.esm"), content); return copy;
+    }
+
+    [Fact]
+    public void PreviousCopiesPastTheAgeLimitAreRemovedWhateverTheCount()
+    {
+        string output = Path_("out");
+        Publish(output, "v1");
+        string old = Aged(output, 20), recent = Aged(output, 3);
+        Assert.Equal(DateTime.Now.AddDays(-20), OutputRetention.ReplacedAt(old)!.Value, TimeSpan.FromSeconds(1));
+        Assert.Null(OutputRetention.ReplacedAt(output + ".previous-renamed-by-hand"));
+        Assert.Equal([old], OutputRetention.Expired(output, 14));
+        Assert.Empty(OutputRetention.Expired(output, 0)); Assert.Empty(OutputRetention.Expired(output, 30));
+        // A publication applies the limit together with the count.
+        var messages = new List<string>();
+        using (OutputRetention.Enter(5, 14)) Publish(output, "v2", new Progress(messages));
+        Assert.False(Directory.Exists(old)); Assert.True(Directory.Exists(recent));
+        Assert.Equal(2, OutputRetention.PreviousCopies(output).Count);
+        Assert.Contains(messages, m => m.Contains("replaced more than 14 days ago") && m.Contains(Path.GetFileName(old)));
+        // 0 sets no limit, and a copy whose name does not give a time is never taken for an old one.
+        string ancient = Aged(output, 400), renamed = output + ".previous-renamed-by-hand"; Directory.CreateDirectory(renamed);
+        using (OutputRetention.Enter(5, 0)) Publish(output, "v3");
+        Assert.True(Directory.Exists(ancient));
+        Assert.Empty(OutputRetention.Prune(output, 100, days: 500)); Assert.True(Directory.Exists(renamed));
+        Assert.Throws<ArgumentOutOfRangeException>(() => OutputRetention.Enter(1, -1));
+    }
+
+    [Fact]
+    public void TheOnlyCopyOfAMissingOutputIsNotExpired()
+    {
+        string output = Path_("out");
+        Publish(output, "v1");
+        string old = Aged(output, 60, "all that is left");
+        Directory.Delete(output, true);   // as if a publication stopped between its two renames
+        Assert.Empty(OutputRetention.Expired(output, 14));
+        Assert.Empty(OutputCleanup.ExpirePrevious([output], 14));
+        Assert.True(Directory.Exists(old));
+    }
+
+    [Fact]
+    public async Task TheAgeLimitIsAppliedWhenTheAppOpensUnlessTheOutputIsInUse()
+    {
+        string output = Path_("out"), other = Path_("other");
+        Publish(output, "v1"); Publish(other, "v1");
+        string old = Aged(output, 20), recent = Aged(output, 2), busy = Aged(other, 20);
+        foreach (var file in Directory.GetFiles(_root, ".pengulod-output-*.lock")) File.Delete(file);
+        // Another job holds the lock. (Taken in a task: code in the flow that holds a lock joins it.)
+        using (await Task.Run(() => OutputLock.Acquire(other)))
+            Assert.Equal([old], OutputCleanup.ExpirePrevious([output, other, Path_("never generated")], 14));
+        Assert.True(Directory.Exists(recent)); Assert.True(Directory.Exists(busy));
+        // Checking an output with nothing to remove leaves no lock file beside it.
+        File.Delete(OutputLock.PathFor(output));
+        Assert.Empty(OutputCleanup.ExpirePrevious([output], 14)); Assert.False(File.Exists(OutputLock.PathFor(output)));
+        Assert.Equal([busy], OutputCleanup.ExpirePrevious([other], 14));
+    }
+
+    [Fact]
+    public void AReusedStageStillHasTheAgeLimitAppliedWhenItsRunStarts()
+    {
+        using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
+        string cache = Path.Combine(f.Root, "cache");
+        var request = new GenerationPipelineRequest(Textures: f.Request, Preflight: false, KeepPrevious: 5, PreviousDays: 14);
+        Assert.True(GenerationPipeline.Run(request, cache).Success);
+        string old = Aged(f.Output, 20), recent = Aged(f.Output, 2);
+        var messages = new List<string>();
+        var again = GenerationPipeline.Run(request, cache, new Progress(messages));
+        Assert.True(again.Success, again.Error); Assert.True(again.Journal.Stages.Single().Reused);
+        Assert.False(Directory.Exists(old)); Assert.True(Directory.Exists(recent));
+        Assert.Contains(messages, m => m.Contains("replaced more than 14 days ago"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => GenerationPipeline.Run(request with { PreviousDays = -1 }, cache));
+    }
+
     [Fact]
     public void UnfinishedWorkspacesOfThisOutputAreSweptButNotOthers()
     {
@@ -190,6 +266,17 @@ public sealed class OutputLifecycleTests : IDisposable
         Assert.Single(OutputRetention.PreviousCopies(output));
         Assert.Equal("v2", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
         Assert.Equal(2, PenguLOD.Cli.Program.Main(["clean"]));
+
+        // The age limit lists the newest copy too once it is old enough; --previous-days 0 sets no limit.
+        string old = Aged(output, 20); Directory.Delete(OutputRetention.PreviousCopies(output)[0], true);
+        Assert.Equal([old], OutputRetention.PreviousCopies(output));
+        Assert.Empty(OutputCleanup.Find(output, keepPrevious: 1));
+        Assert.Equal([old], OutputCleanup.Find(output, keepPrevious: 1, previousDays: 14).Select(i => i.Path));
+        Assert.Equal(0, PenguLOD.Cli.Program.Main(["clean", "--input", output, "--previous-days", "0", "--apply"]));
+        Assert.True(Directory.Exists(old));
+        Assert.Equal(0, PenguLOD.Cli.Program.Main(["clean", "--input", output, "--apply"]));
+        Assert.False(Directory.Exists(old));
+        Assert.Equal(2, PenguLOD.Cli.Program.Main(["clean", "--input", output, "--previous-days", "x"]));
     }
 
     [Fact]
@@ -214,6 +301,12 @@ public sealed class OutputLifecycleTests : IDisposable
         var s = new DesktopSettings { SourceMode = "Data folder / Vortex", GameFolder = f.Data, PluginsFile = f.Plugins,
             TextureGenOutput = Path.Combine(f.Root, "textures"), KeepPreviousOutputs = 3 };
         Assert.Equal(3, RequestFactory.Stages(s, textures: true).KeepPrevious);
+        Assert.Equal(OutputRetention.DefaultDays, RequestFactory.Stages(s, textures: true).PreviousDays);
+        s.PreviousOutputDays = 30; Assert.Equal(30, RequestFactory.Stages(s, textures: true).PreviousDays);
+        s.PreviousOutputDays = -1; Assert.Throws<ArgumentException>(() => RequestFactory.Stages(s, textures: true)); s.PreviousOutputDays = 0;
+        Assert.Equal(OutputRetention.DefaultDays, new GenerationPipelineRequest().PreviousDays);
+        Assert.Equal(OutputRetention.DefaultDays, JsonSerializer.Deserialize<GenerationPipelineRequest>("{}", PersistentPipeline.Json)!.PreviousDays);
+        Assert.Equal([Path.Combine(f.Root, "textures")], RequestFactory.StageOutputs(s));
         s.KeepPreviousOutputs = 1.5m; Assert.Throws<ArgumentException>(() => RequestFactory.Stages(s, textures: true));
         Assert.Equal(OutputRetention.Default, new GenerationPipelineRequest().KeepPrevious);
         Assert.Throws<ArgumentOutOfRangeException>(() => OutputRetention.Enter(-1));

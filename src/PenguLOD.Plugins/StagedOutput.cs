@@ -37,7 +37,7 @@ public sealed class StagedOutput : IDisposable
     private bool _blocksSeeded;
     private readonly Dictionary<string, string> _expected;
     private readonly IDisposable _lock;
-    private readonly int _keepPrevious;
+    private readonly int _keepPrevious, _keepDays;
 
     /// <summary>Workspaces are named for their output, so a sweep never touches another output's build.</summary>
     public static string WorkspacePrefix(string output) =>
@@ -45,7 +45,7 @@ public sealed class StagedOutput : IDisposable
 
     public StagedOutput(string output, bool seedPrevious, IProgress<string>? progress = null, CancellationToken ct = default, bool deferLodBlocks = false, OutputSnapshot? previousHashes = null)
     {
-        Output = HostPath.Canonical(output); _ct = ct; _keepPrevious = OutputRetention.KeepPrevious;
+        Output = HostPath.Canonical(output); _ct = ct; _keepPrevious = OutputRetention.KeepPrevious; _keepDays = OutputRetention.KeepDays;
         var paths = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         _expected = previousHashes?.Files.ToDictionary(k => k.Key.Replace('\\', '/'), v => v.Value, paths) ?? new(paths);
         _lock = OutputLock.Acquire(Output);
@@ -144,7 +144,7 @@ public sealed class StagedOutput : IDisposable
         if (_existed)
         {
             // Names sort by publication time (to the millisecond), which retention relies on.
-            string previous = Output + ".previous-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", System.Globalization.CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N")[..6];
+            string previous = OutputRetention.PreviousName(Output, DateTime.Now);
             if (TryExchange(Payload, Output))
             {
                 // The new output is live. The old one now sits at Payload and is moved beside it.
@@ -181,7 +181,7 @@ public sealed class StagedOutput : IDisposable
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { throw Unpublished(e); }
         }
         progress?.Report("Published output: " + Output);
-        OutputRetention.Prune(Output, _keepPrevious, progress);
+        OutputRetention.Prune(Output, _keepPrevious, progress, _keepDays);
         if (PreviousOutput is not null && !Directory.Exists(PreviousOutput)) PreviousOutput = null;
         if (PreviousOutput is not null) progress?.Report("Previous output retained: " + PreviousOutput);
     }

@@ -132,7 +132,9 @@ and its output files have not changed.
 
 Each time a stage is replaced, the old folder is kept beside the new one with a
 `.previous-` suffix. **Previous outputs to keep** under **Run options** sets how many are
-kept; the default is 1.
+kept; the default is 1. A kept folder is removed 14 days after it was replaced, when a run
+starts or PenguLOD opens. **Days to keep previous outputs** changes that; 0 keeps the
+folder until a newer one takes its place.
 
 ## What to rerun after a change
 

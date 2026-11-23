@@ -11,13 +11,17 @@ public static class OutputCleanup
     /// <summary>Unattributed build folders of older versions are only removed once they are this old.</summary>
     public static readonly TimeSpan LegacyMinimumAge = TimeSpan.FromHours(24);
 
-    public static IReadOnlyList<CleanupItem> Find(string output, int keepPrevious, CancellationToken ct = default)
+    /// <param name="previousDays">Previous copies replaced more than this many days ago are listed too. 0: no age limit.</param>
+    public static IReadOnlyList<CleanupItem> Find(string output, int keepPrevious, CancellationToken ct = default, int previousDays = 0, DateTime? now = null)
     {
         if (keepPrevious is < 0 or > OutputRetention.Maximum) throw new ArgumentOutOfRangeException(nameof(keepPrevious));
+        if (previousDays is < 0 or > OutputRetention.MaximumDays) throw new ArgumentOutOfRangeException(nameof(previousDays));
         string full = HostPath.Canonical(output), parent = Path.GetDirectoryName(full)!;
         var items = new List<CleanupItem>();
         void Add(string dir, string reason) { if (new DirectoryInfo(dir).LinkTarget is null) items.Add(new(dir, reason, Size(dir, ct))); }
-        foreach (string old in OutputRetention.PreviousCopies(full).Skip(keepPrevious)) Add(old, "previous output");
+        var extra = OutputRetention.PreviousCopies(full).Skip(keepPrevious).ToArray();
+        foreach (string old in extra) Add(old, "previous output");
+        foreach (string old in OutputRetention.Expired(full, previousDays, now).Except(extra)) Add(old, $"previous output replaced more than {previousDays} days ago");
         if (Directory.Exists(parent))
         {
             foreach (string dir in Directory.EnumerateDirectories(parent, StagedOutput.WorkspacePrefix(full) + "*")) Add(dir, "unfinished build");
@@ -44,6 +48,23 @@ public static class OutputCleanup
         {
             try { Directory.Delete(item.Path, recursive: true); removed++; progress?.Report("Removed " + item.Path); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { progress?.Report("Could not remove " + item.Path + ": " + e.Message); }
+        }
+        return removed;
+    }
+
+    /// <summary>
+    /// Removes the previous copies of <paramref name="outputs"/> that are past the age limit, for a caller that holds no
+    /// output lock (the desktop app when it opens). An output a job is using is skipped. Returns the folders removed.
+    /// </summary>
+    public static IReadOnlyList<string> ExpirePrevious(IEnumerable<string> outputs, int days, IProgress<string>? progress = null, DateTime? now = null)
+    {
+        var removed = new List<string>();
+        foreach (string output in outputs.Select(HostPath.Canonical).Distinct())
+        {
+            // Nothing to do is the usual case, and then no lock file is written beside the output.
+            if (OutputRetention.Expired(output, days, now).Count == 0) continue;
+            try { using var guard = OutputLock.Acquire(output); removed.AddRange(OutputRetention.Expire(output, days, progress, now)); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { /* in use: its job applies the limit */ }
         }
         return removed;
     }

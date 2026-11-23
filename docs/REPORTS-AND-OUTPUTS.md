@@ -98,8 +98,10 @@ output folder cannot be narrowed to fewer worldspaces than it already holds.
 ## Remove old copies
 
 Each time a stage is replaced, the old folder is kept beside it with a `.previous-` suffix.
-**Previous outputs to keep** sets how many are kept. To list the extra copies and any
-unfinished build folders, run this while nothing is generating:
+**Previous outputs to keep** sets how many are kept, and **Days to keep previous outputs**
+for how long after they were replaced (14 days by default). Both are under **Overview → Run
+options**. To list the copies over either limit and any unfinished build folders, run this
+while nothing is generating:
 
 ```sh
 PenguLOD clean --input "/path/to/output folder"

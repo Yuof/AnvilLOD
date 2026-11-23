@@ -53,6 +53,25 @@ public sealed class DesktopTests : IDisposable
             .Children.OfType<T>().Single();
 
     [AvaloniaFact]
+    public async Task OpeningTheAppRemovesPreviousOutputsPastTheirAgeLimit()
+    {
+        string output = Path.Combine(_root, "Textures"); Directory.CreateDirectory(output);
+        string Aged(int days) => Directory.CreateDirectory(PenguLOD.Core.Pipeline.OutputRetention.PreviousName(output, DateTime.Now.AddDays(-days))).FullName;
+        string old = Aged(20), recent = Aged(3);
+        var window = Window();
+        window.ReplaceSettings(new DesktopSettings { TextureGenOutput = output, PreviousOutputDays = 0 });
+        await window.ExpirePreviousOutputs();
+        Assert.True(Directory.Exists(old));
+        window.ReplaceSettings(new DesktopSettings { TextureGenOutput = output });
+        await window.ExpirePreviousOutputs();
+        Assert.False(Directory.Exists(old)); Assert.True(Directory.Exists(recent));
+        // A value that is not valid yet is left for the run to report.
+        window.ReplaceSettings(new DesktopSettings { TextureGenOutput = output, PreviousOutputDays = 1.5m });
+        await window.ExpirePreviousOutputs();
+        Assert.True(Directory.Exists(recent));
+    }
+
+    [AvaloniaFact]
     public void WorkflowStageOutputsStayInSyncAndOnlySelectedStagesRun()
     {
         using var fixture = new TextureFixture(); var window = Window();

@@ -47,6 +47,7 @@ These can be added to a `--settings` or `--request` run:
 | `--verify-source-contents` | Read every source file in full when deciding what can be reused |
 | `--expand-output-scope` | Keep the worldspaces and levels already in an output folder |
 | `--keep-previous <n>` | Previous copies of each output to keep, 0 to 100 (default 1) |
+| `--previous-days <n>` | Days a previous copy is kept after it was replaced, 0 to 3650 (default 14). 0 sets no limit |
 | `--texture-compute Cpu\|Auto\|Vulkan` | Texture encoder |
 | `--wine-prefix <path>` | Wine or Proton prefix used to resolve Windows paths |
 | `--report <file>` | Write a JSON report of the run |
