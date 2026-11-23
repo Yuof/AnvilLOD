@@ -31,7 +31,7 @@ public sealed class PresetTests : IDisposable
         "TextureGenFilter", "UseGeneratedTextures", "GrassOutput", "GrassExecutable", "GrassWorldspaces", "GrassNgioConfig", "GrassPreview",
         "UseGeneratedGrass", "GrassCellX", "GrassCellY", "GrassRadius", "GrassWriters", "TextureInputs", "TextureOutput", "TexconvPath",
         "ConvertSource", "ConvertOutput", "CleanOutput", "TextureAllMods", "ConvertAllMeshes", "ConvertOverwrite", "TextureCompute",
-        "MaxThreads", "ResumeCompletedStages", "ExpandOutputScope", "KeepPreviousOutputs", "VerifySourceContents", "PipelineGrass",
+        "MaxThreads", "ResumeCompletedStages", "ExpandOutputScope", "KeepPreviousOutputs", "PreviousOutputDays", "VerifySourceContents", "PipelineGrass",
         "PipelineTextures", "PipelineLod", "PresetScreen",
     ];
 

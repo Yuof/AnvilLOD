@@ -85,44 +85,93 @@ public static class OutputLock
     }
 }
 
-/// <summary>How many earlier copies of an output a publication keeps beside it (".previous-*").</summary>
+/// <summary>How many earlier copies of an output a publication keeps beside it (".previous-*"), and for how long.</summary>
 public static class OutputRetention
 {
     public const int Default = 1;
     public const int Maximum = 100;
-    private static readonly AsyncLocal<int?> Current = new();
-    public static int KeepPrevious => Current.Value ?? Default;
+    /// <summary>Days an earlier copy is kept after it was replaced. 0 keeps it until newer copies take its place.</summary>
+    public const int DefaultDays = 14;
+    public const int MaximumDays = 3650;
+    private const string Infix = ".previous-", Stamp = "yyyyMMdd-HHmmss-fff";
+    private static readonly AsyncLocal<(int Keep, int Days)?> Current = new();
+    public static int KeepPrevious => Current.Value?.Keep ?? Default;
+    public static int KeepDays => Current.Value?.Days ?? DefaultDays;
 
-    public static IDisposable Enter(int keepPrevious)
+    public static IDisposable Enter(int keepPrevious, int keepDays = DefaultDays)
     {
         if (keepPrevious is < 0 or > Maximum) throw new ArgumentOutOfRangeException(nameof(keepPrevious), $"Keep between 0 and {Maximum} previous outputs.");
-        var previous = Current.Value; Current.Value = keepPrevious;
+        if (keepDays is < 0 or > MaximumDays) throw new ArgumentOutOfRangeException(nameof(keepDays), $"Keep previous outputs between 0 and {MaximumDays} days.");
+        var previous = Current.Value; Current.Value = (keepPrevious, keepDays);
         return new Scope(() => Current.Value = previous);
+    }
+
+    /// <summary>The folder name an output replaced at <paramref name="replaced"/> (local time) is kept under.</summary>
+    public static string PreviousName(string output, DateTime replaced) =>
+        Path.TrimEndingDirectorySeparator(output) + Infix + replaced.ToString(Stamp, System.Globalization.CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N")[..6];
+
+    /// <summary>When an earlier copy was replaced (local time), read from its folder name. Null when the name does not say.</summary>
+    public static DateTime? ReplacedAt(string previousCopy)
+    {
+        string name = Path.GetFileName(Path.TrimEndingDirectorySeparator(previousCopy));
+        int at = name.LastIndexOf(Infix, StringComparison.Ordinal);
+        if (at < 0 || name.Length < at + Infix.Length + Stamp.Length) return null;
+        return DateTime.TryParseExact(name.AsSpan(at + Infix.Length, Stamp.Length), Stamp, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeLocal, out var replaced) ? replaced : null;
     }
 
     /// <summary>Earlier copies of <paramref name="output"/>, newest first. Their names sort by publication time.</summary>
     public static IReadOnlyList<string> PreviousCopies(string output)
     {
         string full = Path.TrimEndingDirectorySeparator(HostPath.Canonical(output));
-        string parent = Path.GetDirectoryName(full)!, prefix = Path.GetFileName(full) + ".previous-";
+        string parent = Path.GetDirectoryName(full)!, prefix = Path.GetFileName(full) + Infix;
         if (!Directory.Exists(parent)) return [];
         return Directory.EnumerateDirectories(parent)
             .Where(d => Path.GetFileName(d).StartsWith(prefix, StringComparison.Ordinal) && new DirectoryInfo(d).LinkTarget is null)
             .OrderByDescending(d => Path.GetFileName(d), StringComparer.Ordinal).ToArray();
     }
 
-    /// <summary>Deletes earlier copies beyond the newest <paramref name="keep"/>. Returns the folders removed.</summary>
-    public static IReadOnlyList<string> Prune(string output, int keep, IProgress<string>? progress = null)
+    /// <summary>
+    /// Earlier copies replaced more than <paramref name="days"/> days ago. None when <paramref name="days"/> is 0, and none
+    /// while the output itself is missing: a copy may then be all that is left of it.
+    /// </summary>
+    public static IReadOnlyList<string> Expired(string output, int days, DateTime? now = null)
     {
-        var removed = new List<string>();
-        foreach (string old in PreviousCopies(output).Skip(Math.Max(0, keep)))
+        if (days <= 0 || !Directory.Exists(output)) return [];
+        DateTime limit = (now ?? DateTime.Now).AddDays(-days);
+        return PreviousCopies(output).Where(copy => ReplacedAt(copy) < limit).ToArray();
+    }
+
+    /// <summary>
+    /// Deletes earlier copies beyond the newest <paramref name="keep"/>, and those replaced more than <paramref name="days"/>
+    /// days ago (0: no age limit). Returns the folders removed.
+    /// </summary>
+    public static IReadOnlyList<string> Prune(string output, int keep, IProgress<string>? progress = null, int days = 0, DateTime? now = null)
+    {
+        int extra = Remove(PreviousCopies(output).Skip(Math.Max(0, keep)), progress, out var removed);
+        if (extra > 0) progress?.Report($"Removed {extra} older previous output(s); keeping {keep}.");
+        removed.AddRange(Expire(output, days, progress, now));
+        return removed;
+    }
+
+    /// <summary>Deletes the earlier copies <see cref="Expired"/> names. Returns the folders removed.</summary>
+    public static IReadOnlyList<string> Expire(string output, int days, IProgress<string>? progress = null, DateTime? now = null)
+    {
+        int old = Remove(Expired(output, days, now), progress, out var removed);
+        if (old > 0) progress?.Report($"Removed {old} previous output(s) replaced more than {days} days ago: " + string.Join(", ", removed.Select(Path.GetFileName)));
+        return removed;
+    }
+
+    private static int Remove(IEnumerable<string> copies, IProgress<string>? progress, out List<string> removed)
+    {
+        removed = [];
+        foreach (string old in copies)
         {
             try { Directory.Delete(old, recursive: true); removed.Add(old); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             { progress?.Report("Could not remove previous output " + old + ": " + e.Message); }
         }
-        if (removed.Count > 0) progress?.Report($"Removed {removed.Count} older previous output(s); keeping {keep}.");
-        return removed;
+        return removed.Count;
     }
 
     private sealed class Scope(Action end) : IDisposable

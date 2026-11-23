@@ -2,6 +2,18 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
+## [0.6.0-beta.11] - 2026-11-22
+
+- Added **Days to keep previous outputs** under **Overview → Run options** (`--previous-days`, default 14). A previous output is removed that many days after it was replaced, when a run starts or PenguLOD opens. 0 sets no limit, as before.
+- Added **Storage** on **Reports & outputs**. It lists what the stage output folders and the cache folder hold on disk, removes the previous outputs, unfinished builds and checkpoints you select, and restores a previous output.
+- Added the `restore` command, which puts a previous output back in place, and `--leftovers` for `clean`.
+- Added an estimate of the disk space a run needs on each drive to the setup check, with a warning when the drive has less free.
+- Changed the terrain stage to keep only small tile receipts in the cache folder once the terrain is published, instead of a second copy of every tile. An existing cache is trimmed the next time the same stages run.
+- Changed terrain tile checkpoints of a run that stopped to be removed when the same stages have not run for 30 days.
+- Changed a stage that starts with less free space than its current output takes to remove the previous outputs it would replace before it builds instead of after.
+- Changed the message for a full disk to say what to do.
+- Fixed the "A file could not be read partway through the run" message never appearing on Windows.
+
 ## [0.6.0-beta.10] - 2026-11-21
 
 - Changed the game plugin DLLs to be built with the MSVC 14.44 toolset. Several virus scanners flagged the DLLs of 0.6.0-beta.7 to beta.9, which a newer compiler built from the same source; that was a false positive.

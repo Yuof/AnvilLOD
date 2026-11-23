@@ -173,6 +173,8 @@ file** on **Game & resources**.
 | Check setup before generation | Checks missing inputs, output conflicts and other blocking problems. On by default. |
 | Reuse completed stages | Reuses successful stages when settings, inputs and output checks match. On by default. |
 | Keep existing worlds and levels | Expands a partial run when needed to preserve the current output's coverage. Off by default. **Review output scope** shows the additional work. Use a new folder for an isolated test. |
+| Previous outputs to keep | How many replaced copies of each output are kept beside it, in folders with a `.previous-` suffix. 1 by default. 0 keeps none. |
+| Days to keep previous outputs | A previous output is removed this many days after it was replaced, when a run starts or PenguLOD opens. 14 by default. 0 sets no limit. |
 | Verify all source files | Reads every source asset instead of checking sizes and modification times for large assets. Off by default. |
 
 **Export run configuration** saves the selection for the [CLI](CLI.md).

@@ -8,7 +8,7 @@ namespace PenguLOD.Plugins;
 
 public sealed record GenerationPipelineRequest(GrassGenerationRequest? Grass = null, TextureGenerationRequest? Textures = null,
     ScanRequest? Lod = null, bool Resume = true, bool VerifySourceContents = false, TerrainGenerationRequest? Terrain = null, bool Preflight = true, string TextureCompute = "Cpu", bool ExpandOutputScope = false,
-    int KeepPrevious = OutputRetention.Default);
+    int KeepPrevious = OutputRetention.Default, int PreviousDays = OutputRetention.DefaultDays);
 public sealed record LodStageReceipt(string OutputFolder, int Files, int BlocksWritten, int BlocksUnchanged,
     long Triangles, IReadOnlyList<string> Warnings, string? PreviousOutput);
 public sealed record GenerationPipelineResult(string JobFolder, PipelineInputSnapshot Inputs, PipelineJournal Journal,
@@ -21,6 +21,10 @@ public sealed record GenerationPipelineResult(string JobFolder, PipelineInputSna
 /// <summary>Shared persistent orchestration for desktop and CLI. Generated inputs are explicit dependencies.</summary>
 public static class GenerationPipeline
 {
+    private const string TerrainTiles = "terrain-tiles";
+    /// <summary>Tile checkpoints of an unfinished terrain run are removed when its job has not run for this long.</summary>
+    public static readonly TimeSpan IdleCheckpointAge = TimeSpan.FromDays(30);
+
     public static GenerationPipelineResult Run(GenerationPipelineRequest request, string cache,
         IProgress<string>? progress = null, CancellationToken ct = default)
     {
@@ -31,7 +35,7 @@ public static class GenerationPipeline
             progress?.Report(scope.Summary()); request = scope.Request;
         }
         using var compute = PenguLOD.Textures.TextureCompute.Enter(request.TextureCompute, progress);
-        using var retention = OutputRetention.Enter(request.KeepPrevious);
+        using var retention = OutputRetention.Enter(request.KeepPrevious, request.PreviousDays);
         var source = request.Grass?.Game ?? request.Textures?.Game ?? request.Lod?.Game ?? request.Terrain?.Game
             ?? throw new ArgumentException("Select at least one pipeline stage.");
         GenerationDestination.ValidateCache(source,cache);
@@ -80,6 +84,12 @@ public static class GenerationPipeline
         if (terrain is not null) plan.Add(new(StageIds.Terrain, "Terrain and water", terrain.OutputFolder, []));
         if (lod is not null) plan.Add(new(StageIds.Lod, "LOD", lod.OutputFolder!, plan.Select(p => p.Id).ToArray()));
         using var job = new PersistentPipeline(cache, plan, request.Resume, progress, ct);
+        // A terrain run that stopped keeps its finished tiles for the next attempt. Other stage selections have their own
+        // job folder; one that was not picked up again would keep those tiles for good.
+        if (job.RemoveFromIdleJobs(TerrainTiles, IdleCheckpointAge) is > 0 and var idle)
+            progress?.Report($"Removed terrain tile checkpoints of {idle} job(s) not run for {IdleCheckpointAge.Days} days.");
+        // The job holds every output's lock. A stage that is reused publishes nothing, so the age limit is applied here as well.
+        foreach (var output in outputs) OutputRetention.Expire(output, request.PreviousDays, progress);
         var inputs = PipelineInputs.Capture(source, outputs, [], request.VerifySourceContents, progress, ct);
         File.WriteAllText(Path.Combine(job.Folder, "inputs.json"), JsonSerializer.Serialize(inputs, PersistentPipeline.Json));
         File.WriteAllText(Path.Combine(job.Folder, "request.json"), JsonSerializer.Serialize(request, PersistentPipeline.Json));
@@ -94,7 +104,7 @@ public static class GenerationPipeline
             if (request.Preflight)
             {
                 active = "preflight";
-                diagnostics = PipelineDiagnostics.Run(request with { Grass = grass, Textures = textures, Terrain = terrain, Lod = lod }, progress: progress, ct: ct);
+                diagnostics = PipelineDiagnostics.Run(request with { Grass = grass, Textures = textures, Terrain = terrain, Lod = lod }, progress: progress, ct: ct, cacheFolder: cache);
                 diagnostics.Write(Path.Combine(job.Folder, "diagnostics.json"));
                 if (!diagnostics.CanGenerate) throw new InvalidDataException("Preflight found blocking issues: " + string.Join("; ", diagnostics.Issues.Where(i => i.Severity == "Error").Select(i => i.Message)));
             }
@@ -128,9 +138,12 @@ public static class GenerationPipeline
                 active = StageIds.Terrain;
                 string terrainFingerprint=Fingerprint(terrain);
                 OutputSnapshot? terrainOutput = null;
+                string terrainTiles = Path.Combine(job.Folder, TerrainTiles);
                 terrainResult = job.Run(StageIds.Terrain, terrainFingerprint, () => TerrainGeneration.RunWithCheckpoints(terrain,
-                    Path.Combine(job.Folder,"terrain-tiles"),terrainFingerprint,request.Resume,progress,ct,
+                    terrainTiles,terrainFingerprint,request.Resume,progress,ct,
                     (payload, snapshot) => terrainOutput = Record(StageIds.Terrain, payload, snapshot)), _ => terrainOutput!);
+                // The terrain is published and recorded (or verified as it was). The tile checkpoints were a second copy of it.
+                TerrainTileCache.Trim(terrainTiles, progress, ct);
             }
             if (lod is not null)
             {
@@ -202,8 +215,9 @@ public static class GenerationPipeline
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            // A read that failed because its storage went away gets a plain account; the stack trace says nothing more.
-            string? plain = RunEnvironment.DescribeLostStorage(e);
+            // A read that failed because its storage went away, or a write to a full disk, gets a plain account; the stack
+            // trace says nothing more.
+            string? plain = RunEnvironment.DescribeLostStorage(e) ?? RunEnvironment.DescribeFullDisk(e);
             error = plain ?? e.Message;
             progress?.Report("Pipeline stopped at " + active + ": " + (plain ?? e.ToString()));
         }

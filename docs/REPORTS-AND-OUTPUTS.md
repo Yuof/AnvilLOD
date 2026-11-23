@@ -95,17 +95,51 @@ output folder cannot be narrowed to fewer worldspaces than it already holds.
   output scope**, then turn on **Keep existing worlds and levels**. The run then covers the
   worldspaces already in the folder as well as the ones you selected.
 
-## Remove old copies
+## Storage
 
 Each time a stage is replaced, the old folder is kept beside it with a `.previous-` suffix.
-**Previous outputs to keep** sets how many are kept. To list the extra copies and any
-unfinished build folders, run this while nothing is generating:
+**Previous outputs to keep** sets how many are kept, and **Days to keep previous outputs**
+for how long after they were replaced (14 days by default). Both are under **Overview → Run
+options**.
+
+On **Reports & outputs**, **Measure storage** lists what the stage output folders in your
+settings hold on disk:
+
+| What it is | Meaning |
+| --- | --- |
+| Output | A stage output folder. It is never removed here. |
+| Previous output | An earlier copy of an output, with when it was generated and when it was replaced. |
+| Unfinished build | A build folder left by a run that stopped. The next run of that stage removes it. |
+| Finished build that was not published | A complete build that could not be moved into place. See [Troubleshooting](TROUBLESHOOTING.md). |
+| Previous output of another folder, unfinished build of another folder | Left in the same parent folder by an output folder that is not one of those in your settings, for example one that was renamed or is no longer used. |
+| Terrain tile checkpoints | Finished tiles a terrain run keeps in the cache folder so that it can continue after a stop. |
+
+Select rows and click **Remove selected**, then click it again to confirm. The folders are
+deleted, not moved to a recycle bin. A folder that a running job is using is left.
+
+### Go back to a previous output
+
+Select one previous output and click **Restore selected**. It is moved back into place, and
+the output it replaces becomes a previous output, so restoring that one undoes it. Your
+`meta.ini` and `SKSE/Plugins/PenguLOD.ini` stay as they are. Restart Skyrim afterwards.
+
+- Object LOD is built against the grass, texture and terrain outputs of its run. Restore the
+  outputs of one run together.
+- Restoring does not change your settings. The next run of that stage generates a new output.
+
+### From the command line
+
+Run these while nothing is generating:
 
 ```sh
 PenguLOD clean --input "/path/to/output folder"
+PenguLOD restore --input "/path/to/output folder"
 ```
 
-Add `--apply` to delete them.
+`clean` lists the previous copies over either limit and any unfinished build folders; add
+`--apply` to delete them. `--leftovers` also lists, in the same parent folders, unfinished
+builds of other outputs and previous copies whose output folder is gone. `restore` puts the
+newest previous copy back; `--previous <folder>` names another.
 
 ## Command line
 

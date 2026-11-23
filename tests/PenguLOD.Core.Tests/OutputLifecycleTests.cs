@@ -17,6 +17,7 @@ public sealed class OutputLifecycleTests : IDisposable
     public void Dispose()
     {
         StagedOutput.DisableExchange = false; StagedOutput.MoveOverride = null; StagedOutput.MoveRetry = TimeSpan.FromSeconds(120);
+        DiskSpace.Override = null;
         if (Directory.Exists(_root)) Directory.Delete(_root, true);
     }
 
@@ -155,6 +156,259 @@ public sealed class OutputLifecycleTests : IDisposable
         if (keep > 0) Assert.Equal("v2", File.ReadAllText(Path.Combine(previous[0], "PenguLOD.esm")));
     }
 
+    /// <summary>A previous copy of <paramref name="output"/> named as if it was replaced <paramref name="daysAgo"/> days ago.</summary>
+    private static string Aged(string output, double daysAgo, string content = "old")
+    {
+        string copy = OutputRetention.PreviousName(output, DateTime.Now.AddDays(-daysAgo));
+        Put(Path.Combine(copy, "PenguLOD.esm"), content); return copy;
+    }
+
+    [Fact]
+    public void PreviousCopiesPastTheAgeLimitAreRemovedWhateverTheCount()
+    {
+        string output = Path_("out");
+        Publish(output, "v1");
+        string old = Aged(output, 20), recent = Aged(output, 3);
+        Assert.Equal(DateTime.Now.AddDays(-20), OutputRetention.ReplacedAt(old)!.Value, TimeSpan.FromSeconds(1));
+        Assert.Null(OutputRetention.ReplacedAt(output + ".previous-renamed-by-hand"));
+        Assert.Equal([old], OutputRetention.Expired(output, 14));
+        Assert.Empty(OutputRetention.Expired(output, 0)); Assert.Empty(OutputRetention.Expired(output, 30));
+        // A publication applies the limit together with the count.
+        var messages = new List<string>();
+        using (OutputRetention.Enter(5, 14)) Publish(output, "v2", new Progress(messages));
+        Assert.False(Directory.Exists(old)); Assert.True(Directory.Exists(recent));
+        Assert.Equal(2, OutputRetention.PreviousCopies(output).Count);
+        Assert.Contains(messages, m => m.Contains("replaced more than 14 days ago") && m.Contains(Path.GetFileName(old)));
+        // 0 sets no limit, and a copy whose name does not give a time is never taken for an old one.
+        string ancient = Aged(output, 400), renamed = output + ".previous-renamed-by-hand"; Directory.CreateDirectory(renamed);
+        using (OutputRetention.Enter(5, 0)) Publish(output, "v3");
+        Assert.True(Directory.Exists(ancient));
+        Assert.Empty(OutputRetention.Prune(output, 100, days: 500)); Assert.True(Directory.Exists(renamed));
+        Assert.Throws<ArgumentOutOfRangeException>(() => OutputRetention.Enter(1, -1));
+    }
+
+    [Fact]
+    public void TheOnlyCopyOfAMissingOutputIsNotExpired()
+    {
+        string output = Path_("out");
+        Publish(output, "v1");
+        string old = Aged(output, 60, "all that is left");
+        Directory.Delete(output, true);   // as if a publication stopped between its two renames
+        Assert.Empty(OutputRetention.Expired(output, 14));
+        Assert.Empty(OutputCleanup.ExpirePrevious([output], 14));
+        Assert.True(Directory.Exists(old));
+    }
+
+    [Fact]
+    public async Task TheAgeLimitIsAppliedWhenTheAppOpensUnlessTheOutputIsInUse()
+    {
+        string output = Path_("out"), other = Path_("other");
+        Publish(output, "v1"); Publish(other, "v1");
+        string old = Aged(output, 20), recent = Aged(output, 2), busy = Aged(other, 20);
+        foreach (var file in Directory.GetFiles(_root, ".pengulod-output-*.lock")) File.Delete(file);
+        // Another job holds the lock. (Taken in a task: code in the flow that holds a lock joins it.)
+        using (await Task.Run(() => OutputLock.Acquire(other)))
+            Assert.Equal([old], OutputCleanup.ExpirePrevious([output, other, Path_("never generated")], 14));
+        Assert.True(Directory.Exists(recent)); Assert.True(Directory.Exists(busy));
+        // Checking an output with nothing to remove leaves no lock file beside it.
+        File.Delete(OutputLock.PathFor(output));
+        Assert.Empty(OutputCleanup.ExpirePrevious([output], 14)); Assert.False(File.Exists(OutputLock.PathFor(output)));
+        Assert.Equal([busy], OutputCleanup.ExpirePrevious([other], 14));
+    }
+
+    [Fact]
+    public void AReusedStageStillHasTheAgeLimitAppliedWhenItsRunStarts()
+    {
+        using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
+        string cache = Path.Combine(f.Root, "cache");
+        var request = new GenerationPipelineRequest(Textures: f.Request, Preflight: false, KeepPrevious: 5, PreviousDays: 14);
+        Assert.True(GenerationPipeline.Run(request, cache).Success);
+        string old = Aged(f.Output, 20), recent = Aged(f.Output, 2);
+        var messages = new List<string>();
+        var again = GenerationPipeline.Run(request, cache, new Progress(messages));
+        Assert.True(again.Success, again.Error); Assert.True(again.Journal.Stages.Single().Reused);
+        Assert.False(Directory.Exists(old)); Assert.True(Directory.Exists(recent));
+        Assert.Contains(messages, m => m.Contains("replaced more than 14 days ago"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => GenerationPipeline.Run(request with { PreviousDays = -1 }, cache));
+    }
+
+    [Theory]
+    [InlineData(1, 0)] [InlineData(2, 1)] [InlineData(0, 0)]
+    public void WithTooLittleSpaceThePreviousCopiesABuildWouldReplaceAreRemovedBeforeIt(int keep, int left)
+    {
+        string output = Path_("out");
+        using var retention = OutputRetention.Enter(keep);
+        using (OutputRetention.Enter(2))
+            for (int i = 0; i < 3; i++) { Publish(output, "version " + i); Thread.Sleep(20); }
+        Assert.Equal(2, OutputRetention.PreviousCopies(output).Count);
+        long size = new FileInfo(Path.Combine(output, "PenguLOD.esm")).Length;
+
+        // Enough room for a build the size of the output: nothing is removed until the build is published.
+        DiskSpace.Override = _ => new("volume", size * 2);
+        using (new StagedOutput(output, seedPrevious: false)) Assert.Equal(2, OutputRetention.PreviousCopies(output).Count);
+
+        DiskSpace.Override = _ => new("volume", size / 2);
+        var messages = new List<string>();
+        using (var staged = new StagedOutput(output, seedPrevious: false, new Progress(messages)))
+        {
+            // The copies this publication keeps, and the output, are still there while it builds.
+            Assert.Equal(left, OutputRetention.PreviousCopies(output).Count);
+            Assert.Equal("version 2", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
+            Assert.Contains(messages, m => m.StartsWith("Low disk space") && m.Contains($"Removed {2 - left} previous output(s) before building"));
+            Put(Path.Combine(staged.Payload, "PenguLOD.esm"), "version 3");
+            staged.Commit();
+        }
+        Assert.Equal(keep, OutputRetention.PreviousCopies(output).Count);
+        if (keep > 0) Assert.Equal("version 2", File.ReadAllText(Path.Combine(OutputRetention.PreviousCopies(output)[0], "PenguLOD.esm")));
+        // When the free space cannot be read, nothing is removed early.
+        DiskSpace.Override = _ => null;
+        using (OutputRetention.Enter(1)) using (new StagedOutput(output, seedPrevious: false)) Assert.Equal(keep, OutputRetention.PreviousCopies(output).Count);
+    }
+
+    [Fact]
+    public void SpaceNeededIsTheLargestBuildOnTopOfTheCopiesThatStay()
+    {
+        // Grass gains a previous copy (10 stays), textures replaces one (5 only while building),
+        // terrain builds 40 beside its output and keeps 40 in the cache on another drive, LOD builds 30.
+        var peak = DiskSpace.Peak([[new("a", 10, 10)], [new("a", 5, 0)], [new("a", 40, 0), new("b", 40, 0)], [new("a", 30, 30)]]);
+        Assert.Equal(50, peak["a"]); Assert.Equal(40, peak["b"]);
+        // With the cache on the output's drive both copies of the terrain are there at once.
+        Assert.Equal(80, DiskSpace.Peak([[new("a", 40, 0), new("a", 40, 0)]])["a"]);
+        Assert.Empty(DiskSpace.Peak([]));
+        Assert.NotNull(DiskSpace.Of(_root)); Assert.True(DiskSpace.Of(Path_("not", "yet", "there"))!.Free > 0);
+        Put(Path_("sized", "a", "b.bin"), "12345"); Assert.Equal(5, DiskSpace.SizeOf(Path_("sized"))); Assert.Equal(0, DiskSpace.SizeOf(Path_("absent")));
+    }
+
+    [Fact]
+    public void PreflightWarnsWhenAVolumeHasLessFreeThanTheRunNeeds()
+    {
+        using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
+        string cache = Path.Combine(f.Root, "cache");
+        var request = new GenerationPipelineRequest(Textures: f.Request);
+        var first = GenerationPipeline.Run(request, cache);
+        Assert.True(first.Success, first.Error);
+        Assert.DoesNotContain(first.Diagnostics!.Issues, i => i.Code == "low-disk-space");   // nothing to estimate from yet
+        long size = DiskSpace.SizeOf(f.Output);
+
+        DiskSpace.Override = _ => new("/fixture", size - 1);
+        var report = PipelineDiagnostics.Run(request);
+        Assert.Contains(report.Estimates, e => e.Name == "Space needed on /fixture" && e.Value == size);
+        var issue = Assert.Single(report.Issues, i => i.Code == "low-disk-space");
+        Assert.Equal("Warning", issue.Severity); Assert.Contains("/fixture has", issue.Message); Assert.True(report.CanGenerate);
+
+        DiskSpace.Override = _ => new("/fixture", size);
+        Assert.DoesNotContain(PipelineDiagnostics.Run(request).Issues, i => i.Code == "low-disk-space");
+        DiskSpace.Override = _ => null;
+        Assert.Contains(PipelineDiagnostics.Run(request).Issues, i => i.Code == "free-space-unavailable");
+    }
+
+    [Fact]
+    public async Task StorageIsListedByKindAndOnlyWhatIsNotAnOutputOrInUseIsRemoved()
+    {
+        string output = Path_("out"), other = Path_("other"), cache = Path_("cache");
+        using (OutputRetention.Enter(5))
+        {
+            Publish(output, "v1"); OutputSetReceipt.Record(output, StageIds.Lod, "source", OutputSnapshot.Capture(output)); Thread.Sleep(20);
+            Publish(output, "version 2");
+        }
+        string previous = OutputRetention.PreviousCopies(output).Single();
+        string build = Path_(StagedOutput.WorkspacePrefix(output) + Guid.NewGuid().ToString("N")); Put(Path.Combine(build, "output", "a.bto"), "x");
+        string unpublished = Path_(StagedOutput.WorkspacePrefix(output) + Guid.NewGuid().ToString("N")); Put(Path.Combine(unpublished, StagedOutput.UnpublishedMarker), "x");
+        // Left by output folders that are not named: a previous copy, a recent build, an old one and one whose job is running.
+        string otherPrevious = Aged(Path_("renamed away"), 5);
+        string recentBuild = Path_(StagedOutput.WorkspacePrefix(Path_("a")) + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(recentBuild);
+        string oldBuild = Path_(".pengulod-build-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(oldBuild); Directory.SetLastWriteTimeUtc(oldBuild, DateTime.UtcNow.AddDays(-2));
+        string busyBuild = Path_(StagedOutput.WorkspacePrefix(other) + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(busyBuild);
+        Directory.CreateDirectory(Path_("notes")); Directory.CreateDirectory(Path_("out.previous-renamed-by-hand"));
+        string tiles = Path.Combine(cache, "jobs", "A", "terrain-tiles"), busyTiles = Path.Combine(cache, "jobs", "B", "terrain-tiles");
+        Put(Path.Combine(tiles, "t", "a.btr"), "tile"); Put(Path.Combine(busyTiles, "t", "a.btr"), "tile"); Directory.CreateDirectory(Path.Combine(cache, "jobs", "C", "terrain-tiles"));
+
+        using var running = await Task.Run(() => OutputLock.Acquire(other));
+        using var job = new FileStream(Path.Combine(cache, "jobs", "B", "job.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var items = OutputStorage.Survey([output, output + Path.DirectorySeparatorChar], cache);
+        string Kind(string path) => items.Single(i => i.Path == path).Kind;
+        Assert.Equal(StorageKinds.Output, Kind(output)); Assert.Equal(StorageKinds.Previous, Kind(previous));
+        Assert.Equal(StorageKinds.Build, Kind(build)); Assert.Equal(StorageKinds.Unpublished, Kind(unpublished));
+        Assert.Equal(StorageKinds.OtherPrevious, Kind(otherPrevious)); Assert.Equal(StorageKinds.Checkpoints, Kind(tiles));
+        Assert.All(new[] { recentBuild, oldBuild, busyBuild }, path => Assert.Equal(StorageKinds.OtherBuild, Kind(path)));
+        Assert.Equal(11, items.Count);   // with the copy renamed by hand, which is listed as a previous output; not "notes" or the empty cache folder
+        var copy = items.Single(i => i.Path == previous);
+        Assert.Equal(PenguLOD.Core.ProductInfo.Version, copy.Version); Assert.NotNull(copy.Generated); Assert.NotNull(copy.Replaced); Assert.True(copy.Restorable);
+        Assert.Equal(Path_("renamed away"), items.Single(i => i.Path == otherPrevious).Output);
+        Assert.Equal(OutputLock.PathFor(other), items.Single(i => i.Path == busyBuild).LockFile);
+        Assert.Equal("version 2".Length, items.Single(i => i.Path == output).Bytes);
+
+        var messages = new List<string>();
+        Assert.Equal(6, OutputStorage.Remove(items, new Progress(messages)));
+        Assert.All(new[] { output, recentBuild, busyBuild, busyTiles, Path_("out.previous-renamed-by-hand") }, path => Assert.True(Directory.Exists(path), path));
+        Assert.All(new[] { previous, build, unpublished, otherPrevious, oldBuild, tiles }, path => Assert.False(Directory.Exists(path), path));
+        Assert.Contains(messages, m => m.StartsWith("Left, because a job may be using it") && m.Contains(recentBuild));
+        Assert.Contains(messages, m => m.StartsWith("Could not remove") && m.Contains(busyBuild));
+        // A list that has gone stale does not remove what is at the path now.
+        Assert.Equal(0, OutputStorage.Remove([new(Path_("notes"), StorageKinds.Previous, 0, Output: output)]));
+        Assert.True(Directory.Exists(Path_("notes")));
+        Assert.Empty(OutputStorage.Survey([], null));
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void APreviousOutputIsRestoredAndTheOneItReplacesIsKept(bool disableExchange)
+    {
+        string output = Path_("out");
+        StagedOutput.DisableExchange = disableExchange;
+        Assert.Throws<InvalidOperationException>(() => StagedOutput.Restore(output));
+        using (OutputRetention.Enter(5))
+            for (int i = 1; i <= 3; i++) { Publish(output, "v" + i); Thread.Sleep(20); }
+        Put(Path.Combine(output, "meta.ini"), "installed"); Put(Path.Combine(output, "SKSE", "Plugins", "PenguLOD.ini"), "user settings");
+        string oldest = OutputRetention.PreviousCopies(output)[1];
+        var messages = new List<string>();
+
+        string replaced = StagedOutput.Restore(output, progress: new Progress(messages))!;
+        Assert.Equal("v2", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
+        // The installed copies of the user's files stay with the output folder.
+        Assert.Equal("installed", File.ReadAllText(Path.Combine(output, "meta.ini")));
+        Assert.Equal("user settings", File.ReadAllText(Path.Combine(output, "SKSE", "Plugins", "PenguLOD.ini")));
+        // The output it replaced is the newest previous copy, so the same call undoes the restore.
+        Assert.Equal("v3", File.ReadAllText(Path.Combine(replaced, "PenguLOD.esm")));
+        Assert.Equal([replaced, oldest], OutputRetention.PreviousCopies(output));
+        Assert.Contains(messages, m => m.StartsWith("Restored") && m.Contains(replaced));
+        StagedOutput.Restore(output);
+        Assert.Equal("v3", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
+
+        StagedOutput.Restore(output, oldest);
+        Assert.Equal("v1", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
+        Assert.Equal(2, OutputRetention.PreviousCopies(output).Count);
+        Assert.Throws<ArgumentException>(() => StagedOutput.Restore(output, Path_("elsewhere")));
+        Assert.Empty(Directory.GetDirectories(_root, ".pengulod-build-*"));
+
+        // With the output gone, as after an interrupted publication, the copy is moved into place.
+        Directory.Delete(output, true);
+        Assert.Null(StagedOutput.Restore(output));
+        Assert.True(File.Exists(Path.Combine(output, "PenguLOD.esm"))); Assert.Single(OutputRetention.PreviousCopies(output));
+    }
+
+    [Fact]
+    public void RestoreAndLeftoversAreCliCommands()
+    {
+        string output = Path_("out");
+        using (OutputRetention.Enter(5)) { Publish(output, "v1"); Thread.Sleep(20); Publish(output, "v2"); }
+        string previous = OutputRetention.PreviousCopies(output).Single(), leftover = Aged(Path_("renamed away"), 1);
+        // A previous copy of an output that is still there, though not named, is that output's and is not a leftover.
+        string other = Path_("other"); Publish(other, "v1"); string kept = Aged(other, 1);
+        Assert.Equal(0, PenguLOD.Cli.Program.Main(["restore", "--input", output, "--previous", previous]));
+        Assert.Equal("v1", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
+        Assert.Equal(2, PenguLOD.Cli.Program.Main(["restore"]));
+        Assert.Equal(2, PenguLOD.Cli.Program.Main(["restore", "--input", Path_("never generated")]));
+        // Without --leftovers a folder of another output is not looked at; with it, it is listed, and removed with --apply.
+        Assert.Equal(0, PenguLOD.Cli.Program.Main(["clean", "--input", output, "--keep-previous", "5", "--apply"]));
+        Assert.True(Directory.Exists(leftover));
+        Assert.Equal(0, PenguLOD.Cli.Program.Main(["clean", "--input", output, "--keep-previous", "5", "--leftovers"]));
+        Assert.True(Directory.Exists(leftover));
+        Assert.Equal(0, PenguLOD.Cli.Program.Main(["clean", "--input", output, "--keep-previous", "5", "--leftovers", "--apply"]));
+        Assert.False(Directory.Exists(leftover)); Assert.Single(OutputRetention.PreviousCopies(output));
+        Assert.True(Directory.Exists(kept));
+    }
+
     [Fact]
     public void UnfinishedWorkspacesOfThisOutputAreSweptButNotOthers()
     {
@@ -190,6 +444,17 @@ public sealed class OutputLifecycleTests : IDisposable
         Assert.Single(OutputRetention.PreviousCopies(output));
         Assert.Equal("v2", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
         Assert.Equal(2, PenguLOD.Cli.Program.Main(["clean"]));
+
+        // The age limit lists the newest copy too once it is old enough; --previous-days 0 sets no limit.
+        string old = Aged(output, 20); Directory.Delete(OutputRetention.PreviousCopies(output)[0], true);
+        Assert.Equal([old], OutputRetention.PreviousCopies(output));
+        Assert.Empty(OutputCleanup.Find(output, keepPrevious: 1));
+        Assert.Equal([old], OutputCleanup.Find(output, keepPrevious: 1, previousDays: 14).Select(i => i.Path));
+        Assert.Equal(0, PenguLOD.Cli.Program.Main(["clean", "--input", output, "--previous-days", "0", "--apply"]));
+        Assert.True(Directory.Exists(old));
+        Assert.Equal(0, PenguLOD.Cli.Program.Main(["clean", "--input", output, "--apply"]));
+        Assert.False(Directory.Exists(old));
+        Assert.Equal(2, PenguLOD.Cli.Program.Main(["clean", "--input", output, "--previous-days", "x"]));
     }
 
     [Fact]
@@ -208,12 +473,38 @@ public sealed class OutputLifecycleTests : IDisposable
     }
 
     [Fact]
+    public void PublishedTerrainTileCachesKeepOnlyTheirReceipts()
+    {
+        string tiles = Path_("terrain-tiles"), tile = Path.Combine(tiles, new string('A', 64), new string('B', 64)), unrelated = Path.Combine(tiles, "notes", "keep.txt");
+        Put(Path.Combine(tile, "entry.json"), "{}");
+        Put(Path.Combine(tile, "meshes", "terrain", "World", "World.4.0.0.btr"), "mesh");
+        Put(Path.Combine(tile, "textures", "terrain", "World", "World.4.0.0.dds"), "texture");
+        Put(unrelated, "x");
+        var messages = new List<string>();
+        Assert.Equal(11, TerrainTileCache.Trim(tiles, new Progress(messages)));
+        Assert.Equal(["entry.json"], Directory.GetFileSystemEntries(tile).Select(Path.GetFileName));
+        Assert.True(File.Exists(unrelated));
+        Assert.Contains(messages, m => m.Contains("2 terrain tile checkpoint files"));
+        // A trimmed cache is marked and not read through again.
+        Assert.True(File.Exists(Path.Combine(tiles, new string('A', 64), TerrainTileCache.TrimmedMarker)));
+        Put(Path.Combine(tile, "late.dds"), "x");
+        Assert.Equal(0, TerrainTileCache.Trim(tiles));
+        Assert.Equal(0, TerrainTileCache.Trim(Path_("absent")));
+    }
+
+    [Fact]
     public void RetentionIsAPresetAndCliSetting()
     {
         using var f = new TextureFixture();
         var s = new DesktopSettings { SourceMode = "Data folder / Vortex", GameFolder = f.Data, PluginsFile = f.Plugins,
             TextureGenOutput = Path.Combine(f.Root, "textures"), KeepPreviousOutputs = 3 };
         Assert.Equal(3, RequestFactory.Stages(s, textures: true).KeepPrevious);
+        Assert.Equal(OutputRetention.DefaultDays, RequestFactory.Stages(s, textures: true).PreviousDays);
+        s.PreviousOutputDays = 30; Assert.Equal(30, RequestFactory.Stages(s, textures: true).PreviousDays);
+        s.PreviousOutputDays = -1; Assert.Throws<ArgumentException>(() => RequestFactory.Stages(s, textures: true)); s.PreviousOutputDays = 0;
+        Assert.Equal(OutputRetention.DefaultDays, new GenerationPipelineRequest().PreviousDays);
+        Assert.Equal(OutputRetention.DefaultDays, JsonSerializer.Deserialize<GenerationPipelineRequest>("{}", PersistentPipeline.Json)!.PreviousDays);
+        Assert.Equal([Path.Combine(f.Root, "textures")], RequestFactory.StageOutputs(s));
         s.KeepPreviousOutputs = 1.5m; Assert.Throws<ArgumentException>(() => RequestFactory.Stages(s, textures: true));
         Assert.Equal(OutputRetention.Default, new GenerationPipelineRequest().KeepPrevious);
         Assert.Throws<ArgumentOutOfRangeException>(() => OutputRetention.Enter(-1));

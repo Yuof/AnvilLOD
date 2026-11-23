@@ -25,9 +25,9 @@ public sealed class CliArgs
         P("settings", true), P("request", true), V("stages", true), P("job-folder", true), P("cache-folder", true),
         V("threads", true), P("report", true), V("texture-compute", true), F("no-resume", true), F("no-preflight", true),
         F("verify-source-contents", true), F("expand-output-scope", true), F("deep-scan", true), F("verify-outputs", true),
-        V("inspect-asset", true), P("wine-prefix", true), V("keep-previous", true), F("allow-software"),
+        V("inspect-asset", true), P("wine-prefix", true), V("keep-previous", true), V("previous-days", true), F("allow-software"),
         // Output management.
-        P("input"), P("before"), P("after"), P("plan"), P("output"), P("reference"), V("texture-samples"),
+        P("input"), P("before"), P("after"), P("plan"), P("output"), P("reference"), V("texture-samples"), P("previous"), F("leftovers"),
         // Game source.
         P("data"), P("plugins"), P("mo2"), V("profile"), P("game-ini"), P("mo2-game"), P("mo2-mods"), P("mo2-profiles"), P("mo2-overwrite"),
         // Scan and generate.

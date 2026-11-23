@@ -98,6 +98,34 @@ public sealed class PersistentPipeline : IDisposable
         catch { Dispose(); throw; }
     }
 
+    /// <summary>
+    /// Removes <paramref name="subfolder"/> from the job folders of other plans in this cache that have not run for
+    /// <paramref name="idle"/>. Their journals stay, so their finished stages are still reused. A job that is running holds
+    /// its lock and is left alone. Returns the number of folders removed.
+    /// </summary>
+    public int RemoveFromIdleJobs(string subfolder, TimeSpan idle, DateTime? now = null)
+    {
+        string jobs = Path.GetDirectoryName(Folder)!; int removed = 0;
+        foreach (var job in new DirectoryInfo(jobs).EnumerateDirectories())
+        {
+            _ct.ThrowIfCancellationRequested();
+            var target = new DirectoryInfo(Path.Combine(job.FullName, subfolder));
+            var journal = new FileInfo(Path.Combine(job.FullName, "job.json"));
+            var guard = new FileInfo(Path.Combine(job.FullName, "job.lock"));
+            if (job.LinkTarget is not null || guard.LinkTarget is not null || job.FullName.Equals(Folder, StringComparison.Ordinal) || !target.Exists) continue;
+            if ((now ?? DateTime.UtcNow) - (journal.Exists ? journal.LastWriteTimeUtc : job.LastWriteTimeUtc) < idle) continue;
+            try
+            {
+                using var held = new FileStream(guard.FullName, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                // A link is removed itself; what it points to is not touched.
+                target.Delete(recursive: target.LinkTarget is null); removed++;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            { _progress?.Report("Could not remove " + target.FullName + ": " + e.Message); }
+        }
+        return removed;
+    }
+
     private void Lock(string file)
     {
         if (new FileInfo(file).LinkTarget is not null) throw new IOException("Job lock must not be a symbolic link: " + file);

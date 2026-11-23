@@ -47,6 +47,7 @@ These can be added to a `--settings` or `--request` run:
 | `--verify-source-contents` | Read every source file in full when deciding what can be reused |
 | `--expand-output-scope` | Keep the worldspaces and levels already in an output folder |
 | `--keep-previous <n>` | Previous copies of each output to keep, 0 to 100 (default 1) |
+| `--previous-days <n>` | Days a previous copy is kept after it was replaced, 0 to 3650 (default 14). 0 sets no limit |
 | `--texture-compute Cpu\|Auto\|Vulkan` | Texture encoder |
 | `--wine-prefix <path>` | Wine or Proton prefix used to resolve Windows paths |
 | `--report <file>` | Write a JSON report of the run |
@@ -82,7 +83,7 @@ PenguLOD job-status --job-folder /path/to/cache/jobs/job-id
 
 | Command | Purpose |
 | --- | --- |
-| `cost-report`, `compare-costs`, `compare-reference`, `verify-output`, `plan-update`, `publish-update`, `plan-generation`, `clean` | [Reports and outputs](REPORTS-AND-OUTPUTS.md) |
+| `cost-report`, `compare-costs`, `compare-reference`, `verify-output`, `plan-update`, `publish-update`, `plan-generation`, `clean`, `restore` | [Reports and outputs](REPORTS-AND-OUTPUTS.md) |
 | `lodmaker`, `author`, `convert-lod`, `fix-textures` | The [tools](TOOLS.md), from the command line |
 | `compute-info` | Test optional Vulkan texture encoding on this machine |
 
