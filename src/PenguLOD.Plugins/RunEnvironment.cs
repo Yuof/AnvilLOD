@@ -150,7 +150,7 @@ public static class RunEnvironment
 
     /// <summary>True for the operating system's "no space left" and "quota exceeded" errors.</summary>
     internal static bool FullDisk(IOException error) => OperatingSystem.IsWindows()
-        ? (error.HResult & 0xFFFF0000) == unchecked((int)0x80070000) && (error.HResult & 0xFFFF) is
+        ? Win32Code(error.HResult) is
             39        // ERROR_HANDLE_DISK_FULL
             or 112    // ERROR_DISK_FULL
             or 1295   // ERROR_DISK_QUOTA_EXCEEDED
@@ -158,13 +158,16 @@ public static class RunEnvironment
             28        // ENOSPC
             or 122;   // EDQUOT on Linux
 
+    /// <summary>The Win32 error code an HRESULT carries (0x8007xxxx), or -1 for any other HRESULT.</summary>
+    internal static int Win32Code(int hresult) => unchecked((uint)hresult) >> 16 == 0x8007 ? hresult & 0xFFFF : -1;
+
     /// <summary>True for the operating system's "the device or connection behind this file is gone" errors.</summary>
     internal static bool LostStorage(IOException error)
     {
         if (error is FileNotFoundException or DirectoryNotFoundException or PathTooLongException or EndOfStreamException or DriveNotFoundException) return false;
         // On Unix an unmapped errno is the HResult itself; on Windows the Win32 code is the low word of 0x8007xxxx.
         if (OperatingSystem.IsWindows())
-            return (error.HResult & 0xFFFF0000) == unchecked((int)0x80070000) && (error.HResult & 0xFFFF) is
+            return Win32Code(error.HResult) is
                 21      // ERROR_NOT_READY
                 or 55   // ERROR_DEV_NOT_EXIST
                 or 59   // ERROR_UNEXP_NET_ERR

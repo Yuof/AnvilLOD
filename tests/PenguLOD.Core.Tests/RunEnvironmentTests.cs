@@ -52,6 +52,16 @@ public sealed class RunEnvironmentTests
         Assert.Null(RunEnvironment.DescribeFullDisk(new IOException("Input/output error", OperatingSystem.IsWindows() ? unchecked((int)0x8007045D) : 5)));
         Assert.Null(RunEnvironment.DescribeFullDisk(new FileNotFoundException("Missing landscape texture: a.dds", "a.dds")));
         Assert.Null(RunEnvironment.DescribeFullDisk(new InvalidDataException("Texture output is incomplete.")));
+        // A Windows error code is read from an HRESULT of the 0x8007xxxx kind only. (An int masked with 0xFFFF0000 is a
+        // long that never equals a negative int, which is how the check for lost storage was written and never matched.)
+        Assert.Equal(112, RunEnvironment.Win32Code(unchecked((int)0x80070070))); Assert.Equal(55, RunEnvironment.Win32Code(unchecked((int)0x80070037)));
+        Assert.Equal(-1, RunEnvironment.Win32Code(unchecked((int)0x80131620))); Assert.Equal(-1, RunEnvironment.Win32Code(28));
+        if (OperatingSystem.IsWindows())
+        {
+            var gone = new IOException("The specified network resource or device is no longer available.", unchecked((int)0x80070037));
+            Assert.True(RunEnvironment.LostStorage(gone)); Assert.NotNull(RunEnvironment.DescribeLostStorage(gone));
+            Assert.False(RunEnvironment.LostStorage(full));
+        }
         if (!OperatingSystem.IsLinux()) return;
         // The kernel's own answer: /dev/full accepts no bytes.
         using var device = File.OpenHandle("/dev/full", FileMode.Open, FileAccess.Write);
