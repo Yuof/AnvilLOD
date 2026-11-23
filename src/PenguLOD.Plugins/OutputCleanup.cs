@@ -69,7 +69,7 @@ public static class OutputCleanup
         return removed;
     }
 
-    private static long Size(string dir, CancellationToken ct)
+    internal static long Size(string dir, CancellationToken ct)
     {
         long total = 0;
         foreach (var file in new DirectoryInfo(dir).EnumerateFiles("*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true }))

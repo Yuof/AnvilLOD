@@ -72,6 +72,49 @@ public sealed class DesktopTests : IDisposable
     }
 
     [AvaloniaFact]
+    public async Task StorageCardMeasuresRestoresAndRemovesOnlyAfterASecondClick()
+    {
+        string output = Path.Combine(_root, "Textures");
+        void Publish(string content)
+        {
+            using var staged = new StagedOutput(output, seedPrevious: false);
+            File.WriteAllText(Path.Combine(staged.Payload, "PenguLOD.esm"), content); staged.Commit();
+        }
+        using (PenguLOD.Core.Pipeline.OutputRetention.Enter(5)) { Publish("v1"); await Task.Delay(20, TestContext.Current.CancellationToken); Publish("v2"); }
+        var window = Window();
+        window.ReplaceSettings(new DesktopSettings { TextureGenOutput = output, CacheFolder = Path.Combine(_root, "cache"), PreviousOutputDays = 0 }); window.Show();
+        try
+        {
+            Click(window, "Reports & outputs");
+            await window.MeasureStorage();
+            Assert.Equal([StorageKinds.Output, StorageKinds.Previous], window.StorageItems.Select(i => i.Kind));
+            Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "Outputs 1 KiB · previous outputs 1 KiB");
+            var previous = window.StorageItems[1];
+            if (Environment.GetEnvironmentVariable("PENGULOD_SCREENSHOTS") is { } screenshots)
+            {
+                window.GetVisualDescendants().OfType<DataGrid>().Last().BringIntoView(); Dispatcher.UIThread.RunJobs();
+                window.CaptureRenderedFrame()?.Save(Path.Combine(screenshots, "storage.png"), PngBitmapEncoderOptions.Default);
+            }
+
+            await window.RestoreStorage([window.StorageItems[0]]);   // an output is not something to restore
+            Assert.Equal("v2", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
+            await window.RestoreStorage([previous]);
+            Assert.Equal("v1", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
+            previous = Assert.Single(window.StorageItems, i => i.Kind == StorageKinds.Previous);
+            Assert.Equal("v2", File.ReadAllText(Path.Combine(previous.Path, "PenguLOD.esm")));
+
+            await window.RemoveStorage([window.StorageItems[0]]);   // nor to remove
+            await window.RemoveStorage([previous]);
+            Assert.True(Directory.Exists(previous.Path));
+            Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), t => t.Text?.StartsWith("Click Remove selected again to delete 1 folder(s)") == true);
+            await window.RemoveStorage([previous]);
+            Assert.False(Directory.Exists(previous.Path)); Assert.True(Directory.Exists(output));
+            Assert.Equal([StorageKinds.Output], window.StorageItems.Select(i => i.Kind));
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
     public void WorkflowStageOutputsStayInSyncAndOnlySelectedStagesRun()
     {
         using var fixture = new TextureFixture(); var window = Window();

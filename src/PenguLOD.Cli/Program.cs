@@ -86,10 +86,15 @@ public static partial class Program
           PenguLOD plan-generation --settings <preset.json> --report <scope-plan.json>
                                          Review the scope needed to retain existing worlds and levels.
                                          --expand-output-scope explicitly permits the expanded generation.
-          PenguLOD clean --input <output folder> [--input ...] [--keep-previous <n>] [--previous-days <n>] [--apply]
+          PenguLOD clean --input <output folder> [--input ...] [--keep-previous <n>] [--previous-days <n>] [--leftovers] [--apply]
                                          List previous copies beyond the newest n (default 1) or replaced more than
                                          --previous-days ago (default 14), and unfinished build folders beside each
-                                         output. --apply removes them. Run it while no job is running.
+                                         output. --leftovers also lists, in the same parent folders, unfinished builds
+                                         of other outputs and previous copies whose output folder is gone. --apply
+                                         removes what is listed. Run it while no job is running.
+          PenguLOD restore --input <output folder> [--previous <previous copy>]
+                                         Put a previous copy of an output back in its place (the newest one unless
+                                         --previous names another). The output it replaces is kept as a previous copy.
 
         Options:
           --pbr-waterfalls      Use full PBR-patched waterfall models independently of --pbr-lod
@@ -324,6 +329,7 @@ public static partial class Program
                 "publish-update" => PublishUpdate(options),
                 "plan-generation" => PlanGeneration(options),
                 "clean" => RunClean(options),
+                "restore" => RunRestore(options),
                 "compute-info" => RunComputeInfo(options),
                 "pipeline" => RunPipeline(options),
                 "grass" => RunPipeline(options,"grass"),

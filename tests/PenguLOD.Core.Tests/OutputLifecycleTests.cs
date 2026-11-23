@@ -232,6 +232,113 @@ public sealed class OutputLifecycleTests : IDisposable
     }
 
     [Fact]
+    public async Task StorageIsListedByKindAndOnlyWhatIsNotAnOutputOrInUseIsRemoved()
+    {
+        string output = Path_("out"), other = Path_("other"), cache = Path_("cache");
+        using (OutputRetention.Enter(5))
+        {
+            Publish(output, "v1"); OutputSetReceipt.Record(output, StageIds.Lod, "source", OutputSnapshot.Capture(output)); Thread.Sleep(20);
+            Publish(output, "version 2");
+        }
+        string previous = OutputRetention.PreviousCopies(output).Single();
+        string build = Path_(StagedOutput.WorkspacePrefix(output) + Guid.NewGuid().ToString("N")); Put(Path.Combine(build, "output", "a.bto"), "x");
+        string unpublished = Path_(StagedOutput.WorkspacePrefix(output) + Guid.NewGuid().ToString("N")); Put(Path.Combine(unpublished, StagedOutput.UnpublishedMarker), "x");
+        // Left by output folders that are not named: a previous copy, a recent build, an old one and one whose job is running.
+        string otherPrevious = Aged(Path_("renamed away"), 5);
+        string recentBuild = Path_(StagedOutput.WorkspacePrefix(Path_("a")) + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(recentBuild);
+        string oldBuild = Path_(".pengulod-build-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(oldBuild); Directory.SetLastWriteTimeUtc(oldBuild, DateTime.UtcNow.AddDays(-2));
+        string busyBuild = Path_(StagedOutput.WorkspacePrefix(other) + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(busyBuild);
+        Directory.CreateDirectory(Path_("notes")); Directory.CreateDirectory(Path_("out.previous-renamed-by-hand"));
+        string tiles = Path.Combine(cache, "jobs", "A", "terrain-tiles"), busyTiles = Path.Combine(cache, "jobs", "B", "terrain-tiles");
+        Put(Path.Combine(tiles, "t", "a.btr"), "tile"); Put(Path.Combine(busyTiles, "t", "a.btr"), "tile"); Directory.CreateDirectory(Path.Combine(cache, "jobs", "C", "terrain-tiles"));
+
+        using var running = await Task.Run(() => OutputLock.Acquire(other));
+        using var job = new FileStream(Path.Combine(cache, "jobs", "B", "job.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var items = OutputStorage.Survey([output, output + Path.DirectorySeparatorChar], cache);
+        string Kind(string path) => items.Single(i => i.Path == path).Kind;
+        Assert.Equal(StorageKinds.Output, Kind(output)); Assert.Equal(StorageKinds.Previous, Kind(previous));
+        Assert.Equal(StorageKinds.Build, Kind(build)); Assert.Equal(StorageKinds.Unpublished, Kind(unpublished));
+        Assert.Equal(StorageKinds.OtherPrevious, Kind(otherPrevious)); Assert.Equal(StorageKinds.Checkpoints, Kind(tiles));
+        Assert.All(new[] { recentBuild, oldBuild, busyBuild }, path => Assert.Equal(StorageKinds.OtherBuild, Kind(path)));
+        Assert.Equal(11, items.Count);   // with the copy renamed by hand, which is listed as a previous output; not "notes" or the empty cache folder
+        var copy = items.Single(i => i.Path == previous);
+        Assert.Equal(PenguLOD.Core.ProductInfo.Version, copy.Version); Assert.NotNull(copy.Generated); Assert.NotNull(copy.Replaced); Assert.True(copy.Restorable);
+        Assert.Equal(Path_("renamed away"), items.Single(i => i.Path == otherPrevious).Output);
+        Assert.Equal(OutputLock.PathFor(other), items.Single(i => i.Path == busyBuild).LockFile);
+        Assert.Equal("version 2".Length, items.Single(i => i.Path == output).Bytes);
+
+        var messages = new List<string>();
+        Assert.Equal(6, OutputStorage.Remove(items, new Progress(messages)));
+        Assert.All(new[] { output, recentBuild, busyBuild, busyTiles, Path_("out.previous-renamed-by-hand") }, path => Assert.True(Directory.Exists(path), path));
+        Assert.All(new[] { previous, build, unpublished, otherPrevious, oldBuild, tiles }, path => Assert.False(Directory.Exists(path), path));
+        Assert.Contains(messages, m => m.StartsWith("Left, because a job may be using it") && m.Contains(recentBuild));
+        Assert.Contains(messages, m => m.StartsWith("Could not remove") && m.Contains(busyBuild));
+        // A list that has gone stale does not remove what is at the path now.
+        Assert.Equal(0, OutputStorage.Remove([new(Path_("notes"), StorageKinds.Previous, 0, Output: output)]));
+        Assert.True(Directory.Exists(Path_("notes")));
+        Assert.Empty(OutputStorage.Survey([], null));
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void APreviousOutputIsRestoredAndTheOneItReplacesIsKept(bool disableExchange)
+    {
+        string output = Path_("out");
+        StagedOutput.DisableExchange = disableExchange;
+        Assert.Throws<InvalidOperationException>(() => StagedOutput.Restore(output));
+        using (OutputRetention.Enter(5))
+            for (int i = 1; i <= 3; i++) { Publish(output, "v" + i); Thread.Sleep(20); }
+        Put(Path.Combine(output, "meta.ini"), "installed"); Put(Path.Combine(output, "SKSE", "Plugins", "PenguLOD.ini"), "user settings");
+        string oldest = OutputRetention.PreviousCopies(output)[1];
+        var messages = new List<string>();
+
+        string replaced = StagedOutput.Restore(output, progress: new Progress(messages))!;
+        Assert.Equal("v2", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
+        // The installed copies of the user's files stay with the output folder.
+        Assert.Equal("installed", File.ReadAllText(Path.Combine(output, "meta.ini")));
+        Assert.Equal("user settings", File.ReadAllText(Path.Combine(output, "SKSE", "Plugins", "PenguLOD.ini")));
+        // The output it replaced is the newest previous copy, so the same call undoes the restore.
+        Assert.Equal("v3", File.ReadAllText(Path.Combine(replaced, "PenguLOD.esm")));
+        Assert.Equal([replaced, oldest], OutputRetention.PreviousCopies(output));
+        Assert.Contains(messages, m => m.StartsWith("Restored") && m.Contains(replaced));
+        StagedOutput.Restore(output);
+        Assert.Equal("v3", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
+
+        StagedOutput.Restore(output, oldest);
+        Assert.Equal("v1", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
+        Assert.Equal(2, OutputRetention.PreviousCopies(output).Count);
+        Assert.Throws<ArgumentException>(() => StagedOutput.Restore(output, Path_("elsewhere")));
+        Assert.Empty(Directory.GetDirectories(_root, ".pengulod-build-*"));
+
+        // With the output gone, as after an interrupted publication, the copy is moved into place.
+        Directory.Delete(output, true);
+        Assert.Null(StagedOutput.Restore(output));
+        Assert.True(File.Exists(Path.Combine(output, "PenguLOD.esm"))); Assert.Single(OutputRetention.PreviousCopies(output));
+    }
+
+    [Fact]
+    public void RestoreAndLeftoversAreCliCommands()
+    {
+        string output = Path_("out");
+        using (OutputRetention.Enter(5)) { Publish(output, "v1"); Thread.Sleep(20); Publish(output, "v2"); }
+        string previous = OutputRetention.PreviousCopies(output).Single(), leftover = Aged(Path_("renamed away"), 1);
+        // A previous copy of an output that is still there, though not named, is that output's and is not a leftover.
+        string other = Path_("other"); Publish(other, "v1"); string kept = Aged(other, 1);
+        Assert.Equal(0, PenguLOD.Cli.Program.Main(["restore", "--input", output, "--previous", previous]));
+        Assert.Equal("v1", File.ReadAllText(Path.Combine(output, "PenguLOD.esm")));
+        Assert.Equal(2, PenguLOD.Cli.Program.Main(["restore"]));
+        Assert.Equal(2, PenguLOD.Cli.Program.Main(["restore", "--input", Path_("never generated")]));
+        // Without --leftovers a folder of another output is not looked at; with it, it is listed, and removed with --apply.
+        Assert.Equal(0, PenguLOD.Cli.Program.Main(["clean", "--input", output, "--keep-previous", "5", "--apply"]));
+        Assert.True(Directory.Exists(leftover));
+        Assert.Equal(0, PenguLOD.Cli.Program.Main(["clean", "--input", output, "--keep-previous", "5", "--leftovers"]));
+        Assert.True(Directory.Exists(leftover));
+        Assert.Equal(0, PenguLOD.Cli.Program.Main(["clean", "--input", output, "--keep-previous", "5", "--leftovers", "--apply"]));
+        Assert.False(Directory.Exists(leftover)); Assert.Single(OutputRetention.PreviousCopies(output));
+        Assert.True(Directory.Exists(kept));
+    }
+
+    [Fact]
     public void UnfinishedWorkspacesOfThisOutputAreSweptButNotOthers()
     {
         string output = Path_("out"), other = Path_("other");

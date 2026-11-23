@@ -55,7 +55,7 @@ public sealed class StagedOutput : IDisposable
             _existed = Directory.Exists(Output); _original = Inventory(Output, ct);
             if (!_existed && OutputRetention.PreviousCopies(Output) is [var only])
                 progress?.Report($"The output folder is missing, but a previous copy exists: {only}. An earlier publication may have been interrupted. "
-                    + $"This run creates a new output; to restore the old one instead, cancel and rename that folder to \"{Path.GetFileName(Output)}\" "
+                    + "This run creates a new output; to put the old one back instead, cancel and run \"PenguLOD restore --input <output>\" "
                     + "(PenguLOD clean --input <output> lists previous copies).");
             _workspace = Path.Combine(Path.GetDirectoryName(Output)!, WorkspacePrefix(Output) + Guid.NewGuid().ToString("N"));
             Payload = Path.Combine(_workspace, "output"); Directory.CreateDirectory(Payload);
@@ -191,7 +191,10 @@ public sealed class StagedOutput : IDisposable
     /// waiting (the source is gone, the destination exists) fails at once.
     /// </summary>
     /// <param name="cancellable">False once the old output has been moved away: the sequence must then finish or roll back.</param>
-    private void Move(string from, string to, IProgress<string>? progress, bool cancellable)
+    private void Move(string from, string to, IProgress<string>? progress, bool cancellable) =>
+        MoveRetrying(from, to, progress, cancellable ? _ct : null);
+
+    private static void MoveRetrying(string from, string to, IProgress<string>? progress, CancellationToken? cancel)
     {
         var waited = System.Diagnostics.Stopwatch.StartNew();
         var delay = TimeSpan.FromMilliseconds(250);
@@ -208,11 +211,67 @@ public sealed class StagedOutput : IDisposable
                     progress?.Report($"Publication: {from} cannot be moved yet ({e.Message}). Another program, often a virus scanner or a file indexer, "
                                      + $"is using it. Trying again for up to {MoveRetry.TotalSeconds:0} seconds.");
                 }
-                if (cancellable) { if (_ct.WaitHandle.WaitOne(delay)) _ct.ThrowIfCancellationRequested(); }
+                if (cancel is { } ct) { if (ct.WaitHandle.WaitOne(delay)) ct.ThrowIfCancellationRequested(); }
                 else Thread.Sleep(delay);
                 delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 5000));
             }
         }
+    }
+
+    /// <summary>
+    /// Puts an earlier copy of <paramref name="output"/> back in its place; the newest one when <paramref name="previousCopy"/>
+    /// is null. The output it replaces becomes the newest previous copy, so a restore is undone by another restore. The installed
+    /// copies of user-owned files stay with the output. Returns the folder the replaced output is in, or null when there
+    /// was no output to replace.
+    /// </summary>
+    public static string? Restore(string output, string? previousCopy = null, IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        output = HostPath.Canonical(output);
+        using var guard = OutputLock.Acquire(output);
+        var copies = OutputRetention.PreviousCopies(output);
+        string chosen;
+        if (previousCopy is null) chosen = copies.FirstOrDefault() ?? throw new InvalidOperationException("There is no previous output beside " + output + ".");
+        else
+        {
+            string wanted = HostPath.ComparisonKey(HostPath.Canonical(previousCopy));
+            chosen = copies.FirstOrDefault(c => HostPath.ComparisonKey(c) == wanted)
+                ?? throw new ArgumentException(previousCopy + " is not a previous copy of " + output + ".");
+        }
+        Inventory(chosen, ct);   // refuses a copy that holds links
+        if (!Directory.Exists(output))
+        {
+            MoveRetrying(chosen, output, progress, ct);
+            progress?.Report($"Restored {chosen} as {output}.");
+            return null;
+        }
+        Inventory(output, ct);
+        foreach (var relative in UserOwnedFiles.Existing(output))
+        {
+            string target = PenguLOD.Core.World.GamePath.ResolveAllExisting(chosen, relative).LastOrDefault(File.Exists) ?? Path.Combine(chosen, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(Path.Combine(output, relative), target, overwrite: true);
+        }
+        string replaced = OutputRetention.PreviousName(output, DateTime.Now);
+        if (TryExchange(chosen, output))
+        {
+            // The restored copy is live. The output it replaced sits under the copy's old name and is given the current time.
+            try { Directory.Move(chosen, replaced); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { replaced = chosen; }
+        }
+        else
+        {
+            MoveRetrying(output, replaced, progress, ct);
+            try { MoveRetrying(chosen, output, progress, null); }
+            catch (Exception restore)
+            {
+                try { MoveRetrying(replaced, output, progress, null); }
+                catch (Exception rollback)
+                { throw new IOException($"Restore and rollback failed. The output is in {replaced}; the copy to restore is in {chosen}. {rollback.Message}", restore); }
+                throw;
+            }
+        }
+        progress?.Report($"Restored {Path.GetFileName(chosen)} as {output}. The output it replaced is kept in {replaced}.");
+        return replaced;
     }
 
     /// <summary>
