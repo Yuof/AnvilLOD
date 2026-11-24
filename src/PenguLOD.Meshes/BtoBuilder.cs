@@ -126,11 +126,14 @@ public static class BtoBuilder
                 int tier = category == LodLayers.Grass ? part.Tier : 0;
                 if (tier > 0) chunkKey += "|tier:" + tier;
                 if (shapeName != ObjName) chunkKey += "|shape:" + shapeName;
+                string? customNodeName = segmented && category == LodLayers.Objects && r.Flags.HasFlag(LodReferenceFlags.BuggedLargeRef)
+                    ? LodLayers.LargeRefNodeName(r.Cell.X, r.Cell.Y) : null;
+                if (customNodeName is not null) chunkKey += "|lref:" + customNodeName;
                 if (!chunks.TryGetValue(chunkKey, out var list))
-                    chunks[chunkKey] = list = [new Chunk(part.Material, segmented, brightness) { Layer = category, ShapeName = shapeName, Tier = tier, SnowCover = snowCover }];
+                    chunks[chunkKey] = list = [new Chunk(part.Material, segmented, brightness) { Layer = category, ShapeName = shapeName, Tier = tier, SnowCover = snowCover, CustomNodeName = customNodeName }];
                 var chunk = list[^1];
                 if (chunk.Vertices + part.VertexCount > MaxIndex || chunk.TriangleCount + part.TriangleCount > MaxIndex)
-                    list.Add(chunk = new Chunk(part.Material, segmented, brightness) { Layer = category, ShapeName = shapeName, Tier = tier, SnowCover = snowCover });
+                    list.Add(chunk = new Chunk(part.Material, segmented, brightness) { Layer = category, ShapeName = shapeName, Tier = tier, SnowCover = snowCover, CustomNodeName = customNodeName });
                 culled += chunk.Append(part, m, rot, origin, inv, terrain, segment, pull, flatGuard, basePull);
             }
         }
@@ -156,7 +159,7 @@ public static class BtoBuilder
             tris += c.TriangleCount;
             verts += c.Vertices;
 
-            int layerName = w.String(LodLayers.NodeName(c.Layer, (int)quad.Level, c.Tier));
+            int layerName = w.String(c.CustomNodeName ?? LodLayers.NodeName(c.Layer, (int)quad.Level, c.Tier));
             w.Set(mbNode, b =>
             {
                 NifWriter.WriteObjectNet(b, layerName);
@@ -261,6 +264,7 @@ public static class BtoBuilder
         public int Tier { get; init; }
         public string ShapeName { get; init; } = ObjName;
         public int SnowCover { get; init; }
+        public string? CustomNodeName { get; init; }
         private bool Covered => SnowCover > 0 && (ShapeName.StartsWith("objSnow", StringComparison.Ordinal) || ShapeName.StartsWith("objAsh", StringComparison.Ordinal));
         private readonly List<Vector3> _pos = [];
         private readonly List<Vector2> _uv = [];

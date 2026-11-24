@@ -9,8 +9,7 @@ using PenguLOD.Textures;
 namespace PenguLOD.Plugins;
 
 /// <summary>
-/// Writes the converted PBR albedo copies that object LOD points at (<see cref="PbrLodTextures.OutputRoot"/>). Only the textures the
-/// blocks built in this run asked for are converted; a copy is kept as long as its source, the size and the brightness are the same.
+/// Writes converted PBR/Complex Material albedo and gloss-normal copies that object LOD points at (<see cref="PbrLodTextures.OutputRoot"/>).
 /// </summary>
 public static class PbrLodStage
 {
@@ -36,18 +35,25 @@ public static class PbrLodStage
         int converted = 0, unchanged = 0, failed = 0;
         var errors = new ConcurrentBag<string>();
 
+        byte[]? TryRead(string? path)
+        {
+            if (path is null || !assets.TryOpen(path, out var s)) return null;
+            using (s) { using var ms = new MemoryStream(); s.CopyTo(ms); return ms.ToArray(); }
+        }
+
         Parallel.ForEach(pbr.Conversions, RunLimits.Parallel(ct), kv =>
         {
             var (rel, src) = (kv.Key, kv.Value);
             var dest = GamePath.ToFileSystemPath(output, rel);
-            var stamp = settings + "|" + (assets.Fingerprint(src) ?? "?");
+            var (rmaosPath, maskPath) = PbrLodTextures.FindCompanionMaps(assets, src);
+            var rule = pbr.Catalog?.Match(src);
+            var ruleStamp = rule is null ? "-" : FormattableString.Invariant($"{rule.ColorScale.X:R},{rule.ColorScale.Y:R},{rule.ColorScale.Z:R}:{rule.RoughnessScale:R}:{rule.RoughnessOffset:R}");
+            var stamp = $"{settings}|{assets.Fingerprint(src) ?? "?"}|{assets.Fingerprint(rmaosPath ?? "") ?? "-"}|{assets.Fingerprint(maskPath ?? "") ?? "-"}|{ruleStamp}";
             if (File.Exists(dest) && known.TryGetValue(rel, out var prev) && prev == stamp) { Interlocked.Increment(ref unchanged); return; }
             try
             {
-                if (!assets.TryOpen(src, out var s)) throw new FileNotFoundException(src);
-                byte[] bytes;
-                using (s) { using var ms = new MemoryStream(); s.CopyTo(ms); bytes = ms.ToArray(); }
-                var dds = PbrLodConverter.Convert(bytes, maxSize, brightness);
+                var bytes = TryRead(src) ?? throw new FileNotFoundException(src);
+                var dds = PbrLodConverter.Convert(bytes, maxSize, brightness, TryRead(rmaosPath), TryRead(maskPath), rule?.ColorScale);
                 Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
                 File.WriteAllBytes(dest, dds);
                 known[rel] = stamp;
@@ -60,6 +66,31 @@ public static class PbrLodStage
             }
         });
 
+        Parallel.ForEach(pbr.NormalConversions, RunLimits.Parallel(ct), kv =>
+        {
+            var (rel, spec) = (kv.Key, kv.Value);
+            var dest = GamePath.ToFileSystemPath(output, rel);
+            var rule = pbr.Catalog?.Match(spec.NormalSource[..^6] + ".dds");
+            var ruleStamp = rule is null ? "-" : FormattableString.Invariant($"{rule.RoughnessScale:R}:{rule.RoughnessOffset:R}");
+            var stamp = $"n|{maxSize}|m{PbrLodConverter.MipVersion}|{assets.Fingerprint(spec.NormalSource) ?? "?"}|{assets.Fingerprint(spec.RmaosSource ?? "") ?? "-"}|{assets.Fingerprint(spec.ComplexMaskSource ?? "") ?? "-"}|{ruleStamp}";
+            if (File.Exists(dest) && known.TryGetValue(rel, out var prev) && prev == stamp) { Interlocked.Increment(ref unchanged); return; }
+            try
+            {
+                var bytes = TryRead(spec.NormalSource) ?? throw new FileNotFoundException(spec.NormalSource);
+                var dds = PbrLodConverter.ConvertNormalWithGloss(bytes, maxSize, TryRead(spec.RmaosSource), TryRead(spec.ComplexMaskSource),
+                    rule?.RoughnessScale ?? 1f, rule?.RoughnessOffset ?? 0f);
+                Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                File.WriteAllBytes(dest, dds);
+                known[rel] = stamp;
+                Interlocked.Increment(ref converted);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Interlocked.Increment(ref failed);
+                errors.Add($"{spec.NormalSource}: {ex.Message}");
+            }
+        });
+
         if (known.Count > 0)
         {
             Directory.CreateDirectory(root);
@@ -68,7 +99,6 @@ public static class PbrLodStage
         return new Result(converted, unchanged, failed, pbr.TwinsUsed, sw.Elapsed, [.. errors.Take(20)]);
     }
 
-    /// <summary>Deletes every converted copy this tool wrote (used when the option is off).</summary>
     public static void RemoveAll(string output)
     {
         try

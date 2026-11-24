@@ -47,10 +47,10 @@ public sealed class TextureGenerationTests
     public void ARuleThatCannotBeReadIsSkippedWithItsTextureAndTheRestIsGenerated()
     {
         using var f = new TextureFixture(); using var limits = RunLimits.Enter(2);
-        // The fixture's two rules for atlas.dds, then DynDOLOD's own Majestic Mountains rule (a negative colour factor) as the second of
+        // The fixture's two rules for atlas.dds, then an out-of-range colour factor (-99 < -4) as the second of
         // two tiles of hq.dds, a line that is no rule at all, and one more good texture.
         File.AppendAllText(f.RuleFile, "\n" + TextureFixture.Tile(@"textures\red.dds", @"textures\lod\hq.dds", 0)
-            + "\n96\t-3\t1\t1\ttextures\\green.dds\t1\t1\t1\t0\ttextures\\lod\\hq.dds\t2\t1"
+            + "\n96\t-99\t1\t1\ttextures\\green.dds\t1\t1\t1\t0\ttextures\\lod\\hq.dds\t2\t1"
             + "\nnot a rule"
             + "\n" + TextureFixture.Tile(@"textures\green.dds", @"textures\lod\fine.dds", 0));
         var result = TextureGeneration.Run(f.Request);

@@ -62,23 +62,22 @@ public static partial class GrassGeneration
             foreach (var root in InputRoots)
                 foreach (var path in index.EnumerateLoose(root + "\\"))
                     if (LooseInput(path)) files[path] = index.ResolveLoose(path)!;
-            if (profile.UsesLocalInis) inis.Add(profile.Folder);
-            ccc = GamePath.ResolveExisting(instance.GamePath, "Skyrim.ccc");
+            if (profile.UsesLocalInis) inis.Add(profile.LocalIniFolder);
+            ccc = profile.ResolveGameRootFile("Skyrim.ccc");
         }
         else
         {
-            foreach (var file in Directory.EnumerateFiles(game.DataFolder))
-                if (RootInput(Path.GetFileName(file))) files[Path.GetFileName(file).ToLowerInvariant()] = file;
+            foreach (var file in Directory.EnumerateFiles(game.DataFolder).Order(StringComparer.Ordinal))
+                if (RootInput(Path.GetFileName(file))) files.TryAdd(Path.GetFileName(file).ToLowerInvariant(), file);
             foreach (var root in InputRoots)
             {
-                var dir = GamePath.ResolveExisting(game.DataFolder, root);
-                if (dir is null) continue;
-                foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
-                {
-                    ct.ThrowIfCancellationRequested();
-                    var path = GamePath.Normalize(Path.GetRelativePath(game.DataFolder, file));
-                    if (LooseInput(path)) files[path] = file;
-                }
+                foreach (var dir in GamePath.ResolveAllExisting(game.DataFolder, root))
+                    foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var path = GamePath.Normalize(Path.GetRelativePath(game.DataFolder, file));
+                        if (LooseInput(path)) files.TryAdd(path, file);
+                    }
             }
             if (req.Game.PluginsTxt is { } plugins) inis.Add(Path.GetDirectoryName(plugins)!);
             ccc = GamePath.ResolveExisting(Path.GetDirectoryName(game.DataFolder)!, "Skyrim.ccc");
@@ -126,7 +125,8 @@ public static partial class GrassGeneration
         {
             var found = name == "Skyrim.ini" && req.Game.GameIniPath is { } chosen ? chosen
                 : inis.Select(dir => GamePath.ResolveExisting(dir, name)).FirstOrDefault(File.Exists);
-            if (found is null && name == "Skyrim.ini") found = GamePath.ResolveExisting(Path.GetDirectoryName(game.DataFolder)!, "Skyrim_Default.ini");
+            if (found is null && name == "Skyrim.ini")
+                found = profile?.ResolveGameRootFile("Skyrim_Default.ini") ?? GamePath.ResolveExisting(Path.GetDirectoryName(game.DataFolder)!, "Skyrim_Default.ini");
             if (found is null) continue;
             File.Copy(found, Path.Combine(iniDir, name));
             progress?.Report($"Grass settings: {found}");

@@ -86,6 +86,15 @@ public class HdBillboardTests
         Assert.NotEqual(unpacked, source.Fingerprint(far));                          // the atlas is part of what a far card is built from
         Assert.NotEqual(source.Fingerprint(near), source.Fingerprint(far));
         Assert.Null(source.Build(TreeCardSource.CardPath(@"textures\terrain\lodgen\skyrim.esm\not_there_00000001.dds", far: true)));
+
+        // Near (LOD4) card atlas packs front and side views onto cards_lod4.dds so ESL trees merge into one shape per block too.
+        source.PrepareNearAtlas(lod, [item.Output]);
+        Assert.Equal(2, source.NearAtlas!.Tiles);
+        Assert.True(File.Exists(GamePath.ToFileSystemPath(lod, TreeCardSource.NearAtlasDiffuse)));
+        Assert.True(File.Exists(GamePath.ToFileSystemPath(lod, TreeCardSource.NearAtlasNormal)));
+        var nearAtlased = source.Build(near)!;
+        Assert.All(nearAtlased.Parts, p => { Assert.Equal(TreeCardSource.NearAtlasDiffuse, p.Material.Textures[0]); Assert.Equal(TreeCardSource.NearAtlasNormal, p.Material.Textures[1]); });
+        Assert.Equal(nearAtlased.Parts[0].Material.Key, nearAtlased.Parts[1].Material.Key);
     }
 
     [Fact]

@@ -118,6 +118,28 @@ public sealed class DesktopSettings : ObservableObject
     public bool UseGeneratedTerrain { get => _useGeneratedTerrain; set => Set(ref _useGeneratedTerrain, value); }
     private decimal _terrainTextureSize = 512;
     public decimal TerrainTextureSize { get => _terrainTextureSize; set => Set(ref _terrainTextureSize, value); }
+    private decimal _terrainDiffuseSizeLod8 = 256, _terrainDiffuseSizeLod16 = 256, _terrainDiffuseSizeLod32 = 128;
+    public decimal TerrainDiffuseSizeLod8 { get => _terrainDiffuseSizeLod8; set => Set(ref _terrainDiffuseSizeLod8, value); }
+    public decimal TerrainDiffuseSizeLod16 { get => _terrainDiffuseSizeLod16; set => Set(ref _terrainDiffuseSizeLod16, value); }
+    public decimal TerrainDiffuseSizeLod32 { get => _terrainDiffuseSizeLod32; set => Set(ref _terrainDiffuseSizeLod32, value); }
+    private decimal _terrainNormalSizeLod4 = 512, _terrainNormalSizeLod8 = 256, _terrainNormalSizeLod16 = 256, _terrainNormalSizeLod32 = 128;
+    public decimal TerrainNormalSizeLod4 { get => _terrainNormalSizeLod4; set => Set(ref _terrainNormalSizeLod4, value); }
+    public decimal TerrainNormalSizeLod8 { get => _terrainNormalSizeLod8; set => Set(ref _terrainNormalSizeLod8, value); }
+    public decimal TerrainNormalSizeLod16 { get => _terrainNormalSizeLod16; set => Set(ref _terrainNormalSizeLod16, value); }
+    public decimal TerrainNormalSizeLod32 { get => _terrainNormalSizeLod32; set => Set(ref _terrainNormalSizeLod32, value); }
+    private string _terrainDiffuseFormatLod4 = "BC7", _terrainDiffuseFormatLod8 = "BC1", _terrainDiffuseFormatLod16 = "BC1", _terrainDiffuseFormatLod32 = "BC1";
+    public string TerrainDiffuseFormatLod4 { get => _terrainDiffuseFormatLod4; set => Set(ref _terrainDiffuseFormatLod4, value ?? "BC7"); }
+    public string TerrainDiffuseFormatLod8 { get => _terrainDiffuseFormatLod8; set => Set(ref _terrainDiffuseFormatLod8, value ?? "BC1"); }
+    public string TerrainDiffuseFormatLod16 { get => _terrainDiffuseFormatLod16; set => Set(ref _terrainDiffuseFormatLod16, value ?? "BC1"); }
+    public string TerrainDiffuseFormatLod32 { get => _terrainDiffuseFormatLod32; set => Set(ref _terrainDiffuseFormatLod32, value ?? "BC1"); }
+    private decimal _terrainMaxErrorLod4 = 6m, _terrainMaxErrorLod8 = 16m, _terrainMaxErrorLod16 = 36m, _terrainMaxErrorLod32 = 72m;
+    public decimal TerrainMaxErrorLod4 { get => _terrainMaxErrorLod4; set => Set(ref _terrainMaxErrorLod4, value); }
+    public decimal TerrainMaxErrorLod8 { get => _terrainMaxErrorLod8; set => Set(ref _terrainMaxErrorLod8, value); }
+    public decimal TerrainMaxErrorLod16 { get => _terrainMaxErrorLod16; set => Set(ref _terrainMaxErrorLod16, value); }
+    public decimal TerrainMaxErrorLod32 { get => _terrainMaxErrorLod32; set => Set(ref _terrainMaxErrorLod32, value); }
+    private bool _terrainProtectBorders = true, _terrainOptimizeUnseen = true;
+    public bool TerrainProtectBorders { get => _terrainProtectBorders; set => Set(ref _terrainProtectBorders, value); }
+    public bool TerrainOptimizeUnseen { get => _terrainOptimizeUnseen; set => Set(ref _terrainOptimizeUnseen, value); }
     private decimal _terrainBrightness = 1;
     [System.Text.Json.Serialization.JsonIgnore]
     public bool Seasons
@@ -277,8 +299,8 @@ public sealed class DesktopSettings : ObservableObject
     public bool ConvertAllMeshes { get => _convertAllMeshes; set => Set(ref _convertAllMeshes, value); }
     private bool _convertOverwrite = false;
     public bool ConvertOverwrite { get => _convertOverwrite; set => Set(ref _convertOverwrite, value); }
-    private string _textureCompute = "Cpu";
-    public string TextureCompute { get => _textureCompute; set => Set(ref _textureCompute, value ?? "Cpu"); }
+    private string _textureCompute = "Auto";
+    public string TextureCompute { get => _textureCompute; set => Set(ref _textureCompute, value ?? "Auto"); }
     private decimal _maxThreads = 0m;
     public decimal MaxThreads { get => _maxThreads; set => Set(ref _maxThreads, value); }
     private decimal _makerDetail = 1m;

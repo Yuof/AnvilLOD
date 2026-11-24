@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
@@ -22,34 +23,39 @@ public sealed class RecipeTextureMapper
     private readonly TextureRecipeLayout _layout;
     private readonly IAssetSource _assets;
     private readonly Func<string, byte[]?> _read;
+    private readonly Func<string, Stream?>? _open;
     private readonly string _output;
     private readonly Action<string> _warn;
     private readonly float? _pbrBrightness;
-    private readonly object _gate = new();
-    private readonly Dictionary<string, (string Diffuse, string? Normal)> _variants = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, string> _hashes = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, MappingReport> _report = new(StringComparer.Ordinal);
+    private readonly TruePbrCatalog? _pbrCatalog;
+    private readonly object _warnGate = new();
+    private readonly ConcurrentDictionary<string, Lazy<(string Diffuse, string? Normal)>> _variants = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> _hashes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, MappingReport> _report = new(StringComparer.Ordinal);
     public sealed record MappingReport(string Shape, string Source, string Destination, string Status, string Detail)
     {
         public string Model { get; init; } = "";
     }
-    public IReadOnlyList<MappingReport> Report { get { lock (_gate) return _report.Values.OrderBy(r => r.Model).ThenBy(r => r.Source).ThenBy(r => r.Shape).ToArray(); } }
+    public IReadOnlyList<MappingReport> Report => _report.Values.OrderBy(r => r.Model).ThenBy(r => r.Source).ThenBy(r => r.Shape).ToArray();
 
     /// <param name="pbrBrightness">
     /// With PBR object LOD on, its brightness: a tile read from a PBR albedo (<c>textures\pbr\…</c>) is converted for the LOD shader the
     /// way <see cref="PbrLodConverter"/> converts a whole texture. Null leaves such tiles as they are.
     /// </param>
     public RecipeTextureMapper(TextureRecipeSet recipes, IAssetSource assets, string output, Func<string, byte[]?>? readSource = null, Action<string>? warn = null,
-        float? pbrBrightness = null)
+        float? pbrBrightness = null, TruePbrCatalog? pbrCatalog = null, Func<string, Stream?>? openSource = null)
     {
         _recipes = recipes; _plans = recipes.Compile(); _assets = assets; _output = output; _pbrBrightness = pbrBrightness;
+        _pbrCatalog = pbrCatalog ?? (pbrBrightness is not null ? TruePbrCatalog.Load(assets, (assets as AssetIndex)?.EnumeratePaths("pbrjsons\\")) : null);
         _recipeFingerprint = recipes.Fingerprint + (pbrBrightness is { } b ? FormattableString.Invariant($"|pbr:{b:R}") : "");
         _warn = warn ?? (_ => { });
         _explicitInputs = recipes.Entries.Select(e => e.Copy?.Source ?? e.Tile?.Source ?? e.Conversion!.Source)
             .SelectMany(p => p.Split('|')).ToHashSet(StringComparer.OrdinalIgnoreCase);
         _read = readSource ?? ReadAsset;
+        _open = openSource ?? (readSource is null ? OpenAsset : null);
         _layout = new(recipes, assets.Exists);
     }
+    private Stream? OpenAsset(string path) => _assets.TryOpen(path, out var stream) ? stream : null;
     private byte[]? ReadAsset(string path)
     {
         if (!_assets.TryOpen(path, out var stream)) return null;
@@ -59,7 +65,15 @@ public sealed class RecipeTextureMapper
     {
         if (_hashes.TryGetValue(path, out var hash)) return hash;
         RunLimits.Check();
-        return _hashes[path] = _read(path) is { } bytes ? Convert.ToHexString(SHA256.HashData(bytes)) : "missing";
+        string computed;
+        if (_open is not null)
+        {
+            using var stream = _open(path);
+            computed = stream is not null ? Convert.ToHexString(SHA256.HashData(stream)) : "missing";
+        }
+        else
+            computed = _read(path) is { } bytes ? Convert.ToHexString(SHA256.HashData(bytes)) : "missing";
+        return _hashes.GetOrAdd(path, computed);
     }
 
     // Content hashes, including missing alternatives, invalidate cached quads when a source
@@ -70,51 +84,62 @@ public sealed class RecipeTextureMapper
         foreach (var entry in _recipes.Entries)
             foreach (string source in (entry.Copy?.Source ?? entry.Tile?.Source ?? entry.Conversion!.Source).Split('|'))
             { paths.Add(source); paths.Add(TextureRecipeRenderer.Normal(source)); }
+        var fullModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var variant in variants)
         {
             paths.Add(GamePath.Normalize(variant.FullModel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? variant.FullModel : "meshes\\" + variant.FullModel));
+            fullModels.Add(variant.FullModel);
             foreach (var alt in variant.Alternates)
                 foreach (var texture in new[] { alt.Diffuse, alt.Normal }.OfType<string>().Where(p => p.Length > 0)) paths.Add(GamePath.NormalizeTexture(texture));
-            if (ReadAsset(variant.FullModel) is { } model)
+        }
+        if (fullModels.Count > 0)
+        {
+            var discovered = new ConcurrentBag<string>();
+            Parallel.ForEach(fullModels, RunLimits.Parallel(), fullModel =>
+            {
+                RunLimits.Check();
+                if (ReadAsset(fullModel) is not { } model) return;
                 try
                 {
-                    foreach (var texture in NifGeometryReader.Read(variant.FullModel, model).Parts.SelectMany(p => p.Material.Textures.Take(2)).Where(p => !string.IsNullOrWhiteSpace(p)))
-                        paths.Add(GamePath.NormalizeTexture(texture));
+                    foreach (var texture in NifGeometryReader.Read(fullModel, model).Parts.SelectMany(p => p.Material.Textures.Take(2)).Where(p => !string.IsNullOrWhiteSpace(p)))
+                        discovered.Add(GamePath.NormalizeTexture(texture));
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException) { /* The mesh loader reports malformed models. */ }
+            });
+            foreach (string texture in discovered) paths.Add(texture);
         }
-        return OutputSnapshot.HashText(_recipeFingerprint + "\n" + string.Join('\n', paths.Order(StringComparer.OrdinalIgnoreCase).Select(p => p + "=" + Hash(p))));
+        var ordered = paths.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        var hashed = new string[ordered.Length];
+        Parallel.For(0, ordered.Length, RunLimits.Parallel(), i => hashed[i] = ordered[i] + "=" + Hash(ordered[i]));
+        return OutputSnapshot.HashText(_recipeFingerprint + "\n" + string.Join('\n', hashed));
     }
 
     public LodMeshPart? Map(LodMeshPart part, IReadOnlyList<TextureMatchInput> inputs) => Map("", part, inputs);
 
     public LodMeshPart? Map(string model, LodMeshPart part, IReadOnlyList<TextureMatchInput> inputs)
     {
-        lock (_gate)
+        string source = GamePath.NormalizeTexture(part.Material.Textures[0]);
+        try { return MapCore(model, part, inputs, source); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            string source = GamePath.NormalizeTexture(part.Material.Textures[0]);
-            try { return MapCore(model, part, inputs, source); }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            string detail = ex.Message;
+            if (ex is MissingReplacementTextureException)
             {
-                string detail = ex.Message;
-                if (ex is MissingReplacementTextureException)
+                var missing = part.Material.Textures.Where(p => !string.IsNullOrWhiteSpace(p))
+                    .Where(p => !_assets.Exists(p)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                if (missing.Length == 0)
                 {
-                    var missing = part.Material.Textures.Where(p => !string.IsNullOrWhiteSpace(p))
-                        .Where(p => !_assets.Exists(p)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-                    if (missing.Length == 0)
-                    {
-                        detail += "; kept this material's supplied LOD textures and UVs. Other texture matches remain enabled.";
-                        if (Record(model, part, source, source, "Fallback", detail))
-                            _warn($"Texture matching fallback for {model} [{part.Name}]: {detail}");
-                        // Returning the original part also prevents the non-recipe matcher
-                        // from applying a partial replacement after this fallback.
-                        return part;
-                    }
-                    detail += "; cannot retain the supplied LOD material because its textures are also missing: " + string.Join(", ", missing);
+                    detail += "; kept this material's supplied LOD textures and UVs. Other texture matches remain enabled.";
+                    if (Record(model, part, source, source, "Fallback", detail))
+                        lock (_warnGate) _warn($"Texture matching fallback for {model} [{part.Name}]: {detail}");
+                    // Returning the original part also prevents the non-recipe matcher
+                    // from applying a partial replacement after this fallback.
+                    return part;
                 }
-                Record(model, part, source, "", "Failed", detail);
-                throw new InvalidDataException($"Recipe mapping for {model} [{part.Name}] ({source}): {detail}", ex);
+                detail += "; cannot retain the supplied LOD material because its textures are also missing: " + string.Join(", ", missing);
             }
+            Record(model, part, source, "", "Failed", detail);
+            throw new InvalidDataException($"Recipe mapping for {model} [{part.Name}] ({source}): {detail}", ex);
         }
     }
     private LodMeshPart? MapCore(string model, LodMeshPart part, IReadOnlyList<TextureMatchInput> inputs, string source)
@@ -214,7 +239,13 @@ public sealed class RecipeTextureMapper
     private (string Diffuse, string? Normal) Build(string destination, IReadOnlyDictionary<string, RecipeTextureReplacement> replacements)
     {
         string key = destination + "|" + _recipeFingerprint + "|" + JsonSerializer.Serialize(replacements.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase));
-        if (_variants.TryGetValue(key, out var existing)) return existing;
+        var lazy = _variants.GetOrAdd(key, _ => new Lazy<(string Diffuse, string? Normal)>(() => BuildCore(key, destination, replacements), LazyThreadSafetyMode.ExecutionAndPublication));
+        try { return lazy.Value; }
+        catch { _variants.TryRemove(key, out _); throw; }
+    }
+
+    private (string Diffuse, string? Normal) BuildCore(string key, string destination, IReadOnlyDictionary<string, RecipeTextureReplacement> replacements)
+    {
         string scratch = Path.Combine(_output, ".recipe-build-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(scratch);
         try
         {
@@ -227,9 +258,16 @@ public sealed class RecipeTextureMapper
             string stem = @"textures\pengulod\recipes\" + OutputSnapshot.HashText(key + Convert.ToHexString(SHA256.HashData(diffuse))
                 + (normal is null ? "" : Convert.ToHexString(SHA256.HashData(normal)))).ToLowerInvariant()[..32];
             void Write(string relative, byte[] bytes)
-            { string file = GamePath.ToFileSystemPath(_output, relative); Directory.CreateDirectory(Path.GetDirectoryName(file)!); File.WriteAllBytes(file, bytes); }
+            {
+                string file = GamePath.ToFileSystemPath(_output, relative);
+                if (File.Exists(file)) return;
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                string tmp = file + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                File.WriteAllBytes(tmp, bytes);
+                File.Move(tmp, file, overwrite: true);
+            }
             Write(stem + ".dds", diffuse); if (normal is not null) Write(stem + "_n.dds", normal);
-            return _variants[key] = (stem + ".dds", normal is null ? null : stem + "_n.dds");
+            return (stem + ".dds", normal is null ? null : stem + "_n.dds");
         }
         finally { Directory.Delete(scratch, true); }
     }
@@ -253,6 +291,10 @@ public sealed class RecipeTextureMapper
     {
         if (_pbrBrightness is not { } brightness || !IsPbrAlbedo(path)) return image;
         var pixels = (byte[])image.Pixels.Clone();
+        var (rmaos, mask) = PbrLodTextures.FindCompanionMaps(_assets, path);
+        var rule = _pbrCatalog?.Match(path);
+        PbrLodConverter.BakeMaterialMaps(pixels, image.Width, image.Height,
+            rmaos is null ? null : ReadAsset(rmaos), mask is null ? null : ReadAsset(mask), rule?.ColorScale);
         PbrLodConverter.ApplyCurve(pixels, brightness / _recipes.Brightness);
         return image with { Pixels = pixels };
     }

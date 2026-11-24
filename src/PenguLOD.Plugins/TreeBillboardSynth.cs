@@ -38,7 +38,7 @@ public sealed class TreeBillboardSynth(IAssetSource assets, string? cacheRoot = 
     /// <summary>Renders (or finds up to date) the billboard for <paramref name="model"/>. False with a reason when there is nothing to draw.</summary>
     /// <param name="pluginFolder">Lower-case plugin file name: the lodgen sub folder.</param>
     /// <param name="name">"model_formid" (formid as 8 hex digits, lower case).</param>
-    public bool TryRender(string model, string pluginFolder, string name, out string reason, TreeMaterialVariant? variant = null)
+    public bool TryRender(string model, string pluginFolder, string name, out string reason, TreeMaterialVariant? variant = null, float minHeight = MinHeight)
     {
         reason = "";
         model = GamePath.Normalize(model.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? model : "meshes\\" + model);
@@ -59,7 +59,7 @@ public sealed class TreeBillboardSynth(IAssetSource assets, string? cacheRoot = 
             { reason = "missing or unreadable diffuse texture"; return false; }
 
         var (min, max) = LodMeshAuthor.Bounds(mesh);
-        if (max.Z - min.Z < MinHeight) { reason = TooSmall; return false; }
+        if (max.Z - min.Z < minHeight) { reason = TooSmall; return false; }
 
         // What the picture depends on: the model and its textures.
         var sb = new StringBuilder().Append(Convert.ToHexString(SHA256.HashData(bytes))).Append('|').Append(variant?.Id);

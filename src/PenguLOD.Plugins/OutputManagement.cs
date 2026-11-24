@@ -182,7 +182,8 @@ public static class OutputManagement
                         if (!actual.TryGetValue(relative, out var path)) { findings.Add(new("Error", "Missing " + stage.Id + " file: " + relative)); continue; }
                         string hash = hashed?.GetValueOrDefault(root)?.GetValueOrDefault(path) ?? OutputSnapshot.HashFile(OutputSnapshot.Resolve(root, path), ct); count++;
                         if (!hash.Equals(expected, StringComparison.OrdinalIgnoreCase)) findings.Add(new("Error", "Changed or stale file: " + relative));
-                        if (all.TryGetValue(relative, out var other) && !hash.Equals(other, StringComparison.OrdinalIgnoreCase))
+                        if (all.TryGetValue(relative, out var other) && !hash.Equals(other, StringComparison.OrdinalIgnoreCase)
+                            && !relative.Contains(".Terrain.HeightMap.", StringComparison.OrdinalIgnoreCase))
                             findings.Add(new("Error", "Conflicting files across selected outputs: " + relative));
                         all[relative] = hash;
                     }
@@ -288,7 +289,14 @@ public static class OutputManagement
                 {
                     var old = copies.GetValueOrDefault(file);
                     if (old is null) copies.Add(file, new(file, stageFolders[stage.Id], hash));
-                    else if (old.Hash != hash) plan.Errors.Add("Stages contain conflicting files: " + file);
+                    else if (old.Hash != hash)
+                    {
+                        if (file.Contains(".Terrain.HeightMap.", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (stage.Id == "lod") copies[file] = new(file, stageFolders[stage.Id], hash);
+                        }
+                        else plan.Errors.Add("Stages contain conflicting files: " + file);
+                    }
                 }
             // User-owned files (mod-manager metadata, runtime settings) belong to the installation: the destination's copy is
             // kept; when it has none, the first selected source that has one provides it.

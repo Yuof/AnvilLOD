@@ -23,8 +23,8 @@ public sealed class RuntimeDataGoldenTests : IDisposable
         throw new DirectoryNotFoundException("Repository root not found.");
     }
 
-    private static LodReference Ref(string id, string mesh, Vector3 position, Vector3 rotation, float scale) =>
-        new($"{id}:Skyrim.esm", "base", null, "Tamriel", "Skyrim.esm", position, rotation, scale, new LodMeshSet(mesh, null, null, null), LodReferenceFlags.None);
+    private static LodReference Ref(string id, string mesh, Vector3 position, Vector3 rotation, float scale, string? mesh8 = null, string? mesh16 = null) =>
+        new($"{id}:Skyrim.esm", "base", null, "Tamriel", "Skyrim.esm", position, rotation, scale, new LodMeshSet(mesh, mesh8, mesh16, null), LodReferenceFlags.None);
 
     private void Check(string relative, string name)
     {
@@ -43,8 +43,9 @@ public sealed class RuntimeDataGoldenTests : IDisposable
     {
         var refs = new[]
         {
-            // A switchable reference: enable parent, opposite state, initially disabled.
-            new DynamicLodReference(Ref("00012345", @"meshes\lod\farmhouse\farmhouse01_lod_0.nif", new(100.5f, -200.25f, 300f), new(0.1f, 0.2f, 0.3f), 1.25f),
+            // A switchable reference: enable parent, opposite state, initially disabled, with distinct LOD4/LOD8/LOD16 meshes (PLDY v3).
+            new DynamicLodReference(Ref("00012345", @"meshes\lod\farmhouse\farmhouse01_lod_0.nif", new(100.5f, -200.25f, 300f), new(0.1f, 0.2f, 0.3f), 1.25f,
+                @"meshes\lod\farmhouse\farmhouse01_lod_1.nif", @"meshes\lod\farmhouse\farmhouse01_lod_2.nif"),
                 "Skyrim.esm", 0x12345, "Skyrim.esm", 0x3C, ParentPlugin: "Update.esm", ParentLocalId: 0x55, ParentOpposite: true, InitiallyDisabled: true),
             // A near grid object from a plugin with a non-ASCII name (UTF-8 length prefix), and window glow at any distance.
             new DynamicLodReference(Ref("00000801", @"meshes\effects\fxwaterfallbodytall.nif", new(-4096f, 8192f, -64f), Vector3.Zero, 1f),
@@ -64,7 +65,8 @@ public sealed class RuntimeDataGoldenTests : IDisposable
             new("WhiterunWorld", "Skyrim.esm", 0x1A26F, "Skyrim.esm", 0x123456, "RockL01", @"Meshes\Landscape\Rocks\RockL01.nif",
                 new Vector3(1, 2, 3), new Vector3(0.1f, 0.2f, 0.3f), 1.5f, 6, -1, true, false),
             new("WhiterunWorld", "Skyrim.esm", 0x1A26F, "Skyrim.esm", 0x123457, "RockPileM02Snow", @"meshes\landscape\rocks\rockpilem02.nif",
-                new Vector3(4, 5, 6), Vector3.Zero, 1f, 7, -1, false, true),
+                new Vector3(4, 5, 6), Vector3.Zero, 1f, 7, -1, false, true,
+                [new AltTexture("RockPileM02:0", @"textures\landscape\mountains\mountainslab02snow.dds", @"textures\landscape\mountains\mountainslab02_n.dds")]),
         };
         Assert.Equal(2, ParentCopyWriter.Write(_root, copies));
         Check(ParentCopyWriter.RelativePath, "PenguLOD.copies");

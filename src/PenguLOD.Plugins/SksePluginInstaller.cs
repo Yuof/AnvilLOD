@@ -43,20 +43,31 @@ public static class SksePluginInstaller
     /// file version, but some executables (a downgraded 1.5.97 for one) carry a bogus 1.0.0.0 there, which used to be mistaken for VR; then
     /// the product version and the SKSE runtime DLL next to it (skse64_1_5_97.dll) say which game it is. A SkyrimSE.exe is never VR.
     /// </summary>
-    public static Version? GameVersion(string gameDataFolder)
+    public static Version? GameVersion(string gameDataFolder, IReadOnlyList<string>? gameRootFolders = null)
     {
-        var gameFolder = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(gameDataFolder));
-        if (gameFolder is null) return null;
-        var exe = Path.Combine(gameFolder, "SkyrimSE.exe");
-        bool vr = false;
-        if (!File.Exists(exe)) { exe = Path.Combine(gameFolder, "SkyrimVR.exe"); vr = true; }
-        if (!File.Exists(exe)) return null;
-        var info = FileVersionInfo.GetVersionInfo(exe);
-        var v = new Version(info.FileMajorPart, info.FileMinorPart, info.FileBuildPart, info.FilePrivatePart);
-        if (vr) return v.Major == 0 && v.Minor == 0 ? null : v;
-        if (v >= FirstSpecialEdition) return v;
-        if (Version.TryParse(info.ProductVersion?.Replace(',', '.').Replace(" ", ""), out var pv) && pv >= FirstSpecialEdition) return pv;
-        return VersionFromSkseFiles(gameFolder);
+        var roots = gameRootFolders is { Count: > 0 }
+            ? gameRootFolders
+            : Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(gameDataFolder)) is { } gf ? [gf] : [];
+        foreach (var gameFolder in roots)
+        {
+            var exe = PenguLOD.Core.World.GamePath.ResolveExisting(gameFolder, "SkyrimSE.exe") ?? Path.Combine(gameFolder, "SkyrimSE.exe");
+            bool vr = false;
+            if (!File.Exists(exe))
+            {
+                exe = PenguLOD.Core.World.GamePath.ResolveExisting(gameFolder, "SkyrimVR.exe") ?? Path.Combine(gameFolder, "SkyrimVR.exe");
+                vr = true;
+            }
+            if (!File.Exists(exe)) continue;
+            var info = FileVersionInfo.GetVersionInfo(exe);
+            var v = new Version(info.FileMajorPart, info.FileMinorPart, info.FileBuildPart, info.FilePrivatePart);
+            if (vr) return v.Major == 0 && v.Minor == 0 ? null : v;
+            if (v >= FirstSpecialEdition) return v;
+            if (Version.TryParse(info.ProductVersion?.Replace(',', '.').Replace(" ", ""), out var pv) && pv >= FirstSpecialEdition) return pv;
+            foreach (var skseRoot in roots)
+                if (VersionFromSkseFiles(skseRoot) is { } sv) return sv;
+            return null;
+        }
+        return null;
     }
 
     /// <summary>The game version named by the newest <c>skse64_&lt;major&gt;_&lt;minor&gt;_&lt;build&gt;.dll</c> in a game folder, or null.</summary>
@@ -98,7 +109,7 @@ public static class SksePluginInstaller
     };
 
     /// <param name="toolFolder">Where the bundled builds live (default: next to the running tool).</param>
-    public static Result Install(string outputFolder, string gameDataFolder, SkseDllChoice choice, string? toolFolder = null)
+    public static Result Install(string outputFolder, string gameDataFolder, SkseDllChoice choice, string? toolFolder = null, IReadOnlyList<string>? gameRootFolders = null)
     {
         var target = Path.Combine(outputFolder, RelativeDll.Replace('\\', Path.DirectorySeparatorChar));
         if (choice == SkseDllChoice.None)
@@ -108,7 +119,7 @@ public static class SksePluginInstaller
             return new Result(false, "SKSE plugin: not put in the output (install it separately, from the PenguLOD SKSE Plugin FOMOD).");
         }
 
-        Version? version = GameVersion(gameDataFolder);
+        Version? version = GameVersion(gameDataFolder, gameRootFolders);
         var use = choice;
         if (choice == SkseDllChoice.Auto)
         {

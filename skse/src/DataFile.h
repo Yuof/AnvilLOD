@@ -10,6 +10,8 @@ namespace PenguLOD
 		std::uint32_t worldPlugin;
 		std::uint32_t worldLocalId;
 		std::uint32_t mesh;
+		std::uint32_t mesh8{ kNone };   // v3: optional LOD8 mesh string index (kNone = reuse mesh)
+		std::uint32_t mesh16{ kNone };  // v3: optional LOD16 mesh string index (kNone = reuse mesh8/mesh)
 		std::array<float, 3> pos;
 		std::array<float, 3> rot;  // radians, as stored in the REFR
 		float                scale;
@@ -27,20 +29,29 @@ namespace PenguLOD
 		static constexpr std::uint32_t kStandIn = 64;     // Tamriel's stand-in for a real object of a city worldspace: hidden inside the loaded cells while the player is in that city
 	};
 
+	struct CopyAltTexture
+	{
+		std::uint32_t shape{ 0 };
+		std::uint32_t diffuse{ 0xFFFFFFFF };
+		std::uint32_t normal{ 0xFFFFFFFF };
+	};
+
 	/// One Parent > Child copy from PenguLOD.copies: a parent worldspace reference around a walled city, drawn while the player is
 	/// in the city's child worldspace (no plugin, no record).
 	struct CopyEntry
 	{
-		std::uint32_t        worldPlugin;
-		std::uint32_t        worldLocalId;
-		std::uint32_t        model;  // string index, relative to Data\meshes
-		std::array<float, 3> pos;
-		std::array<float, 3> rot;  // radians, as stored in the REFR
-		float                scale;
-		std::uint32_t        flags;
+		std::uint32_t               worldPlugin;
+		std::uint32_t               worldLocalId;
+		std::uint32_t               model;  // string index, relative to Data\meshes
+		std::array<float, 3>        pos;
+		std::array<float, 3>        rot;  // radians, as stored in the REFR
+		float                       scale;
+		std::uint32_t               flags;
+		std::vector<CopyAltTexture> alts;  // v2: per-shape alternate texture overrides
 
+		static constexpr std::uint32_t kNone = 0xFFFFFFFF;
 		static constexpr std::uint32_t kChildCell = 1;     // the child worldspace has a cell at these coordinates
-		static constexpr std::uint32_t kAltTextures = 2;   // the base record swaps textures; the copy shows the model's own
+		static constexpr std::uint32_t kAltTextures = 2;   // the base record swaps textures
 	};
 
 	struct CopyFile
@@ -48,7 +59,7 @@ namespace PenguLOD
 		std::vector<std::string> strings;
 		std::vector<CopyEntry>   entries;
 
-		/// Reads Data\SKSE\Plugins\PenguLOD\PenguLOD.copies. Returns false (quietly when it just isn't there) if it can't be used.
+		/// Reads Data\SKSE\Plugins\PenguLOD\PenguLOD.copies (v1 or v2). Returns false if it can't be used.
 		bool Read(const std::filesystem::path& a_path);
 	};
 
@@ -87,7 +98,7 @@ namespace PenguLOD
 		std::vector<std::string>  strings;
 		std::vector<DynamicEntry> entries;
 
-		/// Reads Data\SKSE\Plugins\PenguLOD\PenguLOD.dyn. Returns false (and logs why) if it's missing or broken.
+		/// Reads Data\SKSE\Plugins\PenguLOD\PenguLOD.dyn (v1, v2, or v3). Returns false (and logs why) if it's missing or broken.
 		bool Read(const std::filesystem::path& a_path);
 	};
 }

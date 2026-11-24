@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Numerics;
 using System.Text.Json;
 using PenguLOD.Core.Textures;
@@ -13,7 +14,7 @@ public sealed class TextureRecipeLayout
     private readonly TextureRecipeSet _set;
     private readonly IReadOnlyDictionary<string, TextureRecipePlan> _plans;
     private readonly Func<string, bool> _exists;
-    private readonly Dictionary<string, IReadOnlyList<RecipePlacement>> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, IReadOnlyList<RecipePlacement>> _cache = new(StringComparer.OrdinalIgnoreCase);
     public TextureRecipeLayout(TextureRecipeSet set, Func<string, bool> exists)
     { _set = set; _plans = set.Compile(); _exists = exists; }
 

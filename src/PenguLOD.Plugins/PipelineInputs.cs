@@ -20,7 +20,7 @@ public static class PipelineInputs
 {
     private static StringComparer PathComparer => OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
     private static readonly HashSet<string> AssetRoots = new(StringComparer.OrdinalIgnoreCase)
-        { "meshes", "textures", "lodsettings", "dyndolod", "grass", "seasons", "skse" };
+        { "meshes", "textures", "lodsettings", "dyndolod", "grass", "seasons", "skse", "pbrjsons", "root" };
     private static readonly HashSet<string> ContentExtensions = new(StringComparer.OrdinalIgnoreCase)
         { ".esp", ".esm", ".esl", ".ini", ".json", ".txt", ".toml", ".lod", ".ccc" };
     private static readonly HashSet<string> ProfileFiles = new(StringComparer.OrdinalIgnoreCase)
@@ -44,7 +44,9 @@ public static class PipelineInputs
         string[] parts = relative.Split('/', '\\');
         string name = parts[^1], extension = Path.GetExtension(name);
         if (UnreadExtensions.Contains(extension)) return true;
-        if (parts.Length == 1) return name.Equals("meta.ini", StringComparison.OrdinalIgnoreCase);
+        if (parts.Length == 1)
+            return name.Equals("meta.ini", StringComparison.OrdinalIgnoreCase)
+                || (name.StartsWith("PenguLOD.", StringComparison.OrdinalIgnoreCase) && extension.Equals(".json", StringComparison.OrdinalIgnoreCase));
         if (parts[0].Equals("skse", StringComparison.OrdinalIgnoreCase))
             return parts.Length != 3 || !parts[1].Equals("plugins", StringComparison.OrdinalIgnoreCase)
                 || !(extension.Equals(".dll", StringComparison.OrdinalIgnoreCase) || SkseSettings.Contains(name));

@@ -84,13 +84,21 @@ public static class RequestFactory
     public static TerrainGenerationRequest Terrain(DesktopSettings s)
     {
         int Whole(decimal value) => value == decimal.Truncate(value) ? checked((int)value) : throw new ArgumentException("Terrain sizes must be whole numbers.");
+        int d4 = Whole(s.TerrainTextureSize), d8 = Whole(s.TerrainDiffuseSizeLod8), d16 = Whole(s.TerrainDiffuseSizeLod16), d32 = Whole(s.TerrainDiffuseSizeLod32);
+        int n4 = Whole(s.TerrainNormalSizeLod4), n8 = Whole(s.TerrainNormalSizeLod8), n16 = Whole(s.TerrainNormalSizeLod16), n32 = Whole(s.TerrainNormalSizeLod32);
         var request = new TerrainGenerationRequest(Game(s), RequiredPath(s.TerrainOutput, "a terrain output folder", s), Worldspaces(s.Worldspaces),
-            TextureSize: Whole(s.TerrainTextureSize), Brightness: (float)s.TerrainBrightness, VertexColorStrength: (float)s.TerrainVertexColor,
+            TextureSize: d4, Brightness: (float)s.TerrainBrightness, VertexColorStrength: (float)s.TerrainVertexColor,
             TextureRepeatsPerCell: (float)s.TerrainRepeats, SkirtDepth: (float)s.TerrainSkirt, Water: s.TerrainWater,
             UseExistingTerrain: s.TerrainFallback, ExportHeightmaps: s.TerrainHeightmaps, HeightmapMaximumSize: Whole(s.TerrainHeightmapSize), Seasons: s.Seasons,
             SeasonsStrict: GenerationOptions.Get<bool>(s, "seasonsStrict"), OnlySeasons: GenerationOptions.OnlySeasons(s),
             Materials: new((float)s.TerrainNormalStrength, s.TerrainPbr, s.TerrainPbrTwins, (float)s.TerrainPbrScale, (float)s.TerrainPbrGamma, (float)s.TerrainAo),
-            FillUncoveredLand: s.TerrainFillUncovered, SubstituteMissingTextures: s.TerrainSubstituteTextures);
+            FillUncoveredLand: s.TerrainFillUncovered, SubstituteMissingTextures: s.TerrainSubstituteTextures,
+            DiffuseSizes: new(d4, d8, d16, d32),
+            NormalSizes: new(n4, n8, n16, n32),
+            DiffuseFormats: new(s.TerrainDiffuseFormatLod4, s.TerrainDiffuseFormatLod8, s.TerrainDiffuseFormatLod16, s.TerrainDiffuseFormatLod32),
+            MeshMaxErrors: new((float)s.TerrainMaxErrorLod4, (float)s.TerrainMaxErrorLod8, (float)s.TerrainMaxErrorLod16, (float)s.TerrainMaxErrorLod32),
+            ProtectCellBorders: s.TerrainProtectBorders,
+            OptimizeUnseen: s.TerrainOptimizeUnseen);
         TerrainGeneration.Validate(request);
         return request;
     }
@@ -192,6 +200,10 @@ public static class RequestFactory
             ObjectAtlas: B("objectAtlas"), AtlasCellSize: int.Parse(C("atlasCell")),
             OptimizeObjectTextures: B("objectTextures"), ObjectTextureSize: int.Parse(C("objectTextureSize")),
             AutomaticObjects: new PenguLOD.Plugins.Authoring.AutomaticObjectSettings(B("autoObjects"), I("autoObjectNear"), I("autoObjectMiddle"), I("autoObjectFar"), F("autoObjectMin"), F("autoObjectDetail")),
-            GeneratedTerrainFolder: s.UseGeneratedTerrain ? RequiredPath(s.TerrainOutput, "a terrain output folder", s) : null);
+            GeneratedTerrainFolder: s.UseGeneratedTerrain ? RequiredPath(s.TerrainOutput, "a terrain output folder", s) : null,
+            AtlasPageSize: int.Parse(C("atlasPageSize")),
+            GrassMaxLevel: int.Parse(C("grassMaxLevel")),
+            GrassTiers: int.Parse(C("grassTiers")),
+            AdaptiveQuality: B("adaptiveQuality"));
     }
 }

@@ -8,6 +8,18 @@ namespace PenguLOD.Core.World;
 /// </summary>
 public static class ArchiveOrder
 {
+    /// <summary>
+    /// Intra-plugin BSA tie-breaker matching Skyrim SE: the exact <c>&lt;PluginBase&gt;.bsa</c> loads first (lowest priority),
+    /// followed by suffixed archives such as <c>&lt;PluginBase&gt; - Textures.bsa</c> in case-insensitive alphabetical order.
+    /// </summary>
+    public static (int Suffixed, string FileName) IntraPluginKey(string archivePathOrName, string pluginBase)
+    {
+        var fileName = GamePath.GetFileName(archivePathOrName);
+        var stem = GamePath.GetFileNameWithoutExtension(fileName);
+        int suffixed = stem.Equals(pluginBase, StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+        return (suffixed, fileName);
+    }
+
     /// <param name="archiveFiles">Full paths of the .bsa files in the Data folder.</param>
     /// <param name="pluginOrder">Plugin file names in load order (lowest priority first).</param>
     /// <returns>The archive paths, lowest priority first.</returns>
@@ -20,20 +32,22 @@ public static class ArchiveOrder
             .OrderByDescending(p => p.Base.Length)
             .ToList();
 
-        int Rank(string archivePath)
+        (int Rank, int Suffixed, string FileName) Key(string archivePath)
         {
-            var file = GamePath.GetFileNameWithoutExtension(archivePath);
+            var fileName = GamePath.GetFileName(archivePath);
+            var stem = GamePath.GetFileNameWithoutExtension(fileName);
             foreach (var (b, index) in bases)
-                if (file.StartsWith(b, StringComparison.OrdinalIgnoreCase)
-                    && (file.Length == b.Length || !char.IsLetterOrDigit(file[b.Length])))
-                    return index + 1;
-            return 0;   // no plugin: with the base game
+                if (stem.StartsWith(b, StringComparison.OrdinalIgnoreCase)
+                    && (stem.Length == b.Length || !char.IsLetterOrDigit(stem[b.Length])))
+                    return (index + 1, stem.Length == b.Length ? 0 : 1, fileName);
+            return (0, 0, fileName);   // no plugin: with the base game
         }
 
         return archiveFiles
-            .Select(p => (Path: p, Rank: Rank(p)))
-            .OrderBy(t => t.Rank)
-            .ThenBy(t => GamePath.GetFileName(t.Path), StringComparer.OrdinalIgnoreCase)
+            .Select(p => (Path: p, Sort: Key(p)))
+            .OrderBy(t => t.Sort.Rank)
+            .ThenBy(t => t.Sort.Suffixed)
+            .ThenBy(t => t.Sort.FileName, StringComparer.OrdinalIgnoreCase)
             .Select(t => t.Path)
             .ToList();
     }

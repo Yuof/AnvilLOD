@@ -78,9 +78,10 @@ public static partial class NifGeometryReader
         var warnings = new List<string>();
         var visited = new HashSet<int>();
         var scene = new Lazy<Dictionary<int, Matrix4x4>>(() => SceneTransforms(nif));
+        int totalVisits = 0;
 
         foreach (var root in nif.Roots)
-            Walk(nif, root, Matrix4x4.Identity, parts, warnings, visited, passthru, waterAsLit, includeTexGenPlane, includeUnshaded, scene, renderEffects, staticObjectLod);
+            Walk(nif, root, Matrix4x4.Identity, parts, warnings, visited, ref totalVisits, passthru, waterAsLit, includeTexGenPlane, includeUnshaded, scene, renderEffects, staticObjectLod);
 
         bool anyShape = nif.Blocks.Any(b => ShapeTypes.Contains(b.Type) || b.Type is "NiTriShape" or "BSLODTriShape" or "NiTriStrips");
         return new LodMesh { Path = path, Parts = parts, Warnings = warnings, NoShapesInFile = !anyShape && warnings.Count == 0 };
@@ -152,12 +153,12 @@ public static partial class NifGeometryReader
     }
 
     private static void Walk(NifFile nif, int index, Matrix4x4 parent, List<LodMeshPart> parts, List<string> warnings,
-        HashSet<int> visited, bool passthru, bool waterAsLit, bool includeTexGenPlane, bool includeUnshaded,
+        HashSet<int> visited, ref int totalVisits, bool passthru, bool waterAsLit, bool includeTexGenPlane, bool includeUnshaded,
         Lazy<Dictionary<int, Matrix4x4>> scene, bool renderEffects, bool staticObjectLod, int depth = 0)
     {
         if (index == -1) return;
         if (index < 0 || index >= nif.Blocks.Count) { warnings.Add($"Scene child {index} could not be read: invalid block reference."); return; }
-        if (depth > 256 || !visited.Add(index)) { warnings.Add($"Scene child {index} could not be read: repeated, cyclic or excessively deep node."); return; }
+        if (depth > 256 || ++totalVisits > 65536 || !visited.Add(index)) { warnings.Add($"Scene child {index} could not be read: cyclic or excessively deep/large node."); return; }
         var block = nif.Blocks[index];
         try
         {
@@ -180,7 +181,7 @@ public static partial class NifGeometryReader
                     children = [children[active]];
                 }
                 foreach (int child in children)
-                    Walk(nif, child, world, parts, warnings, visited, passthru, waterAsLit, includeTexGenPlane, includeUnshaded, scene, renderEffects, staticObjectLod, depth + 1);
+                    Walk(nif, child, world, parts, warnings, visited, ref totalVisits, passthru, waterAsLit, includeTexGenPlane, includeUnshaded, scene, renderEffects, staticObjectLod, depth + 1);
             }
             else if (ShapeTypes.Contains(block.Type))
             {
@@ -203,7 +204,14 @@ public static partial class NifGeometryReader
                 // Scene children are NiAVObjects. An unsupported hidden particle/effect is not visible geometry.
                 var r = nif.ReaderFor(block);
                 if ((ReadAvObject(nif, ref r).Flags & 1) == 0)
-                    warnings.Add($"Scene child {block.Index} ({block.Type}) is not supported; skipped.");
+                {
+                    bool nonStructural = block.Type.EndsWith("ParticleSystem", StringComparison.Ordinal)
+                        || block.Type.EndsWith("Light", StringComparison.Ordinal);
+                    if (staticObjectLod && nonStructural)
+                        warnings.Add($"{LodOmissionWarning}scene child {block.Index} ({block.Type}) is a dynamic effect/light; retained the model's static surfaces.");
+                    else
+                        warnings.Add($"Scene child {block.Index} ({block.Type}) is not supported; skipped.");
+                }
             }
         }
         catch (UnsupportedEffectException ex)
@@ -213,6 +221,10 @@ public static partial class NifGeometryReader
         catch (Exception ex) when (ex is InvalidDataException or ArgumentException or IndexOutOfRangeException or OverflowException or NotSupportedException)
         {
             warnings.Add($"Shape/node {block.Index} ({block.Type}) could not be read: {ex.Message}");
+        }
+        finally
+        {
+            visited.Remove(index);
         }
     }
 

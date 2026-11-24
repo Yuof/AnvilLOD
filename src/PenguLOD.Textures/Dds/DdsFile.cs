@@ -201,7 +201,18 @@ public static class DdsFile
     }
 
     /// <summary>Writes a BC7 DDS (DX10 header). <paramref name="mips"/> are the compressed levels, largest first.</summary>
-    public static void WriteBc7(Stream output, int width, int height, IReadOnlyList<byte[]> mips, bool srgb = false)
+    public static void WriteBc7(Stream output, int width, int height, IReadOnlyList<byte[]> mips, bool srgb = false) =>
+        WriteDx10(output, width, height, mips, srgb ? 99 : 98);
+
+    /// <summary>Writes a BC1 / DXT1 DDS (DX10 header, 4 bpp).</summary>
+    public static void WriteBc1(Stream output, int width, int height, IReadOnlyList<byte[]> mips, bool srgb = false) =>
+        WriteDx10(output, width, height, mips, srgb ? 72 : 71);
+
+    /// <summary>Writes a BC5 DDS (DX10 header, 8 bpp 2-channel normal).</summary>
+    public static void WriteBc5(Stream output, int width, int height, IReadOnlyList<byte[]> mips) =>
+        WriteDx10(output, width, height, mips, 83);
+
+    private static void WriteDx10(Stream output, int width, int height, IReadOnlyList<byte[]> mips, int dxgiFormat)
     {
         Span<byte> h = stackalloc byte[4 + HeaderSize + 20];
         h.Clear();
@@ -222,7 +233,7 @@ public static class DdsFile
         // caps: COMPLEX | TEXTURE | MIPMAP
         BinaryPrimitives.WriteUInt32LittleEndian(hdr[104..], 0x8 | 0x1000 | 0x400000);
         var dx10 = h[(4 + HeaderSize)..];
-        BinaryPrimitives.WriteInt32LittleEndian(dx10, srgb ? 99 : 98);
+        BinaryPrimitives.WriteInt32LittleEndian(dx10, dxgiFormat);
         BinaryPrimitives.WriteInt32LittleEndian(dx10[4..], 3); // TEXTURE2D
         BinaryPrimitives.WriteInt32LittleEndian(dx10[8..], 0);
         BinaryPrimitives.WriteInt32LittleEndian(dx10[12..], 1); // array size

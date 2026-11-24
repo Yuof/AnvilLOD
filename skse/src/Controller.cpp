@@ -351,6 +351,14 @@ namespace PenguLOD
 			item.cellY = CellOf(e.pos[1]);
 			item.copy = true;
 			item.childCell = (e.flags & CopyEntry::kChildCell) != 0;
+			item.alts.reserve(e.alts.size());
+			for (const auto& a : e.alts) {
+				item.alts.push_back({
+					file.strings[a.shape],
+					a.diffuse != CopyEntry::kNone ? file.strings[a.diffuse] : std::string{},
+					a.normal != CopyEntry::kNone ? file.strings[a.normal] : std::string{},
+				});
+			}
 			_byWorld[item.world].push_back(_items.size());
 			_items.push_back(std::move(item));
 			++_copyCount;
@@ -444,6 +452,8 @@ namespace PenguLOD
 				item.parent = data->LookupFormID(e.parentLocalId, _meshes[e.parentPlugin]);
 			}
 			item.mesh = e.mesh;
+			item.mesh8 = e.mesh8;
+			item.mesh16 = e.mesh16;
 			item.pos = RE::NiPoint3(e.pos[0], e.pos[1], e.pos[2]);
 			item.rot = ReferenceRotation(e.rot[0], e.rot[1], e.rot[2]);
 			item.scale = e.scale;
@@ -451,10 +461,10 @@ namespace PenguLOD
 			item.cellY = CellOf(e.pos[1]);
 			item.opposite = (e.flags & DynamicEntry::kOpposite) != 0;
 			item.initiallyDisabled = (e.flags & DynamicEntry::kInitiallyDisabled) != 0;
-			item.grid = (e.flags & DynamicEntry::kGridObject) != 0;
+			item.glow = (e.flags & DynamicEntry::kGlow) != 0;
+			item.grid = (e.flags & DynamicEntry::kGridObject) != 0 && !item.glow;
 			item.nearGrid = (e.flags & DynamicEntry::kNearGrid) != 0;
 			item.neverFade = (e.flags & DynamicEntry::kNeverFade) != 0;
-			item.glow = (e.flags & DynamicEntry::kGlow) != 0;
 			item.standIn = (e.flags & DynamicEntry::kStandIn) != 0;
 			_glowCount += item.glow ? 1 : 0;
 			item.water = item.grid && IsWaterMesh(_meshes[e.mesh]);
@@ -535,8 +545,14 @@ namespace PenguLOD
 	void Controller::Reset()
 	{
 		_waterShown = 0;
+		_glowShown = 0;
+		_copiesShown = 0;
+		_lastWorld = 0;
+		_holdUntil = {};
+		_capWarned = false;
 		for (auto i : _shown) {
 			_items[i].scrollProps.clear();
+			_items[i].glowProps.clear();
 			_items[i].controllers.clear();
 			_items[i].node.reset();
 		}
@@ -574,30 +590,47 @@ namespace PenguLOD
 		const float px = outside ? player->GetPositionX() : 0.0f;
 		const float py = outside ? player->GetPositionY() : 0.0f;
 		const float nearOn = Settings::Get().nearGridDistance;
-		const float nearOff = nearOn * 1.1f;
 		const float kEffectsDistance = Settings::Get().effectsDistance;  // about five cells by default: the loaded area plus a little
 		for (const auto& n : _natives) {
-			bool wanted;
+			bool sourceWanted;
 			if (const auto* src = RE::TESForm::LookupByID<RE::TESObjectREFR>(n.source)) {
 				// The vanilla reference's own 3D is up when its cell is loaded: then it is the one to see, not our copy of it.
-				wanted = !src->IsDisabled() && !src->IsDeleted() && !src->Is3DLoaded();
+				sourceWanted = !src->IsDisabled() && !src->IsDeleted() && !src->Is3DLoaded();
 			} else if (n.parent != 0) {
 				const auto* parent = RE::TESForm::LookupByID<RE::TESObjectREFR>(n.parent);
-				wanted = parent ? parent->IsDisabled() == n.opposite : !n.initiallyDisabled;
+				sourceWanted = parent ? parent->IsDisabled() == n.opposite : !n.initiallyDisabled;
 			} else {
-				wanted = !n.initiallyDisabled;
+				sourceWanted = !n.initiallyDisabled;
 			}
 			auto* ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(n.native);
 			if (!ref || ref->IsDeleted()) {
 				continue;
 			}
-			if (wanted && (n.nearOnly || n.effects)) {
+			bool inRange = true;
+			if (sourceWanted && (n.nearOnly || n.effects)) {
 				const float dx = n.x - px;
 				const float dy = n.y - py;
 				const float on = n.effects ? std::min(nearOn, kEffectsDistance) : nearOn;
-				const float limit = ref->IsDisabled() ? on : on * 1.1f;
-				wanted = outside && dx * dx + dy * dy <= limit * limit;
+				const bool currentlyShown = !ref->IsDisabled() && (!ref->Get3D() || !ref->Get3D()->GetAppCulled());
+				const float limit = currentlyShown ? on * 1.1f : on;
+				inRange = outside && dx * dx + dy * dy <= limit * limit;
 			}
+			if (n.effects && sourceWanted) {
+				// Avoid writing repeated Enable/Disable REFR changeforms into savegames when walking in and out of effect range:
+				// enable once when entering range, and toggle visibility via scene-graph SetAppCulled thereafter.
+				if (ref->IsDisabled()) {
+					if (inRange) {
+						EnableRef(ref);
+					}
+				} else if (auto* obj3d = ref->Get3D()) {
+					if (obj3d->GetAppCulled() == inRange) {
+						obj3d->SetAppCulled(!inRange);
+					}
+				}
+				enabled += inRange ? 1 : 0;
+				continue;
+			}
+			const bool wanted = sourceWanted && inRange;
 			if (wanted == ref->IsDisabled()) {
 				if (Settings::Get().verboseLog) {
 					logger::info("native {} {:08X} at {:.0f},{:.0f}", wanted ? "ON " : "off", n.native, n.x, n.y);
@@ -678,14 +711,15 @@ namespace PenguLOD
 			const auto reach = a_half + settings.parentCopyExtraCells;
 			return std::abs(a_item.cellX - a_pcx) <= reach && std::abs(a_item.cellY - a_pcy) <= reach;
 		}
-		if (a_item.grid ?(!settings.gridObjects || (a_item.water && !settings.waterPlanes)) : !settings.enabled) {
+		if (a_item.glow) {
+			if (!settings.glowWindows || _glowFactor <= 0.001f) {
+				return false;  // windows are dark by day or window glow is switched off
+			}
+		} else if (a_item.grid ? (!settings.gridObjects || (a_item.water && !settings.waterPlanes)) : !settings.enabled) {
 			return false;
 		}
 		if (a_item.critter && !settings.animate) {
 			return false;  // a frozen bird hangs in the air; it is drawn only when it can move
-		}
-		if (a_item.glow && (!settings.glowWindows || _glowFactor <= 0.001f)) {
-			return false;  // windows are dark by day: nothing to draw
 		}
 		// Inside the loaded cells the real object is (or would be) there. Not for an object of the parent worldspace seen from a child
 		// one (Whiterun's windmills and water planes while the player is in the city's worldspace): the child has no such reference.
@@ -695,7 +729,7 @@ namespace PenguLOD
 			return false;
 		}
 		const float dx = a_item.pos.x - a_player.x, dy = a_item.pos.y - a_player.y;
-		const float maxDist = !a_item.grid ? settings.maxDistance :
+		const float maxDist = !(a_item.grid || a_item.glow) ? settings.maxDistance :
 		                      a_item.neverFade ? std::numeric_limits<float>::max() / 4.0f :
 		                      a_item.nearGrid  ? settings.nearGridDistance :
 		                                         settings.farGridDistance;
@@ -764,10 +798,127 @@ namespace PenguLOD
 		return raw;
 	}
 
-	void Controller::Show(Item& a_item)
+	namespace
+	{
+		RE::BSLightingShaderProperty* LightingProperty(RE::BSGeometry* a_geom)
+		{
+#if PENGULOD_RUNTIME_LINE == 17 || PENGULOD_RUNTIME_LINE == 14
+			auto* prop = a_geom->GetGeometryRuntimeData().shaderProperty.get();
+#else
+			auto* prop = a_geom->GetGeometryRuntimeData().properties[RE::BSGeometry::States::kEffect].get();
+#endif
+			return prop ? netimmerse_cast<RE::BSLightingShaderProperty*>(prop) : nullptr;
+		}
+
+		void SetLightingProperty(RE::BSGeometry* a_geom, RE::BSLightingShaderProperty* a_prop)
+		{
+#if PENGULOD_RUNTIME_LINE == 17 || PENGULOD_RUNTIME_LINE == 14
+			a_geom->GetGeometryRuntimeData().shaderProperty.reset(a_prop);
+#else
+			a_geom->GetGeometryRuntimeData().properties[RE::BSGeometry::States::kEffect].reset(a_prop);
+#endif
+		}
+
+		void ApplyAltTextures(RE::NiAVObject* a_object, const auto& a_alts, int a_depth = 0)
+		{
+			if (!a_object || a_alts.empty() || a_depth > 64) {
+				return;
+			}
+			if (auto* geom = a_object->AsGeometry()) {
+				const char* gname = geom->name.c_str();
+				if (gname && *gname) {
+					for (const auto& alt : a_alts) {
+						if (_stricmp(gname, alt.shape.c_str()) != 0) {
+							continue;
+						}
+						auto* origProp = LightingProperty(geom);
+						auto* origMat = origProp && origProp->material
+							? static_cast<RE::BSLightingShaderMaterialBase*>(origProp->material) : nullptr;
+						if (!origMat || !origMat->textureSet) {
+							break;
+						}
+						RE::NiPointer<RE::NiObject> clonedObj(CloneModel(origProp));
+						auto* clonedProp = clonedObj ? netimmerse_cast<RE::BSLightingShaderProperty*>(clonedObj.get()) : nullptr;
+						auto* newTexSet = clonedProp ? RE::BSShaderTextureSet::Create() : nullptr;
+						if (!clonedProp || !newTexSet) {
+							break;
+						}
+						for (std::uint32_t s = 0; s < RE::BSTextureSet::Textures::kTotal; ++s) {
+							const auto slot = static_cast<RE::BSTextureSet::Textures::Texture>(s);
+							if (const char* existing = origMat->textureSet->GetTexturePath(slot)) {
+								newTexSet->SetTexturePath(slot, existing);
+							}
+						}
+						if (!alt.diffuse.empty()) {
+							newTexSet->SetTexturePath(RE::BSTextureSet::Textures::kDiffuse, alt.diffuse.c_str());
+						}
+						if (!alt.normal.empty()) {
+							newTexSet->SetTexturePath(RE::BSTextureSet::Textures::kNormal, alt.normal.c_str());
+						}
+						if (auto* newMat = static_cast<RE::BSLightingShaderMaterialBase*>(origMat->Create())) {
+							newMat->CopyMembers(origMat);
+							newMat->ClearTextures();
+							RE::NiPointer<RE::BSTextureSet> texPtr(newTexSet);
+							newMat->OnLoadTextureSet(0, texPtr);
+							clonedProp->SetMaterial(newMat, true);
+							clonedProp->SetupGeometry(geom);
+							clonedProp->FinishSetupGeometry(geom);
+							SetLightingProperty(geom, clonedProp);
+						}
+						break;
+					}
+				}
+			}
+			if (auto* node = a_object->AsNode()) {
+				for (auto& child : node->GetChildren()) {
+					ApplyAltTextures(child.get(), a_alts, a_depth + 1);
+				}
+			}
+		}
+
+		std::pair<float, float> BlockLevelDistances()
+		{
+			float d0 = 32768.0f, d1 = 65536.0f;
+			auto read = [](const char* a_key, float& a_dst) {
+				if (auto* prefs = RE::INIPrefSettingCollection::GetSingleton()) {
+					if (auto* s = prefs->GetSetting(a_key)) { a_dst = s->data.f; return; }
+				}
+				if (auto* ini = RE::INISettingCollection::GetSingleton()) {
+					if (auto* s = ini->GetSetting(a_key)) { a_dst = s->data.f; }
+				}
+			};
+			read("fBlockLevel0Distance:TerrainManager", d0);
+			read("fBlockLevel1Distance:TerrainManager", d1);
+			d0 = std::max(4096.0f, d0);
+			d1 = std::max(d0 + 4096.0f, d1);
+			return { d0, d1 };
+		}
+	}
+
+	std::uint32_t Controller::SelectMesh(const Item& a_item, float a_distSq, float a_d0, float a_d1) const
+	{
+		if (a_item.grid || a_item.glow || a_item.copy || a_item.underside ||
+			(a_item.mesh8 == DynamicEntry::kNone && a_item.mesh16 == DynamicEntry::kNone)) {
+			return a_item.mesh;
+		}
+		const std::uint32_t m8 = a_item.mesh8 != DynamicEntry::kNone ? a_item.mesh8 : a_item.mesh;
+		const std::uint32_t m16 = a_item.mesh16 != DynamicEntry::kNone ? a_item.mesh16 : m8;
+		// Apply 10% distance hysteresis when already shown so crossing a distance band never thrashes.
+		float t0 = a_d0, t1 = a_d1;
+		if (a_item.node && a_item.activeMesh != DynamicEntry::kNone) {
+			if (a_item.activeMesh == a_item.mesh) { t0 *= 1.05f; t1 *= 1.05f; }
+			else if (a_item.activeMesh == m16 && m16 != m8) { t1 *= 0.95f; t0 *= 0.95f; }
+			else { t0 *= 0.95f; t1 *= 1.05f; }
+		}
+		if (a_distSq > t1 * t1) return m16;
+		if (a_distSq > t0 * t0) return m8;
+		return a_item.mesh;
+	}
+
+	void Controller::Show(Item& a_item, std::uint32_t a_chosenMesh)
 	{
 		auto* root = Root();
-		auto* tmpl = root ? Template(a_item.mesh) : nullptr;
+		auto* tmpl = root ? Template(a_chosenMesh) : nullptr;
 		if (!tmpl) {
 			return;
 		}
@@ -778,6 +929,9 @@ namespace PenguLOD
 			return;
 		}
 		StripCollision(node);
+		if (a_item.copy && !a_item.alts.empty()) {
+			ApplyAltTextures(node, a_item.alts);
+		}
 
 		node->local.translate = a_item.pos;
 		if (a_item.water) {
@@ -787,6 +941,7 @@ namespace PenguLOD
 		node->local.scale = a_item.scale;
 		root->AttachChild(node, true);
 		node->SetAppCulled(false);
+		a_item.activeMesh = a_chosenMesh;
 
 		const auto& settings = Settings::Get();
 		const bool  animate = a_item.grid && settings.animate && settings.animationFps > 0;
@@ -808,8 +963,8 @@ namespace PenguLOD
 					}
 				}
 				++_animatedShown;
-				if (settings.verboseLog && _animLogged.size() < 40 && _animLogged.insert(a_item.mesh).second) {
-					logger::info("anim {}: {} controllers", _meshes[a_item.mesh], a_item.controllers.size());
+				if (settings.verboseLog && _animLogged.size() < 40 && _animLogged.insert(a_chosenMesh).second) {
+					logger::info("anim {}: {} controllers", _meshes[a_chosenMesh], a_item.controllers.size());
 					for (auto* ctl : a_item.controllers) {
 						const char* name = ctl->GetRTTI() ? ctl->GetRTTI()->GetName() : "?";
 						if (auto* mgr = netimmerse_cast<RE::NiControllerManager*>(ctl)) {
@@ -843,16 +998,6 @@ namespace PenguLOD
 
 	namespace
 	{
-		RE::BSLightingShaderProperty* LightingProperty(RE::BSGeometry* a_geom)
-		{
-#if PENGULOD_RUNTIME_LINE == 17 || PENGULOD_RUNTIME_LINE == 14
-			auto* prop = a_geom->GetGeometryRuntimeData().shaderProperty.get();
-#else
-			auto* prop = a_geom->GetGeometryRuntimeData().properties[RE::BSGeometry::States::kEffect].get();
-#endif
-			return prop ? netimmerse_cast<RE::BSLightingShaderProperty*>(prop) : nullptr;
-		}
-
 		void CollectLightingProperties(RE::NiAVObject* a_object, std::vector<RE::BSLightingShaderProperty*>& a_out, int a_depth = 0)
 		{
 			if (!a_object || a_depth > 64) {
@@ -1065,6 +1210,7 @@ namespace PenguLOD
 			}
 		}
 		a_item.glowProps.clear();
+		a_item.activeMesh = DynamicEntry::kNone;
 		if (a_item.node) {
 			if (a_item.node->parent) {
 				a_item.node->parent->DetachChild(a_item.node.get());
@@ -1154,11 +1300,20 @@ namespace PenguLOD
 		const auto pos = player ? player->GetPosition() : RE::NiPoint3{};
 		const auto pcx = CellOf(pos.x), pcy = CellOf(pos.y);
 		const auto half = LoadedGridHalf();
+		const auto [blockD0, blockD1] = BlockLevelDistances();
 		const RE::FormID playerWorld = world ? world->GetFormID() : 0;
 		if (playerWorld != _lastWorld) {
 			// Another worldspace loads other LOD blocks: let the quality layers rescan them.
 			_lastWorld = playerWorld;
+			_lastLargeCellX = pcx;
+			_lastLargeCellY = pcy;
 			Layers::Get().Changed();
+		} else if (pcx != _lastLargeCellX || pcy != _lastLargeCellY) {
+			_lastLargeCellX = pcx;
+			_lastLargeCellY = pcy;
+			if (Layers::Get().AnyLargeRefs()) {
+				Layers::Get().Changed();
+			}
 		}
 		std::unordered_set<RE::FormID> activeWorlds;
 		for (auto* list : lists) {
@@ -1171,7 +1326,9 @@ namespace PenguLOD
 		stillShown.reserve(_shown.size());
 		for (auto i : _shown) {
 			auto& item = _items[i];
-			if (activeWorlds.contains(item.world) && WantShown(item, pos, pcx, pcy, half, playerWorld)) {
+			const float sdx = item.pos.x - pos.x, sdy = item.pos.y - pos.y;
+			const std::uint32_t desiredMesh = SelectMesh(item, sdx * sdx + sdy * sdy, blockD0, blockD1);
+			if (activeWorlds.contains(item.world) && WantShown(item, pos, pcx, pcy, half, playerWorld) && desiredMesh == item.activeMesh) {
 				stillShown.push_back(i);
 			} else {
 				Hide(item);
@@ -1199,11 +1356,13 @@ namespace PenguLOD
 					continue;
 				}
 				glowWanted += item.glow ? 1 : 0;
-				if (_failedMeshes.contains(item.mesh)) {
+				const float dx = item.pos.x - pos.x, dy = item.pos.y - pos.y;
+				const float distSq = dx * dx + dy * dy;
+				const std::uint32_t chosenMesh = SelectMesh(item, distSq, blockD0, blockD1);
+				if (_failedMeshes.contains(chosenMesh)) {
 					continue;  // a model that could not be loaded must not use up the per-update budget every update
 				}
-				const float dx = item.pos.x - pos.x, dy = item.pos.y - pos.y;
-				wanted.push_back({ dx * dx + dy * dy, i });
+				wanted.push_back({ distSq, i });
 			}
 		}
 		// With the verbose log: one line per cell change for the window glow, so a report of "no windows from inside a city" says where they were lost.
@@ -1242,11 +1401,13 @@ namespace PenguLOD
 		}
 		for (auto i : plan.show) {
 			auto& item = _items[i];
-			Show(item);
+			const float dx = item.pos.x - pos.x, dy = item.pos.y - pos.y;
+			const std::uint32_t chosenMesh = SelectMesh(item, dx * dx + dy * dy, blockD0, blockD1);
+			Show(item, chosenMesh);
 			if (item.node) {
 				_shown.push_back(i);
 				if (settings.verboseLog) {
-					logger::info("show {:08X} {}", item.ref, _meshes[item.mesh]);
+					logger::info("show {:08X} {}", item.ref, _meshes[chosenMesh]);
 				}
 			}
 		}

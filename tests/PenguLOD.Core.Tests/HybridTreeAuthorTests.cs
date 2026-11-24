@@ -101,9 +101,9 @@ public class HybridTreeAuthorTests
             foreach (string path in cards.SelectMany(p => p.Material.Textures.Take(2)))
             { Assert.True(File.Exists(GamePath.ToFileSystemPath(output, path)), path); textures.Add(path); }
         }
-        // The tree of the base block is on the trunk atlas; the seasonal replacement is chosen later and keeps its own textures.
+        // Both the base block's tree and the seasonal replacement are pre-gathered onto the shared trunk atlas.
         Assert.Contains(Tree3DSource.TrunkAtlasDiffuse, textures); Assert.Contains(Tree3DSource.TrunkAtlasNormal, textures);
-        Assert.Equal(6, textures.Count);
+        Assert.Equal(2, textures.Count);
         var second = GenerationPipeline.Run(request, cache); Assert.True(second.Success, second.Error); Assert.All(second.Journal.Stages, s => Assert.True(s.Reused));
     }
 

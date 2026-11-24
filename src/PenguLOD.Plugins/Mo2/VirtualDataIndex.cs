@@ -49,8 +49,15 @@ public sealed class VirtualDataIndex
         var sw = Stopwatch.StartNew();
         var inst = profile.Instance;
 
-        var layers = new List<string> { inst.GameDataFolder };
+        var layerEntries = new List<(string Dir, AmethystLayerRules? Rules)> { (inst.GameDataFolder, null) };
         int missing = 0;
+        void AddModLayer(string dir, AmethystLayerRules? layerRules)
+        {
+            layerEntries.Add((dir, layerRules));
+            foreach (var rootData in GamePath.ResolveAllExisting(dir, @"Root\Data").Where(Directory.Exists))
+                layerEntries.Add((rootData, null));
+        }
+
         foreach (var mod in profile.EnabledModsLowToHigh)
         {
             var dir = GamePath.ResolveExisting(profile.ModsFolder, mod) ?? Path.Combine(profile.ModsFolder, mod);
@@ -60,11 +67,12 @@ public sealed class VirtualDataIndex
                 excluded = dir;
                 continue;
             }
-            if (Directory.Exists(dir)) layers.Add(dir);
+            if (Directory.Exists(dir)) AddModLayer(dir, profile.LayerRules(dir));
             else missing++;
         }
-        if (Directory.Exists(profile.OverwriteFolder)) layers.Add(profile.OverwriteFolder);
-        var rules = layers.Select((l, i) => i == 0 ? null : profile.LayerRules(l)).ToArray();
+        if (Directory.Exists(profile.OverwriteFolder)) AddModLayer(profile.OverwriteFolder, profile.LayerRules(profile.OverwriteFolder));
+        var layers = layerEntries.Select(e => e.Dir).ToList();
+        var rules = layerEntries.Select(e => e.Rules).ToArray();
 
         // Enumerate every layer in parallel, then merge in priority order.
         var perLayer = new (List<KeyValuePair<string, string>> Root, List<KeyValuePair<string, string>> Loose, List<string> Conflicts)[layers.Count];

@@ -43,6 +43,10 @@ public static class MountainFit
             }
         if (tris.Count == 0) return lod;
 
+        var grid = new TriangleGrid(tris);
+        var seenStamp = new int[tris.Count];
+        int queryId = 0;
+
         var parts = new List<LodMeshPart>(lod.Parts.Count);
         var cache = new Dictionary<Vector3, Vector3>();
         foreach (var part in lod.Parts)
@@ -53,7 +57,7 @@ public static class MountainFit
             {
                 if (!cache.TryGetValue(pos[i], out var target))
                 {
-                    target = Nearest(pos[i], tris);
+                    target = grid.Nearest(pos[i], seenStamp, ref queryId);
                     cache[pos[i]] = target;
                 }
                 if (target != pos[i]) { pos[i] = target; changed = true; moved++; }
@@ -63,18 +67,71 @@ public static class MountainFit
         return moved == 0 ? lod : new LodMesh { Path = lod.Path, Parts = parts, Warnings = lod.Warnings, NoShapesInFile = lod.NoShapesInFile };
     }
 
-    /// <summary>Where a vertex goes: itself when it is inside the full model (or too far to be a coarser copy), else the closest surface point.</summary>
-    private static Vector3 Nearest(Vector3 v, List<(Vector3 A, Vector3 B, Vector3 C, Vector3 N)> tris)
+    /// <summary>
+    /// 3D spatial grid over full-model triangles with <c>CellSize = 96 &gt; MaxMove (80)</c>, guaranteeing that any surface point
+    /// within <see cref="MaxMove"/> of query vertex <c>v</c> lies inside the 3x3x3 cell neighbourhood around <c>v</c>.
+    /// </summary>
+    private sealed class TriangleGrid
     {
-        float best = float.MaxValue; Vector3 point = v; float side = 0;
-        foreach (var t in tris)
+        private const float CellSize = 96f;
+        private const float InvCell = 1f / CellSize;
+        private readonly List<(Vector3 A, Vector3 B, Vector3 C, Vector3 N)> _tris;
+        private readonly Dictionary<(int X, int Y, int Z), List<int>> _cells = [];
+        private readonly List<int> _oversized = [];
+
+        public TriangleGrid(List<(Vector3 A, Vector3 B, Vector3 C, Vector3 N)> tris)
         {
-            var q = ClosestOnTriangle(v, t.A, t.B, t.C);
-            float d = Vector3.DistanceSquared(v, q);
-            if (d < best) { best = d; point = q; side = Vector3.Dot(v - q, t.N); }
+            _tris = tris;
+            for (int i = 0; i < tris.Count; i++)
+            {
+                var (a, b, c, _) = tris[i];
+                int x0 = (int)MathF.Floor(MathF.Min(a.X, MathF.Min(b.X, c.X)) * InvCell);
+                int x1 = (int)MathF.Floor(MathF.Max(a.X, MathF.Max(b.X, c.X)) * InvCell);
+                int y0 = (int)MathF.Floor(MathF.Min(a.Y, MathF.Min(b.Y, c.Y)) * InvCell);
+                int y1 = (int)MathF.Floor(MathF.Max(a.Y, MathF.Max(b.Y, c.Y)) * InvCell);
+                int z0 = (int)MathF.Floor(MathF.Min(a.Z, MathF.Min(b.Z, c.Z)) * InvCell);
+                int z1 = (int)MathF.Floor(MathF.Max(a.Z, MathF.Max(b.Z, c.Z)) * InvCell);
+                long span = (long)(x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1);
+                if (span > 512) { _oversized.Add(i); continue; }
+                for (int gz = z0; gz <= z1; gz++)
+                    for (int gy = y0; gy <= y1; gy++)
+                        for (int gx = x0; gx <= x1; gx++)
+                        {
+                            if (!_cells.TryGetValue((gx, gy, gz), out var list)) _cells[(gx, gy, gz)] = list = [];
+                            list.Add(i);
+                        }
+            }
         }
-        float dist = MathF.Sqrt(best);
-        return side > 1e-3f && dist <= MaxMove ? point : v;
+
+        public Vector3 Nearest(Vector3 v, int[] seenStamp, ref int queryId)
+        {
+            int qid = ++queryId;
+            if (qid == int.MaxValue) { Array.Clear(seenStamp); qid = queryId = 1; }
+            float best = (MaxMove + 1f) * (MaxMove + 1f);
+            Vector3 point = v;
+            float side = 0;
+
+            void Test(int idx)
+            {
+                if (seenStamp[idx] == qid) return;
+                seenStamp[idx] = qid;
+                var t = _tris[idx];
+                var q = ClosestOnTriangle(v, t.A, t.B, t.C);
+                float d = Vector3.DistanceSquared(v, q);
+                if (d < best) { best = d; point = q; side = Vector3.Dot(v - q, t.N); }
+            }
+
+            foreach (int idx in _oversized) Test(idx);
+            int cx = (int)MathF.Floor(v.X * InvCell), cy = (int)MathF.Floor(v.Y * InvCell), cz = (int)MathF.Floor(v.Z * InvCell);
+            for (int dz = -1; dz <= 1; dz++)
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++)
+                        if (_cells.TryGetValue((cx + dx, cy + dy, cz + dz), out var bucket))
+                            foreach (int idx in bucket) Test(idx);
+
+            float dist = MathF.Sqrt(best);
+            return side > 1e-3f && dist <= MaxMove ? point : v;
+        }
     }
 
     private static LodMeshPart CopyWith(LodMeshPart p, Vector3[] positions) => p with { Positions = positions };

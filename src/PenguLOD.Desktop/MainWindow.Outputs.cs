@@ -13,11 +13,14 @@ public sealed partial class MainWindow
     private readonly TextBox _costFolder = new() { Name = "CostFolder" };
     private readonly TextBox _costBefore = new() { Name = "CostBefore" };
     private readonly TextBox _costAfter = new() { Name = "CostAfter" };
+    private readonly TextBox _compareOutput = new() { Name = "CompareOutput" };
+    private readonly TextBox _compareReference = new() { Name = "CompareReference" };
     private readonly TextBox _outputFolders = new() { Name = "OutputFolders", AcceptsReturn = true, MinHeight = 80 };
     private readonly TextBox _packageFolder = new() { Name = "PackageFolder" };
     private readonly TextBlock _outputSummary = Text("No output report yet.", true);
     private readonly DataGrid _costGroups = Table(("World", "World"), ("LOD", "Level"), ("Season", "Season"), ("Layer", "Layer"), ("Triangles", "Triangles"), ("Mesh groups", "MeshGroups"));
     private readonly DataGrid _costBlocks = Table(("Block", "File"), ("Bytes", "Bytes"), ("Triangles", "Triangles"), ("Mesh groups", "MeshGroups"), ("Unavailable", "Unavailable"));
+    private readonly DataGrid _parityBlocks = new() { AutoGenerateColumns = false, IsReadOnly = true, IsVisible = false, GridLinesVisibility = DataGridGridLinesVisibility.Horizontal, MinHeight = 140, MaxHeight = 320 };
     private readonly DataGrid _settingChanges = Table(("Setting", "Setting"), ("Before", "Before"), ("After", "After"));
     private readonly DataGrid _storage = Table(("Folder", "Name"), ("What it is", "Kind"), ("Size", "Size"), ("Generated", "Generated"), ("Replaced", "Replaced"), ("Version", "Version"), ("In", "Parent"));
     private readonly TextBlock _storageSummary = Text("Not measured yet.", true);
@@ -30,6 +33,11 @@ public sealed partial class MainWindow
 
     private Control ReportsPage()
     {
+        if (_parityBlocks.Columns.Count == 0)
+        {
+            foreach (var (h, prop) in new[] { ("World", "World"), ("Kind", "Kind"), ("LOD", "Level"), ("Common", "Common"), ("Out tris", "OutputTriangles"), ("Ref tris", "ReferenceTriangles"), ("Out shapes/blk", "OutputShapesPerBlock"), ("Ref shapes/blk", "ReferenceShapesPerBlock"), ("Out tex/blk", "OutputTexturesPerBlock"), ("Ref tex/blk", "ReferenceTexturesPerBlock") })
+                _parityBlocks.Columns.Add(new DataGridTextColumn { Header = h, Binding = new Avalonia.Data.Binding(prop), Width = DataGridLength.Auto });
+        }
         _publishOutput = Help(Primary("Publish reviewed package", PublishOutput), "Applies the reviewed update and keeps a backup of the previous package."); _publishOutput.IsEnabled = false;
         _outputFolders.PropertyChanged -= OutputFieldsChanged; _outputFolders.PropertyChanged += OutputFieldsChanged;
         _packageFolder.PropertyChanged -= OutputFieldsChanged; _packageFolder.PropertyChanged += OutputFieldsChanged;
@@ -37,11 +45,15 @@ public sealed partial class MainWindow
             Card("PERFORMANCE REPORTS", Stack(10,
                 BrowseBox("Output folder to measure", _costFolder, false), Button("Measure output", MeasureOutput),
                 BrowseBox("Before report", _costBefore, true), BrowseBox("After report", _costAfter, true), Help(Button("Compare cost reports", CompareOutputCosts), "Compares geometry and texture storage for matching output. These figures do not measure FPS or VRAM use."))),
+            Card("COMPARE REFERENCE", Stack(10,
+                BrowseBox("PenguLOD output folder", _compareOutput, false),
+                BrowseBox("Reference folder (DynDOLOD / xLODGen / TexGen)", _compareReference, false),
+                Help(Button("Compare with reference", CompareWithReference), "Compares common block triangles, shapes/textures per block, texture brightness/contrast ratios, and plugin records against a DynDOLOD, xLODGen, or TexGen folder."))),
             Card("OUTPUT MANAGEMENT", Stack(10, Labeled("Stage output folders · one per line", _outputFolders),
                 Button("Add stage output", async () => { if (await Pick(false, "Select generated stage output") is { } p) _outputFolders.Text = ((_outputFolders.Text ?? "").TrimEnd() + "\n" + p).Trim(); }),
                 BrowseBox("Package destination", _packageFolder, false),
                 Row(Button("Verify output set", VerifyOutputs), Button("Preview package update", PreviewOutputUpdate), _publishOutput))),
-            Card("RESULTS", Stack(10, _outputSummary, Button("Export report", ExportOutputReport), _costGroups, _costBlocks, _settingChanges)),
+            Card("RESULTS", Stack(10, _outputSummary, Button("Export report", ExportOutputReport), _parityBlocks, _costGroups, _costBlocks, _settingChanges)),
             Card("STORAGE", Stack(10,
                 Text("What the stage output folders in your settings hold on disk, with their previous copies, unfinished builds and the cache's checkpoints.", true),
                 Row(Button("Measure storage", MeasureStorage),
@@ -118,14 +130,34 @@ public sealed partial class MainWindow
         {
             string file = Path.Combine(run, OutputCostReport.FileName); report.Write(file);
             _costAfter.Text = file; _outputReport = report; _outputReportInputs = [folder]; _outputSummary.Text = report.Summary();
-            _costGroups.ItemsSource = report.Groups; _costBlocks.ItemsSource = report.LargestBlocks; _settingChanges.ItemsSource = null;
+            _parityBlocks.IsVisible = false; _costGroups.ItemsSource = report.Groups; _costBlocks.ItemsSource = report.LargestBlocks; _settingChanges.ItemsSource = null;
         }, saveSettings: false);
     }
     internal Task CompareOutputCosts()
     {
         string before = _costBefore.Text ?? "", after = _costAfter.Text ?? "";
         return RunJob("Compare output costs", _settings.Snapshot(), (_, _) => OutputCostReport.Compare(OutputCostReport.Read(before), OutputCostReport.Read(after)),
-            (report, _, _) => { _outputReport = report; _outputReportInputs = [before, after]; _outputSummary.Text = report.Summary(); _costGroups.ItemsSource = report.CommonGroups; _costBlocks.ItemsSource = report.CommonBlocks; _settingChanges.ItemsSource = report.Settings; }, saveSettings: false);
+            (report, _, _) => { _outputReport = report; _outputReportInputs = [before, after]; _outputSummary.Text = report.Summary(); _parityBlocks.IsVisible = false; _costGroups.ItemsSource = report.CommonGroups; _costBlocks.ItemsSource = report.CommonBlocks; _settingChanges.ItemsSource = report.Settings; }, saveSettings: false);
+    }
+
+    internal Task CompareWithReference()
+    {
+        var outs = RequestFactory.Lines(_compareOutput.Text ?? "").Select(p => RequestFactory.PathValue(p, _settings)).ToArray();
+        var refs = RequestFactory.Lines(_compareReference.Text ?? "").Select(p => RequestFactory.PathValue(p, _settings)).ToArray();
+        return RunJob("Compare reference output", _settings.Snapshot(),
+            (progress, ct) => ReferenceComparison.Compare(outs, refs, progress: progress, ct: ct),
+            (report, run, _) =>
+            {
+                File.WriteAllText(Path.Combine(run, "reference-comparison.json"), JsonSerializer.Serialize(report, PersistentPipeline.Json));
+                _outputReport = report;
+                _outputReportInputs = [.. outs, .. refs];
+                _outputSummary.Text = report.Summary();
+                _parityBlocks.ItemsSource = report.Blocks.Where(b => b.Common > 0).ToArray();
+                _parityBlocks.IsVisible = true;
+                _costGroups.ItemsSource = null;
+                _costBlocks.ItemsSource = null;
+                _settingChanges.ItemsSource = null;
+            }, saveSettings: false);
     }
     internal Task VerifyOutputs()
     {

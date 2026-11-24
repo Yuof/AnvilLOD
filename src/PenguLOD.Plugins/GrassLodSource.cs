@@ -39,17 +39,25 @@ public sealed class GrassLodSource : ISyntheticMeshSource
     private readonly string? _outputFolder;
     private readonly object _renderLock = new();
     private readonly float _top, _bottom;
+    private readonly int _maxLevel, _tiers;
 
     /// <param name="outputFolder">Where rendered grass billboards go (grass types TexGen made no billboard for). Null: use the model's own texture.</param>
     /// <param name="top">Vertex-colour brightness at the top of a tuft (share of white), like DynDOLOD's GrassBrightnessTop.</param>
     /// <param name="bottom">Vertex-colour brightness at the roots, like DynDOLOD's GrassBrightnessBottom.</param>
+    /// <param name="maxLevel">Furthest LOD level carrying grass billboards (4, 8 or 16).</param>
+    /// <param name="tiers">Number of Morton-ordered runtime density tiers per block (1 or 4).</param>
     public GrassLodSource(GameContext game, AssetIndex assets, float density, float sizeScale, string? outputFolder = null,
-        float top = GrassPatchBuilder.DefaultTop, float bottom = GrassPatchBuilder.DefaultBottom)
+        float top = GrassPatchBuilder.DefaultTop, float bottom = GrassPatchBuilder.DefaultBottom,
+        int maxLevel = 16, int tiers = PenguLOD.Core.Lod.LodLayers.GrassTiers)
     {
+        if (maxLevel is not (4 or 8 or 16)) throw new ArgumentOutOfRangeException(nameof(maxLevel), "Grass max level must be 4, 8 or 16.");
+        if (tiers is not (1 or PenguLOD.Core.Lod.LodLayers.GrassTiers)) throw new ArgumentOutOfRangeException(nameof(tiers), "Grass runtime tiers must be 1 or 4.");
         _assets = assets;
         _outputFolder = outputFolder;
         _top = top;
         _bottom = bottom;
+        _maxLevel = maxLevel;
+        _tiers = tiers;
         _density = Math.Clamp(density, 0.001f, 1f);
         _sizeScale = sizeScale;
         _runtime = RuntimeFormIds.FromLoadOrder(game.LoadOrder);
@@ -88,7 +96,7 @@ public sealed class GrassLodSource : ISyntheticMeshSource
         var parts = r.FormKey.Split(':');
         if (parts.Length != 4 || !int.TryParse(parts[2], out var x) || !int.TryParse(parts[3], out var y)) return null;
         if (!_seasonal.TryGetValue((parts[1].ToLowerInvariant(), x, y, suffix), out var cache)) return null;
-        string Mesh(int level) => $"{Prefix}{level}|{cache}";
+        string? Mesh(int level) => level <= _maxLevel ? $"{Prefix}{level}|{cache}" : null;
         return r with { Meshes = new LodMeshSet(Mesh(4), Mesh(8), Mesh(16), null) };
     }
 
@@ -115,9 +123,7 @@ public sealed class GrassLodSource : ISyntheticMeshSource
             }
             cells.Add((ws.ToLowerInvariant(), x, y)); _atlasCaches.Add(path);
 
-            // Real grass from the cache is drawn out to the grass cell radius (often 10+ cells with NGIO), well into the
-            // LOD8/LOD16 range, so grass LOD goes into all three near levels, sparser and bigger as the level grows.
-            string Mesh(int level) => $"{Prefix}{level}|{path}";
+            string? Mesh(int level) => level <= _maxLevel ? $"{Prefix}{level}|{path}" : null;
             refs.Add(new LodReference(
                 FormKey: $"~grass:{grid.Worldspace}:{x}:{y}",
                 BaseFormKey: "grass",
@@ -144,7 +150,7 @@ public sealed class GrassLodSource : ISyntheticMeshSource
     {
         if (!Owns(path)) return null;
         var (level, cache) = Split(path);
-        return $"g{Version}|L{level}|{_assets.Fingerprint(cache)}|{BillboardFingerprint()}|{_density:R}|{_sizeScale:R}|{_top:R}|{_bottom:R}|{_atlasHash}";
+        return $"g{Version}|L{level}|T{_tiers}|{_assets.Fingerprint(cache)}|{BillboardFingerprint()}|{_density:R}|{_sizeScale:R}|{_top:R}|{_bottom:R}|{_atlasHash}";
     }
 
     /// <summary>Fewer tufts further out; the builder picks larger bins (and so bigger tufts) to keep the covered area.</summary>
@@ -189,7 +195,7 @@ public sealed class GrassLodSource : ISyntheticMeshSource
             if (bb is null) continue;
             withBillboards.Add((bb, t.Instances));
         }
-        return GrassPatchBuilder.Build(path, origin, withBillboards, Math.Min(1f, _density * densityMul), _sizeScale * sizeMul, _top, _bottom, PenguLOD.Core.Lod.LodLayers.GrassTiers);
+        return GrassPatchBuilder.Build(path, origin, withBillboards, Math.Min(1f, _density * densityMul), _sizeScale * sizeMul, _top, _bottom, _tiers);
     }
 
     private static InvalidDataException Unreadable(string path, Exception e) => new(

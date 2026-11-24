@@ -1,3 +1,6 @@
+using System.Text.Json;
+using PenguLOD.Core.Pipeline;
+using PenguLOD.Core.World;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Binary.Parameters;
 using Mutagen.Bethesda.Plugins.Cache;
@@ -20,6 +23,7 @@ namespace PenguLOD.Plugins;
 public static class UndersidePluginWriter
 {
     public const string FileName = "PenguLOD.esp";
+    public const string FormIdsFileName = "PenguLOD.formids.json";
     /// <summary>Files older versions wrote (a separate ESM, then the ESP under its old name). No longer written; deleted when found.</summary>
     public static readonly string[] LegacyFileNames = ["PenguLOD Underside.esm", "PenguLOD Underside.esp"];
 
@@ -75,20 +79,26 @@ public static class UndersidePluginWriter
     public static Result Write(GameContext game, IReadOnlyCollection<string> worldspaces, string outputFolder, IReadOnlyList<NativeGridObjects.Pick>? natives = null, bool largeEsl = false)
     {
         natives ??= [];
-        var main = WriteOne(game, FileName, worldspaces, outputFolder, natives.Where(n => !n.Effect).ToList(), towers: true);
+        var formIdMap = LoadFormIdMap(outputFolder);
+        var main = WriteOne(game, FileName, worldspaces, outputFolder, natives.Where(n => !n.Effect).ToList(), towers: true, largeEsl: false, formIdMap: formIdMap);
         var effects = natives.Where(n => n.Effect).ToList();
         // Plugins from an earlier run ("PenguLOD Effects.esp", "PenguLOD Effects 2.esp", ...) are replaced.
         foreach (var old in Directory.Exists(outputFolder) ? Directory.GetFiles(outputFolder, "PenguLOD Effects*.esp") : [])
             File.Delete(old);
-        if (effects.Count == 0) return main;
+        if (effects.Count == 0)
+        {
+            SaveFormIdMap(outputFolder, formIdMap);
+            return main;
+        }
         // One ESL holds 2,048 new records: the references plus one base record per distinct model. Each plugin is filled up to that limit
         // (see PackEffects), so a list with many more fires and candles than ours only gets as many plugins as it really needs.
         var results = new List<Result>();
         foreach (var chunk in PackEffects(effects, largeEsl))
         {
             var name = results.Count == 0 ? EffectsFileName : $"PenguLOD Effects {results.Count + 1}.esp";
-            results.Add(WriteOne(game, name, [], outputFolder, chunk, towers: false, largeEsl));
+            results.Add(WriteOne(game, name, [], outputFolder, chunk, towers: false, largeEsl, formIdMap));
         }
+        SaveFormIdMap(outputFolder, formIdMap);
         return main with
         {
             NativeBases = main.NativeBases + results.Sum(r => r.NativeBases),
@@ -109,15 +119,14 @@ public static class UndersidePluginWriter
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     private static Result WriteOne(GameContext game, string fileName, IReadOnlyCollection<string> worldspaces, string outputFolder,
-        IReadOnlyList<NativeGridObjects.Pick> natives, bool towers, bool largeEsl = false)
+        IReadOnlyList<NativeGridObjects.Pick> natives, bool towers, bool largeEsl = false,
+        Dictionary<string, Dictionary<string, uint>>? formIdMap = null)
     {
         var undersideWorlds = new HashSet<string>(worldspaces, StringComparer.OrdinalIgnoreCase);
         var wanted = new HashSet<string>(worldspaces, StringComparer.OrdinalIgnoreCase);
         foreach (var n in natives) wanted.Add(n.Source.Ref.Worldspace);
         var nativeBase = new Dictionary<(string Model, bool Movable), FormKey>();
-        // The Whiterun windmill towers are persistent references of a base that is visible when distant, but the references are not
-        // flagged for it, so the engine never draws them at a distance (the Missing Windmill Fix mod places a flagged duplicate on each).
-        var towerFix = new List<(string World, FormKey Base, Noggog.P3Float Pos, Noggog.P3Float Rot, float? Scale)>();
+        var towerFix = new List<(string World, FormKey SourceRef, FormKey Base, Noggog.P3Float Pos, Noggog.P3Float Rot, float? Scale)>();
         if (towers)
         foreach (var pctx in game.LoadOrder.PriorityOrder.PlacedObject().WinningContextOverrides(game.LinkCache))
         {
@@ -126,14 +135,38 @@ public static class UndersidePluginWriter
             if (!pctx.TryGetParentSimpleContext<IWorldspaceGetter>(out var pws) || pws.Record.EditorID is not { } pwsId || !wanted.Contains(pwsId)) continue;
             if (!game.LinkCache.TryResolve<IStaticGetter>(pr.Base.FormKey, out var pst) || pst.EditorID?.StartsWith("SFarmhouseWindMill", StringComparison.OrdinalIgnoreCase) != true) continue;
             if ((pst.MajorRecordFlagsRaw & 0x8000) == 0) continue;
-            towerFix.Add((pwsId, pr.Base.FormKey, pp.Position, pp.Rotation, pr.Scale));
+            towerFix.Add((pwsId, pr.FormKey, pr.Base.FormKey, pp.Position, pp.Rotation, pr.Scale));
         }
         int nativeRefs = 0, towerRefs = 0;
         var nativeEntries = new List<NativeGridObjectWriter.Entry>();
         var esp = new SkyrimMod(ModKey.FromNameAndExtension(fileName), SkyrimRelease.SkyrimSE) { IsSmallMaster = true };
-        // Game 1.6.1130 and newer read an ESL with header 1.71 as having 4,096 FormIDs (0x000 to 0xFFF, 0x000 itself unused); older ones only 0x800 to 0xFFF.
-        if (largeEsl) { esp.ModHeader.Stats.Version = LargeEslHeaderVersion; esp.ModHeader.Stats.NextFormID = 0x001; }
-        else esp.ModHeader.Stats.NextFormID = 0x800;
+        uint minId = largeEsl ? 0x001u : 0x800u;
+        if (largeEsl) esp.ModHeader.Stats.Version = LargeEslHeaderVersion;
+        esp.ModHeader.Stats.NextFormID = minId;
+
+        Dictionary<string, uint> pluginIds = [];
+        if (formIdMap is not null && !formIdMap.TryGetValue(fileName, out pluginIds!))
+            formIdMap[fileName] = pluginIds = new(StringComparer.OrdinalIgnoreCase);
+        var usedIds = new HashSet<uint>();
+        foreach (var kv in pluginIds)
+            if (kv.Value >= minId && kv.Value <= 0xFFFu) usedIds.Add(kv.Value);
+        uint nextCursor = minId;
+
+        FormKey Alloc(string roleKey)
+        {
+            if (pluginIds.TryGetValue(roleKey, out uint saved) && saved >= minId && (saved <= 0xFFFu || usedIds.Count >= (0xFFFu - minId + 1)))
+            {
+                usedIds.Add(saved);
+                if (saved >= esp.ModHeader.Stats.NextFormID) esp.ModHeader.Stats.NextFormID = saved + 1;
+                return new FormKey(esp.ModKey, saved);
+            }
+            while (usedIds.Contains(nextCursor)) nextCursor++;
+            uint chosen = nextCursor++;
+            usedIds.Add(chosen);
+            pluginIds[roleKey] = chosen;
+            if (chosen >= esp.ModHeader.Stats.NextFormID) esp.ModHeader.Stats.NextFormID = chosen + 1;
+            return new FormKey(esp.ModKey, chosen);
+        }
 
         var done = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -145,17 +178,14 @@ public static class UndersidePluginWriter
             MoveableStatic? stat = null;
             if (undersideWorlds.Contains(id))
             {
-                stat = new MoveableStatic(esp) { EditorID = $"PenguLOD_{id}_UndersideBase", MajorRecordFlagsRaw = FlagNotPlayable };
+                stat = new MoveableStatic(Alloc("underside_base:" + id.ToLowerInvariant()), SkyrimRelease.SkyrimSE)
+                { EditorID = $"PenguLOD_{id}_UndersideBase", MajorRecordFlagsRaw = FlagNotPlayable };
                 esp.MoveableStatics.Add(stat);
                 stat.Model = new Model { File = UndersideModelPath(id) };
                 stat.ObjectBounds.First = new P3Int16(-4096, -4096, -4096);
                 stat.ObjectBounds.Second = new P3Int16(4096, 4096, 4096);
             }
 
-            // The persistent cell has to be the worldspace's own, not a new one: override it, then drop the copied refs
-            // (they stay with their plugins; only ours is written).
-            // The winning worldspace record can be an override that carries no cells (a CC plugin changing one field),
-            // so ask every version for the persistent cell.
             ICell top;
             var topKey = ctx.Record.TopCell?.FormKey
                 ?? game.LinkCache.ResolveAllContexts<IWorldspace, IWorldspaceGetter>(ctx.Record.FormKey)
@@ -167,21 +197,13 @@ public static class UndersidePluginWriter
             else
             {
                 var ws = ctx.GetOrAddAsOverride(esp);
-                top = ws.TopCell ??= new Cell(esp);
+                top = ws.TopCell ??= new Cell(Alloc("topcell:" + id.ToLowerInvariant()), SkyrimRelease.SkyrimSE);
             }
-            // The worldspace record that came along carries the winner's max height data (MHDT). Several plugins (the
-            // Unofficial Patch, patches copying it, ...) leave an old table in it, and DynDOLOD's own worldspace override
-            // carries none, so ours doesn't either: stale max heights make the engine cull terrain LOD that is taller than
-            // the table says (rectangular holes), and the underside then shows through them as a flat slab.
             var carried = esp.Worldspaces.FirstOrDefault(w => w.FormKey == ctx.Record.FormKey);
             if (carried is not null) carried.MaxHeight = null;
-            // Same for the persistent cell: the override copies the winner's occlusion data (TVDT), max heights and region
-            // list, and a stale copy of those culls terrain and LOD around the cell. DynDOLOD's override is empty; ours is too.
             top.OcclusionData = null;
             top.MaxHeightData = null;
             top.Regions = null;
-            // The winner also flags the persistent cell as having water (DATA 2) with a water height and a grid. DynDOLOD's
-            // override has none of them, and the plugin with them in it showed a teal translucent slab near Dragon Bridge.
             top.Flags = 0;
             top.WaterHeight = null;
             top.Grid = null;
@@ -189,7 +211,7 @@ public static class UndersidePluginWriter
             top.Temporary.Clear();
             if (stat is not null)
             {
-                top.Persistent.Add(new PlacedObject(esp)
+                top.Persistent.Add(new PlacedObject(Alloc("underside_ref:" + id.ToLowerInvariant()), SkyrimRelease.SkyrimSE)
                 {
                     EditorID = $"PenguLOD_{id}_Underside",
                     Base = new FormLinkNullable<IPlaceableObjectGetter>(stat.FormKey),
@@ -197,20 +219,18 @@ public static class UndersidePluginWriter
                     Placement = new Placement { Position = new Noggog.P3Float(0, 0, Depth), Rotation = new Noggog.P3Float(0, 0, 0) },
                 });
             }
-            // Real references for the grid objects the engine can animate itself: one base per model (STAT for the effect LOD
-            // meshes, MSTT for models with sequences) and a persistent, full-LOD reference per placement, like DynDOLOD's.
             foreach (var n in natives.Where(n => n.Source.Ref.Worldspace.Equals(id, StringComparison.OrdinalIgnoreCase)))
             {
                 if (!nativeBase.TryGetValue((n.Model, n.Movable), out var baseKey))
                 {
                     var stem = System.IO.Path.GetFileNameWithoutExtension(n.Model.Replace('\\', '/'));
                     var edid = $"PenguLOD_{stem}_Base{(n.Movable ? "M" : "S")}";
-                    // A sailing ship's model travels far from its placement: its bounds must cover the whole route or it is culled when the origin is off screen.
                     short half = NativeGridObjects.IsAnimatedShip(n.Model.ToLowerInvariant()) ? (short)24000 : (short)2048;
                     var bounds = (new P3Int16((short)-half, (short)-half, (short)-half), new P3Int16(half, half, half));
+                    string baseRole = $"native_base:{(n.Movable ? 'M' : 'S')}:{GamePath.Normalize(n.Model)}";
                     if (n.Movable)
                     {
-                        var m = new MoveableStatic(esp) { EditorID = edid, MajorRecordFlagsRaw = FlagNotPlayable };
+                        var m = new MoveableStatic(Alloc(baseRole), SkyrimRelease.SkyrimSE) { EditorID = edid, MajorRecordFlagsRaw = FlagNotPlayable };
                         esp.MoveableStatics.Add(m);
                         m.Model = new Model { File = n.Model };
                         m.ObjectBounds.First = bounds.Item1; m.ObjectBounds.Second = bounds.Item2;
@@ -218,7 +238,7 @@ public static class UndersidePluginWriter
                     }
                     else
                     {
-                        var s = new Static(esp) { EditorID = edid, MajorRecordFlagsRaw = FlagNotPlayable };
+                        var s = new Static(Alloc(baseRole), SkyrimRelease.SkyrimSE) { EditorID = edid, MajorRecordFlagsRaw = FlagNotPlayable };
                         esp.Statics.Add(s);
                         s.Model = new Model { File = n.Model };
                         s.ObjectBounds.First = bounds.Item1; s.ObjectBounds.Second = bounds.Item2;
@@ -227,12 +247,9 @@ public static class UndersidePluginWriter
                     nativeBase[(n.Model, n.Movable)] = baseKey;
                 }
                 var r = n.Source.Ref;
-                // Disabled to begin with when the vanilla reference is (initially disabled or switched by an enable parent): the
-                // SKSE plugin enables it with the source (PenguLOD.native).
-                // Persistent effect references load with the world. Start them disabled to avoid
-                // activating distant particle systems; the SKSE plugin enables only nearby effects.
                 bool startDisabled = n.Effect || n.Source.InitiallyDisabled || n.Source.ParentPlugin is not null;
-                var placed = new PlacedObject(esp)
+                string refRole = $"native_ref:{n.Source.RefPlugin.ToLowerInvariant()}:{n.Source.RefLocalId:x6}";
+                var placed = new PlacedObject(Alloc(refRole), SkyrimRelease.SkyrimSE)
                 {
                     EditorID = $"PenguLOD_{id}_Grid{++nativeRefs}",
                     Base = new FormLinkNullable<IPlaceableObjectGetter>(baseKey),
@@ -249,7 +266,8 @@ public static class UndersidePluginWriter
             }
             foreach (var t in towerFix.Where(t => t.World.Equals(id, StringComparison.OrdinalIgnoreCase)))
             {
-                top.Persistent.Add(new PlacedObject(esp)
+                string towerRole = $"tower_ref:{t.SourceRef.ModKey.FileName.String.ToLowerInvariant()}:{t.SourceRef.ID:x6}";
+                top.Persistent.Add(new PlacedObject(Alloc(towerRole), SkyrimRelease.SkyrimSE)
                 {
                     EditorID = $"PenguLOD_{id}_WindmillTower{++towerRefs}",
                     Base = new FormLinkNullable<IPlaceableObjectGetter>(t.Base),
@@ -272,7 +290,8 @@ public static class UndersidePluginWriter
         }
         // An ESL holds 2,048 records (FormIDs 0x800 to 0xFFF). Fires, candles and the rest of the effects go over that: then it is a plain ESP.
         // With the large range new FormIDs start at 0x001 (0x000 is unused), so 4,095 records fit.
-        bool small = esp.EnumerateMajorRecords().Count(r => r.FormKey.ModKey == esp.ModKey) <= (largeEsl ? 4095 : EslRecordLimit);
+        bool allowEsl = game.Release != Mutagen.Bethesda.GameRelease.SkyrimVR;
+        bool small = allowEsl && esp.EnumerateMajorRecords().Count(r => r.FormKey.ModKey == esp.ModKey) <= (largeEsl ? 4095 : EslRecordLimit);
         esp.IsSmallMaster = small;
         var order = game.LoadOrder.ListedOrder.Select(l => l.ModKey).Where(k => k != esp.ModKey).ToList();
         esp.WriteToBinary(espPath, new BinaryWriteParameters
@@ -287,5 +306,36 @@ public static class UndersidePluginWriter
         using var written = SkyrimMod.CreateFromBinaryOverlay(espPath, SkyrimRelease.SkyrimSE);
         var masters = written.ModHeader.MasterReferences.Select(m => m.Master.FileName.String).ToList();
         return new Result(espPath, done, skipped, masters, nativeBase.Count, nativeRefs, nativeEntries, small);
+    }
+
+    private static Dictionary<string, Dictionary<string, uint>> LoadFormIdMap(string outputFolder)
+    {
+        var map = new Dictionary<string, Dictionary<string, uint>>(StringComparer.OrdinalIgnoreCase);
+        var file = Path.Combine(outputFolder, FormIdsFileName);
+        if (!File.Exists(file)) return map;
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, uint>>>(File.ReadAllText(file));
+            if (parsed is not null)
+                foreach (var (plugin, entries) in parsed)
+                    map[plugin] = new Dictionary<string, uint>(entries, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { }
+        return map;
+    }
+
+    private static void SaveFormIdMap(string outputFolder, Dictionary<string, Dictionary<string, uint>> map)
+    {
+        if (map.Count == 0) return;
+        try
+        {
+            Directory.CreateDirectory(outputFolder);
+            var sorted = map.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(p => p.Key, p => p.Value.OrderBy(e => e.Value).ThenBy(e => e.Key, StringComparer.Ordinal).ToDictionary(e => e.Key, e => e.Value));
+            var file = Path.Combine(outputFolder, FormIdsFileName);
+            File.WriteAllText(file + ".tmp", JsonSerializer.Serialize(sorted, PersistentPipeline.Json));
+            File.Move(file + ".tmp", file, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 }

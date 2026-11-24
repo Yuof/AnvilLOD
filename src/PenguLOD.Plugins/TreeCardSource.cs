@@ -24,11 +24,15 @@ public sealed class TreeCardSource : ISyntheticMeshSource
     public const string FarPrefix = Prefix + "far|";
     /// <summary>The atlas textures, as the LOD meshes name them (written into the output folder).</summary>
     public const string AtlasDiffuse = "textures\\pengulod\\trees\\cards.dds", AtlasNormal = "textures\\pengulod\\trees\\cards_n.dds";
-    /// <summary>Largest side a billboard keeps in the atlas. A 1,500-unit tree is about 45 pixels tall on a 4K screen where LOD8 begins.</summary>
+    /// <summary>Near (LOD4) tree-card atlas textures for ESL-placed and billboard-fallback trees.</summary>
+    public const string NearAtlasDiffuse = "textures\\pengulod\\trees\\cards_lod4.dds", NearAtlasNormal = "textures\\pengulod\\trees\\cards_lod4_n.dds";
+    /// <summary>Largest side a billboard keeps in the far atlas. A 1,500-unit tree is about 45 pixels tall on a 4K screen where LOD8 begins.</summary>
     public const int AtlasTile = 128;
-    private const int Version = 4; // far cards on one atlas
+    /// <summary>Largest side a billboard keeps in the near (LOD4) atlas.</summary>
+    public const int NearAtlasTile = 512;
+    private const int Version = 5; // near and far card atlases
 
-    /// <summary>The mesh path of a tree's card: its own texture close by, the atlas from LOD8 on.</summary>
+    /// <summary>The mesh path of a tree's card: near card at LOD4, far atlas from LOD8 on.</summary>
     public static string CardPath(string billboardTexture, bool far) => (far ? FarPrefix : Prefix) + billboardTexture;
 
     private static (string Texture, bool Far) Split(string path)
@@ -37,20 +41,44 @@ public sealed class TreeCardSource : ISyntheticMeshSource
     private readonly AssetIndex _assets;
     private readonly float _brightness;
     private readonly ConcurrentDictionary<string, LodMesh?> _cache = new(StringComparer.OrdinalIgnoreCase);
-    private IReadOnlyDictionary<string, AtlasRect>? _atlasRects;
-    private string _atlasHash = "-";
+    private IReadOnlyDictionary<string, AtlasRect>? _atlasRects, _nearAtlasRects;
+    private string _atlasHash = "-", _nearAtlasHash = "-";
 
-    /// <summary>What the atlas holds, for the log (null until <see cref="PrepareAtlas"/> has built one).</summary>
+    /// <summary>What the far atlas holds, for the log (null until <see cref="PrepareAtlas"/> has built one).</summary>
     public TreeCardAtlasSummary? Atlas { get; private set; }
+
+    /// <summary>What the near (LOD4) atlas holds, for the log (null until <see cref="PrepareNearAtlas"/> has built one).</summary>
+    public TreeCardAtlasSummary? NearAtlas { get; private set; }
 
     /// <summary>
     /// Packs the front and side billboards of the given trees into <see cref="AtlasDiffuse"/> and a normal-map atlas with the same
     /// layout, in the output folder. Must run before blocks are built: far cards take their UVs from it. A billboard that is not in
-    /// it (a seasonal replacement, an unreadable file) keeps its own texture.
+    /// it (an unreadable file) keeps its own texture.
     /// </summary>
     public void PrepareAtlas(string outputFolder, IEnumerable<string> billboardTextures)
     {
         if (_atlasRects is not null) return;
+        if (BuildBillboardAtlas(outputFolder, billboardTextures, AtlasTile, AtlasDiffuse, AtlasNormal) is not { } atlas) return;
+        _atlasRects = atlas.Rects; _atlasHash = atlas.Hash;
+        Atlas = new(atlas.Rects.Count, atlas.Size, atlas.SizeCap, atlas.Reduced, atlas.Skipped);
+        _cache.Clear();
+    }
+
+    /// <summary>
+    /// Packs near (LOD4) tree cards (ESL-placed trees and 3D-tree billboard fallbacks) into <see cref="NearAtlasDiffuse"/> and
+    /// <see cref="NearAtlasNormal"/> at up to <see cref="NearAtlasTile"/> px per billboard, collapsing per-tree LOD4 shapes into a single draw call.
+    /// </summary>
+    public void PrepareNearAtlas(string outputFolder, IEnumerable<string> billboardTextures)
+    {
+        if (_nearAtlasRects is not null) return;
+        if (BuildBillboardAtlas(outputFolder, billboardTextures, NearAtlasTile, NearAtlasDiffuse, NearAtlasNormal) is not { } atlas) return;
+        _nearAtlasRects = atlas.Rects; _nearAtlasHash = atlas.Hash;
+        NearAtlas = new(atlas.Rects.Count, atlas.Size, atlas.SizeCap, atlas.Reduced, atlas.Skipped);
+        _cache.Clear();
+    }
+
+    private BillboardAtlas.Result? BuildBillboardAtlas(string outputFolder, IEnumerable<string> billboardTextures, int maxTile, string diffusePath, string normalPath)
+    {
         var tiles = new List<BillboardAtlas.Tile>();
         foreach (string plain in billboardTextures.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase))
         {
@@ -65,11 +93,9 @@ public sealed class TreeCardSource : ISyntheticMeshSource
             if (!_assets.TryOpen(texture, out var stream)) return null;
             using (stream) { using var buffer = new MemoryStream(); stream.CopyTo(buffer); return buffer.ToArray(); }
         }
-        if (BillboardAtlas.Build(tiles, Read, AtlasTile) is not { } atlas) return;
-        BillboardAtlas.Write(atlas, outputFolder, AtlasDiffuse, AtlasNormal);
-        _atlasRects = atlas.Rects; _atlasHash = atlas.Hash;
-        Atlas = new(atlas.Rects.Count, atlas.Size, atlas.SizeCap, atlas.Reduced, atlas.Skipped);
-        _cache.Clear();
+        if (BillboardAtlas.Build(tiles, Read, maxTile) is not { } atlas) return null;
+        BillboardAtlas.Write(atlas, outputFolder, diffusePath, normalPath);
+        return atlas;
     }
 
     /// <param name="brightness">Tree LOD brightness (1 = as the billboard is). Applied through vertex colours.</param>
@@ -108,7 +134,8 @@ public sealed class TreeCardSource : ISyntheticMeshSource
         var (texture, far) = Split(path);
         var (dds, normal, txt) = Files(texture);
         var side = txt[..^4] + "_2";
-        return $"c{Version}|{(far ? "atlas:" + _atlasHash : "own")}|b{_brightness:F3}|{_assets.Fingerprint(dds)}|{_assets.Fingerprint(normal)}|{_assets.Fingerprint(txt)}|{_assets.Fingerprint(side + ".dds")}|{_assets.Fingerprint(side + "_n.dds")}";
+        string placement = far ? "atlas:" + _atlasHash : _nearAtlasRects is not null ? "near:" + _nearAtlasHash : "own";
+        return $"c{Version}|{placement}|b{_brightness:F3}|{_assets.Fingerprint(dds)}|{_assets.Fingerprint(normal)}|{_assets.Fingerprint(txt)}|{_assets.Fingerprint(side + ".dds")}|{_assets.Fingerprint(side + "_n.dds")}";
     }
 
     public LodMesh? Build(string path) => _cache.GetOrAdd(path, p => { var (texture, far) = Split(p); return Create(texture, far); });
@@ -121,9 +148,14 @@ public sealed class TreeCardSource : ISyntheticMeshSource
             : (stem + ".dds", stem + "_n.dds", stem + ".txt");
     }
 
-    /// <summary>The atlas rectangle of a billboard texture, for a far card when the atlas has it.</summary>
-    private AtlasRect? Rect(string dds, bool far)
-        => far && _atlasRects is not null && _atlasRects.TryGetValue(GamePath.Normalize(dds), out var rect) ? rect : null;
+    /// <summary>The atlas rectangle and texture pair of a billboard texture when the active near/far atlas holds it.</summary>
+    private (AtlasRect Rect, string Diffuse, string Normal)? Rect(string dds, bool far)
+    {
+        var key = GamePath.Normalize(dds);
+        if (far)
+            return _atlasRects is not null && _atlasRects.TryGetValue(key, out var farRect) ? (farRect, AtlasDiffuse, AtlasNormal) : null;
+        return _nearAtlasRects is not null && _nearAtlasRects.TryGetValue(key, out var nearRect) ? (nearRect, NearAtlasDiffuse, NearAtlasNormal) : null;
+    }
 
     private LodMesh? Create(string plainDds, bool far)
     {
@@ -145,9 +177,9 @@ public sealed class TreeCardSource : ISyntheticMeshSource
         }
 
         var rect = Rect(dds, far);
-        var (u0, v0, u1, v1) = rect is { } r ? (r.U0, r.V0, r.U1, r.V1) : (0f, 0f, 1f, 1f);
+        var (u0, v0, u1, v1) = rect is { } r ? (r.Rect.U0, r.Rect.V0, r.Rect.U1, r.Rect.V1) : (0f, 0f, 1f, 1f);
         var material = new LodMaterial(
-            rect is null ? [dds, _assets.Exists(normal) ? normal : "", "", "", "", "", "", "", ""] : [AtlasDiffuse, AtlasNormal, "", "", "", "", "", "", ""],
+            rect is null ? [dds, _assets.Exists(normal) ? normal : "", "", "", "", "", "", "", ""] : [rect.Value.Diffuse, rect.Value.Normal, "", "", "", "", "", "", ""],
             0x8000_0300u,
             0x0000_0005u | 0x10u, // double-sided
             3,
@@ -192,9 +224,9 @@ public sealed class TreeCardSource : ISyntheticMeshSource
         };
     }
 
-    private LodMeshPart ViewCard(TreeBillboard bb, string normal, bool side, AtlasRect? rect)
+    private LodMeshPart ViewCard(TreeBillboard bb, string normal, bool side, (AtlasRect Rect, string Diffuse, string Normal)? rect)
     {
-        var (u0, v0, u1, v1) = rect is { } r ? (r.U0, r.V0, r.U1, r.V1) : (0f, 0f, 1f, 1f);
+        var (u0, v0, u1, v1) = rect is { } r ? (r.Rect.U0, r.Rect.V0, r.Rect.U1, r.Rect.V1) : (0f, 0f, 1f, 1f);
         var dir = side ? Vector3.UnitY : Vector3.UnitX;
         var normalDir = side ? Vector3.UnitX : -Vector3.UnitY;
         float half = bb.Width * .5f;
@@ -202,7 +234,7 @@ public sealed class TreeCardSource : ISyntheticMeshSource
         return new LodMeshPart
         {
             Name = side ? "Side billboard" : "Front billboard",
-            Material = new LodMaterial(rect is null ? [bb.TexturePath, _assets.Exists(normal) ? normal : "", "", "", "", "", "", "", ""] : [AtlasDiffuse, AtlasNormal, "", "", "", "", "", "", ""],
+            Material = new LodMaterial(rect is null ? [bb.TexturePath, _assets.Exists(normal) ? normal : "", "", "", "", "", "", "", ""] : [rect.Value.Diffuse, rect.Value.Normal, "", "", "", "", "", "", ""],
                 0x8000_0300u, 0x0000_0015u, 3, true, GrassPatchBuilder.AlphaTestFlags, GrassPatchBuilder.AlphaThreshold, Vector3.Zero, 1),
             Positions = [bottom - dir * half, bottom + dir * half, top + dir * half, top - dir * half],
             UVs = [new(u0, v1), new(u1, v1), new(u1, v0), new(u0, v0)],

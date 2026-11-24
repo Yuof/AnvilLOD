@@ -21,8 +21,8 @@ public static class TextureImages
 
     public static TextureImage Blank(int width, int height, bool normal = false)
     {
-        if (width < 4 || height < 4 || width > 4096 || height > 4096)
-            throw new ArgumentOutOfRangeException(nameof(width), "Generated textures must be 4–4096 pixels per side.");
+        if (width < 4 || height < 4 || width > 8192 || height > 8192)
+            throw new ArgumentOutOfRangeException(nameof(width), "Generated textures must be 4–8192 pixels per side.");
         var pixels = new byte[checked(width * height * 4)];
         if (normal)
             for (int i = 0; i < pixels.Length; i += 4) { pixels[i] = 128; pixels[i + 1] = 128; pixels[i + 2] = 255; pixels[i + 3] = 255; }
@@ -72,7 +72,11 @@ public static class TextureImages
                     float bottom = source.Pixels[(y1 * source.Width + x0) * 4 + c] * (1 - fx) + source.Pixels[(y1 * source.Width + x1) * 4 + c] * fx;
                     float value = top * (1 - fy) + bottom * fy;
                     if (!normal && c < 3)
-                        value = (value * MathF.Pow(c == 0 ? tile.Red : c == 1 ? tile.Green : tile.Blue, 1 / 2.2f) + tile.Brightness) * brightness;
+                    {
+                        float factor = c == 0 ? tile.Red : c == 1 ? tile.Green : tile.Blue;
+                        float gamma = factor < 0f ? -MathF.Pow(-factor, 1f / 2.2f) : MathF.Pow(factor, 1f / 2.2f);
+                        value = (value * gamma + tile.Brightness) * brightness;
+                    }
                     if (!normal && c == 3 && !tile.Alpha) value = 255;
                     target.Pixels[dest + c] = (byte)Math.Clamp(MathF.Round(value), 0, 255);
                 }
@@ -105,6 +109,21 @@ public static class TextureImages
         }
         using var output = new MemoryStream();
         DdsFile.WriteBc7(output, image.Width, image.Height, mips);
+        return output.ToArray();
+    }
+
+    public static byte[] EncodeBc1(TextureImage image, bool punchThroughAlpha = false, bool srgb = false)
+    {
+        var mips = new List<byte[]>();
+        var levels = punchThroughAlpha ? PbrLodConverter.MipChain(image.Pixels, image.Width, image.Height)
+            : Levels(image, normal: false).ToList();
+        foreach (var level in levels)
+        {
+            RunLimits.Check();
+            mips.Add(Bc1Encoder.EncodeImage(level.Rgba, level.W, level.H, punchThroughAlpha));
+        }
+        using var output = new MemoryStream();
+        DdsFile.WriteBc1(output, image.Width, image.Height, mips, srgb);
         return output.ToArray();
     }
 

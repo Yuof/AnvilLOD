@@ -56,6 +56,21 @@ public static class DdsAlpha
                         if (((blocks[o + k] & 0xF) * 17) < OpaqueAbove || ((blocks[o + k] >> 4) * 17) < OpaqueAbove) return true;
                 return false;
             }
+            case BcFormat.Bc1:
+            {
+                // BC1 1-bit punch-through alpha: when c0 <= c1, 2-bit index 3 decodes to RGBA (0,0,0,0) which LOD shaders alpha-test!
+                var blocks = DdsFile.TopMipBlocks(dds, info);
+                for (int o = 0; o + 8 <= blocks.Length; o += 8)
+                {
+                    ushort c0 = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(blocks.Slice(o, 2));
+                    ushort c1 = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(blocks.Slice(o + 2, 2));
+                    if (c0 > c1) continue;
+                    uint idx = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(blocks.Slice(o + 4, 4));
+                    for (int k = 0; k < 16; k++, idx >>= 2)
+                        if ((idx & 3u) == 3u) return true;
+                }
+                return false;
+            }
             case BcFormat.Bc7:
             {
                 var (rgba, _, _, _) = DdsFile.DecodeTopMip(dds);
@@ -63,7 +78,7 @@ public static class DdsAlpha
                 return false;
             }
             default:
-                return false; // BC1 has at most a 1-bit alpha the shader ignores; BC4/BC5 aren't diffuse textures
+                return false; // BC4/BC5 aren't diffuse textures
         }
     }
 

@@ -37,6 +37,12 @@ public static class SeasonalLod
         var seasonalTrees = SeasonalAssets.Read(game, index, "Trees", strict, warn, only);
         var treeLookup = (trees ?? []).GroupBy(t=>(t.Worldspace,t.FormKey)).ToDictionary(g=>g.Key,g=>g.First());
         var settings = treeSettings ?? Tree3DSettings.Off;
+        Dictionary<string, ParallaxGenDiff.Entry>? pgDiff = null;
+        if (settings.Enabled && assets.TryOpen(ParallaxGenDiff.FileName, out var pgStream))
+        {
+            using (pgStream) pgDiff = ParallaxGenDiff.Parse(pgStream, out _);
+            if (pgDiff.Count == 0) pgDiff = null;
+        }
         int seasons = 0, rebuilt = 0, linked = 0;
 
         foreach (var (suffix, name) in SeasonSwaps.Seasons)
@@ -86,7 +92,7 @@ public static class SeasonalLod
                         && treeLookup.TryGetValue((r.Worldspace,r.FormKey),out var tree)
                         && seasonalTrees.TryGetValue(suffix,out var treeSwaps))
                     {
-                        var replacement = SeasonalAssets.SwapTree(game,(AssetIndex)assets,tree,treeSwaps,settings,missingBillboard);
+                        var replacement = SeasonalAssets.SwapTree(game,(AssetIndex)assets,tree,treeSwaps,settings,missingBillboard,resolver.Index,pgDiff);
                         if (replacement == tree) {seasonal.Add(r);continue;}
                         string near = TreeCardSource.CardPath(replacement.Billboard.TexturePath, far: false), card = TreeCardSource.CardPath(replacement.Billboard.TexturePath, far: true);
                         LodMeshSet meshes;
@@ -227,14 +233,21 @@ public static class SeasonalLod
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool CreateHardLinkW(string newFile, string existingFile, IntPtr security);
 
+    [DllImport("libc", EntryPoint = "link", SetLastError = true)]
+    private static extern int PosixLink(string oldpath, string newpath);
+
     /// <summary>Hard link where possible (no extra disk space), else a copy.</summary>
-    private static void LinkOrCopy(string src, string dst)
+    internal static void LinkOrCopy(string src, string dst)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
         if (File.Exists(dst)) File.Delete(dst);
         if (OperatingSystem.IsWindows())
         {
             try { if (CreateHardLinkW(dst, src, IntPtr.Zero)) return; } catch (EntryPointNotFoundException) { }
+        }
+        else if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        {
+            try { if (PosixLink(src, dst) == 0) return; } catch (DllNotFoundException) { } catch (EntryPointNotFoundException) { }
         }
         File.Copy(src, dst, overwrite: true);
     }

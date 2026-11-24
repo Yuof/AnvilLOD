@@ -5,14 +5,14 @@ namespace PenguLOD.Core.Tests;
 public class ArchiveOrderTests
 {
     [Fact]
-    public void Base_game_archives_come_first_then_each_plugins_archives_in_load_order()
+    public void Base_game_archives_come_first_then_each_plugins_archives_in_load_order_with_suffixed_bsas_overriding_base_bsa()
     {
         var order = ArchiveOrder.LowToHigh(
             [@"D:\Data\ModB - Textures.bsa", @"D:\Data\Skyrim - Textures0.bsa", @"D:\Data\ModA.bsa", @"D:\Data\ModB.bsa", @"D:\Data\Skyrim - Meshes0.bsa"],
             ["Skyrim.esm", "ModA.esp", "ModB.esp"]);
 
         Assert.Equal(
-            [@"D:\Data\Skyrim - Meshes0.bsa", @"D:\Data\Skyrim - Textures0.bsa", @"D:\Data\ModA.bsa", @"D:\Data\ModB - Textures.bsa", @"D:\Data\ModB.bsa"],
+            [@"D:\Data\Skyrim - Meshes0.bsa", @"D:\Data\Skyrim - Textures0.bsa", @"D:\Data\ModA.bsa", @"D:\Data\ModB.bsa", @"D:\Data\ModB - Textures.bsa"],
             order);
     }
 

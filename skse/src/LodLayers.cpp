@@ -137,7 +137,7 @@ namespace PenguLOD
 				if (!_anyFound && ++ticks % 10 == 0) {
 					_dirty = true;
 				}
-				if (!_dirty && !AnyHidden() && !_appliedHidden) {
+				if (!_dirty && !AnyHidden() && !_appliedHidden && _largeRefsFound == 0) {
 					continue;  // everything shown and nothing to undo: no scene graph work at all
 				}
 				if (_queued.exchange(true)) {
@@ -208,17 +208,39 @@ namespace PenguLOD
 			top = _lodRoot.get();
 		}
 		int                          found[kLayerCount][kLevelCount]{};
+		int                          largeRefs = 0;
+		const auto*                  player = RE::PlayerCharacter::GetSingleton();
+		const bool                   outside = player && player->GetWorldspace() != nullptr;
+		const int                    pcx = outside ? static_cast<int>(std::floor(player->GetPositionX() / 4096.0f)) : 0;
+		const int                    pcy = outside ? static_cast<int>(std::floor(player->GetPositionY() / 4096.0f)) : 0;
+		int                          uGrids = 5, uLarge = 11;
+		if (auto* ini = RE::INISettingCollection::GetSingleton()) {
+			if (auto* sg = ini->GetSetting("uGridsToLoad:General")) uGrids = static_cast<int>(sg->data.u);
+			if (auto* sl = ini->GetSetting("uLargeRefLODGridSize:General")) uLarge = static_cast<int>(sl->data.u);
+		}
+		if (auto* prefs = RE::INIPrefSettingCollection::GetSingleton()) {
+			if (auto* sl = prefs->GetSetting("uLargeRefLODGridSize:General")) uLarge = static_cast<int>(sl->data.u);
+		}
+		const int                    largeHalf = std::max(std::max(1, uGrids) / 2, std::max(1, uLarge) / 2);
 		std::size_t                  visited = 0;
 		std::vector<RE::NiAVObject*> stack{ top };
 		while (!stack.empty() && visited < 600000) {
 			auto* o = stack.back();
 			stack.pop_back();
 			++visited;
-			int layer = 0, level = 0, tier = 0;
+			int layer = 0, level = 0, tier = 0, lrx = 0, lry = 0;
 			if (const char* nm = o->name.c_str(); nm && !_objLogged && _stricmp(nm, "obj") == 0) {
 				// The root of a loaded .bto block is named "obj": tells where the LOD blocks hang in the scene.
 				_objLogged = true;
 				logger::info("Quality layers: a block root 'obj' sits at: {}", PathTo(o));
+			}
+			if (LayerNames::ParseLargeRef(o->name.c_str(), lrx, lry)) {
+				++largeRefs;
+				const bool cullLarge = outside && uLarge > uGrids && std::abs(lrx - pcx) <= largeHalf && std::abs(lry - pcy) <= largeHalf;
+				if (o->GetAppCulled() != cullLarge) {
+					o->SetAppCulled(cullLarge);
+				}
+				continue;
 			}
 			if (Parse(o->name.c_str(), layer, level, tier)) {
 				if (tier == 0) {
@@ -251,6 +273,7 @@ namespace PenguLOD
 			}
 		}
 		_anyFound = any;
+		_largeRefsFound = largeRefs;
 		_appliedHidden = hidden;
 		if (changed || _scans <= 3) {
 			logger::info("Quality layers: scan {}: scene graph walked ({} nodes). Layer nodes found: grass {}/{}/{}/{}, 3D trees {}/{}/{}/{}, tree cards {}/{}/{}/{} (LOD4/8/16/32)", _scans, visited,

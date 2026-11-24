@@ -473,6 +473,8 @@ public sealed class DesktopTests : IDisposable
             Assert.True(heartbeat);
             Click(window, "Object LOD");
             Assert.False(FindButton(window, "Generate object LOD").IsEffectivelyEnabled);
+            Click(window, "Scan results");
+            Assert.All(window.GetVisualDescendants().OfType<ScrollViewer>(), sv => Assert.True(sv.IsEffectivelyEnabled));
             Click(window, "Textures");
             Assert.False(FindButton(window, "Generate textures").IsEffectivelyEnabled);
             Click(window, "Overview");
@@ -694,14 +696,14 @@ public sealed class DesktopTests : IDisposable
         {
             Click(window, "Custom rules");
             var grid = window.GetVisualDescendants().OfType<DataGrid>().Single();
-            Assert.True(grid.Columns.Single(c => c.Header as string == "Reference").IsReadOnly);
-            Assert.True(grid.Columns.Single(c => c.Header as string == "Flags").IsReadOnly);
+            Assert.False(grid.Columns.Single(c => c.Header as string == "Reference").IsReadOnly);
+            Assert.False(grid.Columns.Single(c => c.Header as string == "Flags").IsReadOnly);
             Assert.False(grid.Columns.Single(c => c.Header as string == "LOD4").IsReadOnly);
             var imported = PenguLOD.Core.Lod.RuleEntry.Parse("tree,Level0,Level1,Level2,,Near LOD,Disable,19,imported", "fixture")!;
             imported.Lod4 = "Level1";
             var restored = PenguLOD.Core.Lod.RuleEntry.Parse(imported.Format(), "fixture")!;
             Assert.Equal("Disable", restored.Reference); Assert.Equal(19, restored.Flags);
-            Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), t => t.Text?.Contains("not applied during generation") == true);
+            Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), t => t.Text?.Contains("Flags bitmask") == true);
         }
         finally { window.Close(); }
     }
@@ -728,6 +730,14 @@ public sealed class DesktopTests : IDisposable
             Assert.False(Directory.Exists(Path.Combine(_root, "package")));
             window.GetVisualDescendants().OfType<TextBox>().Single(t => t.Name == "PackageFolder").Text += "-changed";
             Assert.False(FindButton(window, "Publish reviewed package").IsEnabled);
+
+            string refFolder = Path.Combine(_root, "reference"); Directory.CreateDirectory(refFolder);
+            File.WriteAllText(Path.Combine(refFolder, "DynDOLOD.esm"), "fixture");
+            window.GetVisualDescendants().OfType<TextBox>().Single(t => t.Name == "CompareOutput").Text = output;
+            window.GetVisualDescendants().OfType<TextBox>().Single(t => t.Name == "CompareReference").Text = refFolder;
+            await window.CompareWithReference();
+            Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), t => t.Text?.Contains("Blocks both sides have") == true);
+
             if (Environment.GetEnvironmentVariable("PENGULOD_SCREENSHOTS") is { } screenshots)
                 window.CaptureRenderedFrame()?.Save(Path.Combine(screenshots, "reports-outputs.png"), PngBitmapEncoderOptions.Default);
         }

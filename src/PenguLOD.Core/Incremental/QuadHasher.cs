@@ -16,14 +16,15 @@ namespace PenguLOD.Core.Incremental;
 public static class QuadHasher
 {
     /// <summary>Bump when the output format/algorithm changes so every block rebuilds once.</summary>
-    public const int AlgorithmVersion = 14; // NIF tangent frame for generated tangents and billboard cards
+    public const int AlgorithmVersion = 15; // resolved atlas/material transform stamps for incremental reuse
 
     public static string Hash(
         QuadKey quad,
         IReadOnlyList<LodReference> refsSortedByFormKey,
         Func<string, string?> assetFingerprint,
         string settingsFingerprint,
-        Func<string, string?>? variantStamp = null)   // texture variant id -> what its full model looks like now (file fingerprint)
+        Func<string, string?>? variantStamp = null,        // texture variant id -> what its full model looks like now (file fingerprint)
+        Func<string?, string?, string?>? meshTransformStamp = null) // (meshPath, textureVariant) -> resolved atlas/optimized material stamp
     {
         using var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buf = new byte[4];
@@ -53,6 +54,8 @@ public static class QuadHasher
             Str(mesh is null ? null : assetFingerprint(mesh));
             Str(r.TextureVariant);
             Str(r.TextureVariant is null ? null : variantStamp?.Invoke(r.TextureVariant));
+            if (meshTransformStamp is not null)
+                Str(meshTransformStamp(mesh, r.TextureVariant));
             Str(r.Shader == LodShaderKind.None ? null : r.Shader.ToString());
             F(r.Position.X); F(r.Position.Y); F(r.Position.Z);
             F(r.RotationRadians.X); F(r.RotationRadians.Y); F(r.RotationRadians.Z);

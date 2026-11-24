@@ -98,10 +98,12 @@ public static class BoundsFixStage
     }
 
     /// <summary>The plugins a copy of the record needs as masters: the one that defines it and every one it links to.</summary>
-    private static HashSet<ModKey> Masters(IMajorRecordGetter record, ModKey self)
+    internal static HashSet<ModKey> Masters(IMajorRecordGetter record, ModKey self)
     {
         var keys = new HashSet<ModKey> { record.FormKey.ModKey };
-        foreach (var link in record.EnumerateFormLinks()) if (!link.IsNull) keys.Add(link.FormKey.ModKey);
+        // Shallow enumeration avoids walking child cells / placed references inside a Worldspace or Cell record,
+        // which GetOrAddAsOverride does not copy and which would otherwise re-scan the entire worldspace per cell.
+        foreach (var link in record.EnumerateFormLinks(iterateNestedRecords: false)) if (!link.IsNull) keys.Add(link.FormKey.ModKey);
         keys.Remove(self);
         return keys;
     }

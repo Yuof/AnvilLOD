@@ -47,12 +47,22 @@ namespace PenguLOD
 		void WaterOpacityChanged() { _waterOpacityDirty = true; }
 
 	private:
+		struct AltSwap
+		{
+			std::string shape;
+			std::string diffuse;
+			std::string normal;
+		};
+
 		struct Item
 		{
 			RE::FormID                     ref{ 0 };
 			RE::FormID                     parent{ 0 };
 			RE::FormID                     world{ 0 };
 			std::uint32_t                  mesh{ 0 };
+			std::uint32_t                  mesh8{ DynamicEntry::kNone };
+			std::uint32_t                  mesh16{ DynamicEntry::kNone };
+			std::uint32_t                  activeMesh{ DynamicEntry::kNone };
 			RE::NiPoint3                   pos;
 			RE::NiMatrix3                  rot;
 			float                          scale{ 1.0f };
@@ -70,6 +80,7 @@ namespace PenguLOD
 			bool                           childCell{ false };  // ... and the child worldspace has a cell here
 			bool                           glow{ false };       // a window glow mesh: its emissive multiple follows the hour
 			bool                           standIn{ false };    // a parent-worldspace stand-in for a real object of the city worldspace
+			std::vector<AltSwap>           alts;                // PLCP v2: per-shape alternate texture swaps
 			std::vector<RE::BSShaderProperty*> scrollProps;  // water copies: the shader properties whose texture offset is scrolled
 			std::vector<std::pair<RE::BSLightingShaderProperty*, float>> glowProps;  // shader properties of the drawn clone and their own emissive multiple
 			RE::NiPointer<RE::NiAVObject>  node;
@@ -93,7 +104,8 @@ namespace PenguLOD
 		void HideAll();
 		bool WantShown(const Item& a_item, const RE::NiPoint3& a_player, std::int32_t a_pcx, std::int32_t a_pcy, std::int32_t a_half, RE::FormID a_playerWorld) const;
 		bool IsEnabled(const Item& a_item) const;
-		void Show(Item& a_item);
+		std::uint32_t SelectMesh(const Item& a_item, float a_distSq, float a_d0, float a_d1) const;
+		void Show(Item& a_item, std::uint32_t a_chosenMesh);
 		void Hide(Item& a_item);
 		RE::NiNode* Root();
 		RE::NiNode* Template(std::uint32_t a_mesh);
@@ -149,6 +161,8 @@ namespace PenguLOD
 		std::atomic<std::int32_t>                                   _playerCellY{ 0 };
 		std::int32_t                                                _glowLogCellX{ 0x7FFFFFFF };  // where the glow line was last logged
 		std::int32_t                                                _glowLogCellY{ 0x7FFFFFFF };
+		std::int32_t                                                _lastLargeCellX{ 0x7FFFFFFF };
+		std::int32_t                                                _lastLargeCellY{ 0x7FFFFFFF };
 		RE::FormID                                                  _glowLogWorld{ 0 };
 		float                                                      _glowFactor{ 0.0f };  // 0 by day, 1 at night, from the game hour
 		std::unordered_map<std::uint32_t, std::vector<float>>       _glowBases;           // per mesh: the emissive multiple of each of its shaders, as the file has it

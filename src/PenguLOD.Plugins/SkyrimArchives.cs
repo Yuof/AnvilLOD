@@ -33,8 +33,20 @@ public static class SkyrimArchives
             .Concat(List("sArchiveToLoadInMemoryList", [])).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
+    /// <summary>Archive file names explicitly declared in a plugin's own <c>&lt;PluginStem&gt;.ini</c> <c>[Archive]</c> section.</summary>
+    public static IReadOnlyList<string> ReadPluginIniArchives(string? pluginIniPath)
+    {
+        if (string.IsNullOrWhiteSpace(pluginIniPath) || !File.Exists(pluginIniPath)) return [];
+        if (!Mo2Instance.ReadIni(pluginIniPath).TryGetValue("Archive", out var section)) return [];
+        var list = new List<string>();
+        foreach (var key in new[] { "sResourceArchiveList", "sResourceArchiveList2", "sArchiveToLoadInMemoryList" })
+            if (section.TryGetValue(key, out var val) && !string.IsNullOrWhiteSpace(val))
+                list.AddRange(val.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+        return list.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
     public static IReadOnlyList<string> Select(GameRelease release, IEnumerable<string> archivePaths,
-        IReadOnlyList<string> plugins, IReadOnlyList<string> iniArchives)
+        IReadOnlyList<string> plugins, IReadOnlyList<string> iniArchives, Func<string, string?>? pluginIniResolver = null)
     {
         // A case-sensitive Data folder can hold "Foo.bsa" and "foo.bsa"; the game loads one archive by that name.
         var available = archivePaths.Where(p => p.EndsWith(".bsa", StringComparison.OrdinalIgnoreCase)).Order(StringComparer.Ordinal)
@@ -47,7 +59,13 @@ public static class SkyrimArchives
         foreach (var plugin in plugins)
         {
             var key = ModKey.FromFileName(plugin);
-            foreach (var name in available.Keys.Where(n => Archive.IsApplicable(release, key, n)).Order(StringComparer.OrdinalIgnoreCase)) Add(name);
+            if (pluginIniResolver?.Invoke(key.Name + ".ini") is { } pluginIni)
+                foreach (var name in ReadPluginIniArchives(pluginIni))
+                    Add(name);
+            foreach (var name in available.Keys.Where(n => Archive.IsApplicable(release, key, n))
+                .OrderBy(n => ArchiveOrder.IntraPluginKey(n, key.Name).Suffixed)
+                .ThenBy(n => n, StringComparer.OrdinalIgnoreCase))
+                Add(name);
         }
         return result;
     }

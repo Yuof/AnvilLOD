@@ -244,22 +244,32 @@ internal sealed class TerrainSource
         int quadrant=(vx>=16?1:0)+(vy>=16?2:0);
         float qx=vx%16,qy=vy%16;
         var baseLayer=cell.Bases[quadrant];
-        float total=0; Vector3 color=Vector3.Zero, detail=Vector3.Zero;
-        foreach(var layer in cell.Alpha[quadrant])
+        var alphaLayers=cell.Alpha[quadrant];
+        float remaining=1f; Vector3 color=Vector3.Zero, detail=Vector3.Zero;
+        // Creation Engine painter's blend: later ATXT layers (higher LayerNumber) paint over earlier ones and BTXT.
+        // Evaluating top-down lets an opaque upper layer short-circuit without sampling buried textures.
+        for(int i=alphaLayers.Length-1;i>=0 && remaining>1e-4f;i--)
         {
+            var layer=alphaLayers[i];
             float weight=Bilinear(layer.Opacity!,17,qx,qy);
-            if(weight>0) { var sample=Material(layer); total+=weight; color+=sample.Color*weight; detail+=sample.Detail*weight; }
+            if(weight<=0f) continue;
+            var sample=Material(layer);
+            float contrib=remaining*weight;
+            color+=sample.Color*contrib; detail+=sample.Detail*contrib;
+            remaining*=1f-weight;
         }
-        float baseWeight = Math.Max(0, 1 - total);
-        if (baseWeight > 0) { var sample=Material(baseLayer); color+=sample.Color*baseWeight; detail+=sample.Detail*baseWeight; }
-        color/=Math.Max(1,total);
+        if(remaining>1e-4f)
+        {
+            var sample=Material(baseLayer);
+            color+=sample.Color*remaining; detail+=sample.Detail*remaining;
+        }
         if(cell.Colors is {} colors)
         {
             int ix=Math.Clamp((int)vx,0,31),iy=Math.Clamp((int)vy,0,31); float fx=vx-ix,fy=vy-iy;
             var v=Vector3.Lerp(Vector3.Lerp(colors[iy*33+ix],colors[iy*33+ix+1],fx),Vector3.Lerp(colors[(iy+1)*33+ix],colors[(iy+1)*33+ix+1],fx),fy);
-            color*=Vector3.Lerp(Vector3.One,v,colorStrength);
+            color*=SrgbToLinear(Vector3.Lerp(Vector3.One,v,colorStrength));
         }
-        return new(color, detail / Math.Max(1,total));
+        return new(color, detail);
         TerrainSample Material(Layer? layer) {
             string path=layer?.Texture ?? _defaultDiffuse;
             try { return _materials.Sample(path,layer is null ? _defaultNormal : layer.Normal,layer?.Occlusion,
@@ -281,7 +291,7 @@ internal sealed class TerrainSource
     private static float Linear(float c)=>c<=.04045f?c/12.92f:MathF.Pow((c+.055f)/1.055f,2.4f);
     internal static byte Srgb(float c) =>(byte)Math.Clamp(MathF.Round((c<=.0031308f?12.92f*c:1.055f*MathF.Pow(c,1/2.4f)-.055f)*255),0,255);
 
-    private sealed class TriangleField
+    internal sealed class TriangleField
     {
         private readonly List<(Vector3 A,Vector3 B,Vector3 C)>[] _buckets=Enumerable.Range(0,32*32).Select(_=>new List<(Vector3,Vector3,Vector3)>()).ToArray();
         private readonly float _size;

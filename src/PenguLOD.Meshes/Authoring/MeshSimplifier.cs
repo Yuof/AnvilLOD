@@ -14,7 +14,8 @@ public static class MeshSimplifier
 {
     /// <param name="maxError">Largest allowed deviation in mesh units (the collapse stops beyond it).</param>
     /// <param name="minTriangles">Never go below this many triangles.</param>
-    public static LodMeshPart Simplify(LodMeshPart part, float maxError, int minTriangles = 4)
+    /// <param name="pinBorders">Keep every open-border vertex fixed (prevents any collapse removing a perimeter vertex).</param>
+    public static LodMeshPart Simplify(LodMeshPart part, float maxError, int minTriangles = 4, bool pinBorders = false)
     {
         RunLimits.Check();
         int nv = part.VertexCount, nt = part.TriangleCount;
@@ -113,7 +114,7 @@ public static class MeshSimplifier
         void Push(int from, int to)
         {
             if (from == to || dead[from] || dead[to]) return;
-            if (onBorder[from] && !border.Contains(Edge(from, to))) return; // border points only slide along the border
+            if (onBorder[from] && (pinBorders || !border.Contains(Edge(from, to)))) return; // border points stay pinned or slide only along the border
             float cost = (q[from] + q[to]).Evaluate(pidPos[to]);
             if (cost <= maxCost) heap.Enqueue((from, to, version[from], version[to]), cost);
         }

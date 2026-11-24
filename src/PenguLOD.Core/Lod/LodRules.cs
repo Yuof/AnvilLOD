@@ -23,7 +23,10 @@ public readonly record struct LodChoice(LodChoiceKind Kind, int Level = 0)
             "level2" or "staticlod16" => Lod(2),
             "level3" or "staticlod32" => Lod(3),
             "full" or "fullmodel" => Full,
-            _ when t.StartsWith("billboard", StringComparison.Ordinal) => Billboard,
+            _ when t.StartsWith("billboard", StringComparison.Ordinal) =>
+                int.TryParse(t["billboard".Length..], out var view) && view is >= 1 and <= 6
+                    ? new LodChoice(LodChoiceKind.Billboard, view)
+                    : Billboard,
             _ => None,
         };
     }
@@ -36,6 +39,9 @@ public readonly record struct LodChoice(LodChoiceKind Kind, int Level = 0)
 /// </summary>
 public enum DynamicGrid { None, Near, Far, FarFull, NeverFade }
 
+/// <summary>DynDOLOD's Reference column: how placed references and parent/child copies are treated.</summary>
+public enum ReferenceAction { Unchanged, Replace, Disable, KeepParent, KeepChild, KeepBoth, Original, Copy, Delete, Enable, Ignore }
+
 /// <summary>One rule line: a mesh mask (substring of the model path) or a reference/base FormID, and a choice per level.</summary>
 public sealed record LodRule(
     string Mask,               // lower-case path substring, or "" for FormID rules
@@ -44,10 +50,28 @@ public sealed record LodRule(
     string SourceFile,
     DynamicGrid Grid = DynamicGrid.None,
     int Flags = 0,                // DynDOLOD's Flags column: 1 VWD, 2 NoGlow, 4 NoMATO, 8 Dynamic, 16 TREE
-    bool Lod32Explicit = false)   // the line has a LOD32 column (8-9 columns); a 7-column line leaves LOD32 undecided, which the map setting may fill
+    bool Lod32Explicit = false,   // the line has a LOD32 column (8-9 columns); a 7-column line leaves LOD32 undecided, which the map setting may fill
+    ReferenceAction Reference = ReferenceAction.Unchanged)
 {
+    /// <summary>"VWD": treat base as visible when distant.</summary>
+    public bool ForceVwd => (Flags & RuleEntry.FlagVwd) != 0;
+
     /// <summary>"NoGlow": the object's LOD gets no glowing windows.</summary>
     public bool NoGlow => (Flags & RuleEntry.FlagNoGlow) != 0;
+
+    /// <summary>"NoMATO": suppress snow/ash directional material shader on the object's LOD shapes.</summary>
+    public bool NoMato => (Flags & RuleEntry.FlagNoMato) != 0;
+
+    /// <summary>"Dynamic": route the reference to dynamic LOD (<c>PenguLOD.dyn</c>) when dynamic LOD is enabled.</summary>
+    public bool ForceDynamic => (Flags & RuleEntry.FlagDynamic) != 0;
+
+    /// <summary>"TREE": treat non-TREE static/activator object as a billboard/tree candidate.</summary>
+    public bool ForceTree => (Flags & RuleEntry.FlagTree) != 0;
+
+    /// <summary>True when any LOD column asks for a Billboard1..6 card.</summary>
+    public bool HasBillboardChoice =>
+        Lod4.Kind == LodChoiceKind.Billboard || Lod8.Kind == LodChoiceKind.Billboard
+        || Lod16.Kind == LodChoiceKind.Billboard || Lod32.Kind == LodChoiceKind.Billboard;
 
     /// <summary>
     /// An object DynDOLOD draws with dynamic LOD only (all LOD columns empty, a grid set): the SKSE plugin draws
@@ -64,6 +88,21 @@ public sealed record LodRule(
         "farfull" => DynamicGrid.FarFull,
         "neverfadelod" or "neverfade" => DynamicGrid.NeverFade,
         _ => DynamicGrid.None,
+    };
+
+    public static ReferenceAction ParseReference(string s) => s.Trim().Replace(" ", "").ToLowerInvariant() switch
+    {
+        "replace" => ReferenceAction.Replace,
+        "disable" => ReferenceAction.Disable,
+        "keepparent" => ReferenceAction.KeepParent,
+        "keepchild" => ReferenceAction.KeepChild,
+        "keepboth" => ReferenceAction.KeepBoth,
+        "original" => ReferenceAction.Original,
+        "copy" => ReferenceAction.Copy,
+        "delete" => ReferenceAction.Delete,
+        "enable" => ReferenceAction.Enable,
+        "ignore" => ReferenceAction.Ignore,
+        _ => ReferenceAction.Unchanged,
     };
 
     public LodChoice For(LodLevel level) => level switch
@@ -372,6 +411,7 @@ public sealed class LodRules
         LodChoice l32 = hasLod32 ? LodChoice.Parse(c[4]) : LodChoice.None;
         int gridCol = hasLod32 ? 5 : 4;
         var grid = c.Length > gridCol ? LodRule.ParseGrid(c[gridCol]) : DynamicGrid.None;
+        var reference = c.Length > gridCol + 1 ? LodRule.ParseReference(c[gridCol + 1]) : ReferenceAction.Unchanged;
 
         string? formId = null;
         int semi = mask.IndexOf(';');
@@ -384,7 +424,7 @@ public sealed class LodRules
             mask = "";
         }
         int.TryParse(c.Length > gridCol + 2 ? c[gridCol + 2].Trim() : "", out var flags);
-        return new LodRule(mask, formId, l4, l8, l16, l32, source, grid, flags, hasLod32);
+        return new LodRule(mask, formId, l4, l8, l16, l32, source, grid, flags, hasLod32, reference);
     }
 
     /// <summary>

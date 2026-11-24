@@ -134,6 +134,13 @@ static void LayerNodeNames()
 	CHECK(!LayerNames::Parse("PL:grass:16:10", layer, level, tier));
 	CHECK(!LayerNames::Parse("PL:bushes:4", layer, level, tier));
 	CHECK(!LayerNames::Parse(nullptr, layer, level, tier));
+
+	int cx = 0, cy = 0;
+	CHECK(LayerNames::ParseLargeRef("PL:largeref:4:-12:8", cx, cy) && cx == -12 && cy == 8);
+	CHECK(LayerNames::ParseLargeRef("AL:largeref:4:0:-3", cx, cy) && cx == 0 && cy == -3);
+	CHECK(!LayerNames::ParseLargeRef("PL:largeref:8:1:2", cx, cy));
+	CHECK(!LayerNames::ParseLargeRef("PL:largeref:4:abc:2", cx, cy));
+	CHECK(!LayerNames::ParseLargeRef(nullptr, cx, cy));
 }
 
 template <class File>
@@ -199,13 +206,79 @@ static void GeneratorOutput(const fs::path& a_fixtures)
 	CHECK(farm.flags == (DynamicEntry::kOpposite | DynamicEntry::kInitiallyDisabled));
 	CHECK(farm.pos[0] == 100.5f && farm.pos[1] == -200.25f && farm.rot[2] == 0.3f && farm.scale == 1.25f);
 	CHECK(dyn.strings[farm.mesh] == "lod\\farmhouse\\farmhouse01_lod_0.nif");
+	CHECK(farm.mesh8 != DynamicEntry::kNone && dyn.strings[farm.mesh8] == "lod\\farmhouse\\farmhouse01_lod_1.nif");
+	CHECK(farm.mesh16 != DynamicEntry::kNone && dyn.strings[farm.mesh16] == "lod\\farmhouse\\farmhouse01_lod_2.nif");
+	CHECK(water.mesh8 == DynamicEntry::kNone && water.mesh16 == DynamicEntry::kNone);
 
 	CopyFile copies;
 	CHECK(copies.Read(a_fixtures / "PenguLOD.copies"));
 	CHECK(copies.entries.size() == 2);
 	CHECK(copies.strings[copies.entries[0].model] == "landscape\\rocks\\rockl01.nif" && copies.entries[0].worldLocalId == 0x1A26F);
 	CHECK(copies.entries[0].flags == CopyEntry::kChildCell && copies.entries[0].scale == 1.5f && copies.entries[0].rot[1] == 0.2f);
+	CHECK(copies.entries[0].alts.empty());
 	CHECK(copies.entries[1].flags == CopyEntry::kAltTextures && copies.entries[1].pos[2] == 6.0f);
+	CHECK(copies.entries[1].alts.size() == 1);
+	CHECK(copies.strings[copies.entries[1].alts[0].shape] == "RockPileM02:0");
+	CHECK(copies.strings[copies.entries[1].alts[0].diffuse] == "textures\\landscape\\mountains\\mountainslab02snow.dds");
+	CHECK(copies.strings[copies.entries[1].alts[0].normal] == "textures\\landscape\\mountains\\mountainslab02_n.dds");
+
+	// Backwards compatibility: PLDY v1 and v2 (60-byte entries) and PLCP v1 (44-byte entries) must still parse cleanly!
+	for (std::uint32_t legacyVer : { 1u, 2u }) {
+		std::vector<char> vDyn;
+		auto append = [&](const void* p, std::size_t sz) {
+			const auto* b = static_cast<const char*>(p);
+			vDyn.insert(vDyn.end(), b, b + sz);
+		};
+		append("PLDY", 4);
+		append(&legacyVer, 4);
+		const std::uint32_t one = 1;
+		append(&one, 4);
+		const std::string s0 = "Skyrim.esm";
+		const std::uint16_t s0Len = static_cast<std::uint16_t>(s0.size());
+		append(&s0Len, 2);
+		append(s0.data(), s0.size());
+		append(&one, 4);
+		const std::uint32_t e0[5] = { 0, 0x800, 0, 0x3C, 0 };
+		append(e0, sizeof(e0));
+		const float pf[7] = { 10.f, 20.f, 30.f, 0.f, 0.f, 0.f, 1.f };
+		append(pf, sizeof(pf));
+		const std::uint32_t tail[3] = { DynamicEntry::kNone, 0, 2 };
+		append(tail, sizeof(tail));
+		{
+			std::ofstream out("legacy_dyn.bin", std::ios::binary | std::ios::trunc);
+			out.write(vDyn.data(), static_cast<std::streamsize>(vDyn.size()));
+		}
+		DataFile parsedLegacy;
+		CHECK(parsedLegacy.Read("legacy_dyn.bin") && parsedLegacy.entries.size() == 1);
+		CHECK(parsedLegacy.entries[0].mesh8 == DynamicEntry::kNone && parsedLegacy.entries[0].mesh16 == DynamicEntry::kNone);
+	}
+	{
+		std::vector<char> vCp;
+		auto append = [&](const void* p, std::size_t sz) {
+			const auto* b = static_cast<const char*>(p);
+			vCp.insert(vCp.end(), b, b + sz);
+		};
+		append("PLCP", 4);
+		const std::uint32_t v1 = 1;
+		append(&v1, 4);
+		append(&v1, 4);
+		const std::string s0 = "Skyrim.esm";
+		const std::uint16_t s0Len = static_cast<std::uint16_t>(s0.size());
+		append(&s0Len, 2);
+		append(s0.data(), s0.size());
+		append(&v1, 4);
+		const std::uint32_t hdr[3] = { 0, 0x1A26F, 0 };
+		append(hdr, sizeof(hdr));
+		const float pf[7] = { 1.f, 2.f, 3.f, 0.f, 0.f, 0.f, 1.f };
+		append(pf, sizeof(pf));
+		append(&v1, 4);
+		{
+			std::ofstream out("legacy_cp.bin", std::ios::binary | std::ios::trunc);
+			out.write(vCp.data(), static_cast<std::streamsize>(vCp.size()));
+		}
+		CopyFile parsedCp;
+		CHECK(parsedCp.Read("legacy_cp.bin") && parsedCp.entries.size() == 1 && parsedCp.entries[0].alts.empty());
+	}
 
 	NativeFile natives;
 	CHECK(natives.Read(a_fixtures / "PenguLOD.native"));

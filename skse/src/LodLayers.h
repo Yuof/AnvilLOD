@@ -44,6 +44,7 @@ namespace PenguLOD
 		/// How many nodes of each layer and level were found in the loaded scene at the last scan (0 = not in the LOD files).
 		int  Found(int a_layer, int a_level) const { return _found[a_layer][a_level]; }
 		bool AnyFound() const { return _anyFound; }
+		bool AnyLargeRefs() const { return _largeRefsFound > 0; }
 
 		bool show[kLayerCount][kLevelCount]{};
 		/// How many of the grass density tiers are drawn (1 to kGrassTiers; iGrassTiers in PenguLOD.ini). LODs generated before
@@ -65,5 +66,6 @@ namespace PenguLOD
 		RE::NiPointer<RE::NiNode> _lodRoot;  // the engine's "LODRoot" node (found in game: WorldRoot < shadow scene node < LODRoot < LandLOD < ... < obj)
 		bool              _objLogged{ false };
 		int               _found[kLayerCount][kLevelCount]{};
+		std::atomic<int>  _largeRefsFound{ 0 };
 	};
 }

@@ -20,6 +20,19 @@ public static class WaterCopies
 
     public sealed record Result(List<ParentCopy> Copies, int Cells, int Runs);
 
+    /// <summary>Default fake-water plane template matching a 2048-unit water sheet, used when no <c>WaterStandIns</c> mesh was generated.</summary>
+    public static LodMeshPart DefaultTemplate() => new()
+    {
+        Name = "water",
+        Material = PenguLOD.Meshes.Nif.NifGeometryReader.FakeWaterMaterial,
+        Positions = [new(0, 0, 0), new(2048, 0, 0), new(0, 2048, 0)],
+        UVs = [new(0, 0), new(PenguLOD.Meshes.Nif.NifGeometryReader.FakeWaterUvTiling, 0), new(0, PenguLOD.Meshes.Nif.NifGeometryReader.FakeWaterUvTiling)],
+        Normals = [Vector3.UnitZ, Vector3.UnitZ, Vector3.UnitZ],
+        Tangents = [Vector3.UnitY, Vector3.UnitY, Vector3.UnitY],
+        Bitangents = [Vector3.UnitX, Vector3.UnitX, Vector3.UnitX],
+        Triangles = [0, 1, 2],
+    };
+
     public static Result Build(TerrainHeights terrain, IReadOnlyDictionary<(string Ws, int X, int Y), float> waterCells,
         IReadOnlyList<ParentCopyRegion> regions, LodMeshPart template, string outputFolder, CancellationToken ct = default)
     {

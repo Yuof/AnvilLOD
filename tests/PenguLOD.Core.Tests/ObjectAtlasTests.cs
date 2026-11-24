@@ -94,7 +94,55 @@ public class ExpandedObjectAtlasTests
         // More materials than one page holds go on to the next.
         var many = ObjectTextureAtlas.Build(Inputs(20), 64, 256);
         Assert.Equal(2, many.Pages.Count); Assert.Equal((256, 256), (many.Pages[0].Size, many.Pages[0].Height)); Assert.Equal((128, 128), (many.Pages[1].Size, many.Pages[1].Height));
-        Assert.Throws<ArgumentException>(() => ObjectTextureAtlas.Build(Inputs(2), 64, 8192));
+        var eightK = ObjectTextureAtlas.Build(Inputs(2), 64, 8192);
+        Assert.Single(eightK.Pages);
+        Assert.Throws<ArgumentException>(() => ObjectTextureAtlas.Build(Inputs(2), 64, 16384));
+    }
+
+    [Fact]
+    public void Variable_aspect_skyline_packing_preserves_rectangular_ratios_and_incremental_layout_slots()
+    {
+        // A 4:1 strip (256x64) and a small 32x32 texture pack far tighter than uniform 256x256 square cells.
+        var widePixels = new byte[256 * 64 * 4];
+        for (int i = 0; i < widePixels.Length; i += 4) { widePixels[i] = 220; widePixels[i + 1] = 40; widePixels[i + 2] = 20; widePixels[i + 3] = 255; }
+        var smallPixels = new byte[32 * 32 * 4];
+        for (int i = 0; i < smallPixels.Length; i += 4) { smallPixels[i] = 20; smallPixels[i + 1] = 210; smallPixels[i + 2] = 60; smallPixels[i + 3] = 255; }
+
+        var inputs = new[]
+        {
+            new ObjectTextureAtlas.Input("strip", new TextureImage(widePixels, 256, 64), null, false, 3),
+            new ObjectTextureAtlas.Input("small", new TextureImage(smallPixels, 32, 32), null, false, 3),
+        };
+        var packed = ObjectTextureAtlas.Build(inputs, cellSize: 256, pageSize: 4096, variableAspect: true);
+        Assert.Single(packed.Pages);
+        var stripBox = packed.Boxes!["strip"];
+        var smallBox = packed.Boxes["small"];
+        Assert.True(stripBox.InnerW > stripBox.InnerH * 2, $"Expected rectangular inner box, got {stripBox.InnerW}x{stripBox.InnerH}");
+        Assert.True(smallBox.OuterW <= 96 && smallBox.OuterH <= 96, $"Expected compact box for 32x32 texture, got {smallBox.OuterW}x{smallBox.OuterH}");
+
+        // Incremental stage build: adding a third material preserves the first two materials' exact atlas rects and page stem!
+        using var f = new TextureFixture();
+        TextureFixture.Put(f.Data, @"textures\wide.dds", TextureImages.Encode(new(widePixels, 256, 64)));
+        TextureFixture.Put(f.Data, @"textures\small.dds", TextureImages.Encode(new(smallPixels, 32, 32)));
+        using var game = GameContext.Open(f.Game);
+        var assets = game.BuildAssets(_ => true);
+        var m1 = new LodMesh { Path = "m1", Parts = [TextureFixture.Card("a", @"textures\wide.dds"), TextureFixture.Card("b", @"textures\small.dds")] };
+        var run1 = ObjectAtlasStage.Build([m1], assets, f.Output, cellSize: 256, maxPageSize: 4096);
+        Assert.Equal(2, run1.Report.PackedMaterials);
+        Assert.True(File.Exists(Path.Combine(f.Output, ObjectAtlasStage.LayoutFileName)));
+
+        // Re-running unchanged reuses cached page without re-encoding.
+        var runSame = ObjectAtlasStage.Build([m1], assets, f.Output, cellSize: 256, maxPageSize: 4096);
+        Assert.Equal(1, runSame.Report.ReusedPages);
+        static (string D, string N, AtlasRect R) Slot(ObjectAtlasStage.Mapping m) => (m.Diffuse, m.Normal, m.Rect);
+        Assert.Equal(Slot(run1.Mappings![m1.Parts[0].Material.Key]), Slot(runSame.Mappings![m1.Parts[0].Material.Key]));
+
+        // Adding a new material on a max-sized page (or pinned page with free Skyline space) preserves existing rects & page stem!
+        var m2 = new LodMesh { Path = "m2", Parts = [TextureFixture.Card("c", @"textures\red.dds")] };
+        var runAppend = ObjectAtlasStage.Build([m1, m2], assets, f.Output, cellSize: 256, maxPageSize: 4096);
+        Assert.Equal(3, runAppend.Report.PackedMaterials);
+        Assert.Equal(Slot(run1.Mappings[m1.Parts[0].Material.Key]), Slot(runAppend.Mappings![m1.Parts[0].Material.Key]));
+        Assert.Equal(Slot(run1.Mappings[m1.Parts[1].Material.Key]), Slot(runAppend.Mappings[m1.Parts[1].Material.Key]));
     }
 
     [Fact]
