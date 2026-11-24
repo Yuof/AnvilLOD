@@ -859,7 +859,7 @@ namespace PenguLOD
 							newMat->CopyMembers(origMat);
 							newMat->ClearTextures();
 							RE::NiPointer<RE::BSTextureSet> texPtr(newTexSet);
-							newMat->OnLoadTextureSet(0, texPtr);
+							newMat->OnLoadTextureSet(0, texPtr.get());
 							clonedProp->SetMaterial(newMat, true);
 							clonedProp->SetupGeometry(geom);
 							clonedProp->FinishSetupGeometry(geom);
