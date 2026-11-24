@@ -8,24 +8,24 @@ namespace PenguLOD.Plugins;
 /// <summary>
 /// Writes <c>SKSE\Plugins\PenguLOD\PenguLOD.dyn</c>, the data file the PenguLOD SKSE plugin reads at startup.
 /// <code>
-/// char[4] "PLDY", u32 version (2; version 1 had no grid objects)
+/// char[4] "PLDY", u32 version (3; v1 had no grid objects, v2 had a single mesh index per entry)
 /// u32 stringCount, then per string: u16 byteLength + UTF-8 bytes   (plugin names and mesh paths)
-/// u32 entryCount, then per entry (60 bytes):
+/// u32 entryCount, then per entry (68 bytes in v3; 60 bytes in v1-v2):
 ///   u32 refPlugin (string index), u32 refLocalId,
 ///   u32 worldspacePlugin (string index), u32 worldspaceLocalId,
-///   u32 mesh (string index, relative to Data\meshes), f32 pos[3], f32 rot[3] (radians), f32 scale,
+///   u32 mesh (LOD4 / primary string index, relative to Data\meshes),
+///   u32 mesh8 (v3: LOD8 string index, 0xFFFFFFFF = same / absent),
+///   u32 mesh16 (v3: LOD16 string index, 0xFFFFFFFF = same / absent),
+///   f32 pos[3], f32 rot[3] (radians), f32 scale,
 ///   u32 parentPlugin (string index, 0xFFFFFFFF = none), u32 parentLocalId,
-///   u32 flags (1 = enable state opposite of parent, 2 = initially disabled,
-///              4 = grid object: water / waterfall / fire / windmill, always dynamic and animated,
-///              8 = near grid (drawn only near the loaded cells), 16 = never fade (drawn at any distance),
-///              32 = window glow mesh: lit by the hour (night only) instead of always on,
-///              64 = city stand-in (ChildworldMatches): hidden inside the loaded cells even while the player is in the city's own worldspace, where the real object is)
+///   u32 flags
 /// </code>
 /// </summary>
 public static class DynamicLodWriter
 {
     public const string RelativePath = "SKSE\\Plugins\\PenguLOD\\PenguLOD.dyn";
-    public const uint Version = 2;
+    public const uint Version = 3;
+    public const uint NoneIndex = 0xFFFF_FFFFu;
 
     /// <param name="meshMap">Optional replacements for mesh paths (relative to Data\meshes, case-insensitive), e.g. water stand-ins.</param>
     public static int Write(string outputFolder, IReadOnlyList<DynamicLodReference> refs, IReadOnlyDictionary<string, string>? meshMap = null)
@@ -43,18 +43,37 @@ public static class DynamicLodWriter
             return i;
         }
 
-        var entries = new List<(uint P, uint Id, uint WP, uint WId, uint Mesh, LodReference R, DynamicLodReference D)>();
+        string? CleanMesh(string? m)
+        {
+            if (string.IsNullOrEmpty(m) || m.StartsWith('~')) return null;
+            m = ShipLodModels.StockMesh(m);
+            var rel = GamePath.Normalize(m);
+            if (rel.StartsWith("meshes\\", StringComparison.Ordinal)) rel = rel["meshes\\".Length..];
+            if (meshMap is not null && meshMap.TryGetValue(rel, out var replacement)) rel = replacement;
+            return rel;
+        }
+
+        var entries = new List<(uint P, uint Id, uint WP, uint WId, uint Mesh, uint Mesh8, uint Mesh16, LodReference R, DynamicLodReference D)>();
         foreach (var d in refs.OrderBy(d => d.Ref.FormKey, StringComparer.Ordinal))
         {
             var r = d.Ref;
-            var mesh = r.Meshes.Lod4 ?? r.Meshes.Lod8 ?? r.Meshes.Lod16 ?? r.Meshes.Lod32;
-            if (string.IsNullOrEmpty(mesh)) continue;
-            mesh = PenguLOD.Core.Lod.ShipLodModels.StockMesh(mesh);
-            var rel = GamePath.Normalize(mesh);
-            if (rel.StartsWith("meshes\\", StringComparison.Ordinal)) rel = rel["meshes\\".Length..];
-            if (meshMap is not null && meshMap.TryGetValue(rel, out var replacement)) rel = replacement;
+            var m4 = CleanMesh(r.Meshes.Lod4);
+            var m8 = CleanMesh(r.Meshes.Lod8);
+            var m16 = CleanMesh(r.Meshes.Lod16);
+            var m32 = CleanMesh(r.Meshes.Lod32);
+            var primary = m4 ?? m8 ?? m16 ?? m32;
+            if (string.IsNullOrEmpty(primary)) continue;
+
+            uint pIdx = Str(d.RefPlugin);
+            uint wpIdx = Str(d.WorldspacePlugin);
+            uint meshIdx = Str(primary);
+            uint mesh8Idx = !d.IsGridObject && !d.Glow && m8 is not null && !string.Equals(m8, primary, StringComparison.OrdinalIgnoreCase)
+                ? Str(m8) : NoneIndex;
+            string effective8 = mesh8Idx != NoneIndex ? m8! : primary;
+            uint mesh16Idx = !d.IsGridObject && !d.Glow && m16 is not null && !string.Equals(m16, effective8, StringComparison.OrdinalIgnoreCase)
+                ? Str(m16) : NoneIndex;
             if (d.ParentPlugin is { } parentPlugin) Str(parentPlugin);
-            entries.Add((Str(d.RefPlugin), d.RefLocalId, Str(d.WorldspacePlugin), d.WorldspaceLocalId, Str(rel), r, d));
+            entries.Add((pIdx, d.RefLocalId, wpIdx, d.WorldspaceLocalId, meshIdx, mesh8Idx, mesh16Idx, r, d));
         }
 
         uint Str2(string s) => index[s];
@@ -76,18 +95,18 @@ public static class DynamicLodWriter
             w.Write((uint)entries.Count);
             foreach (var e in entries)
             {
-                w.Write(e.P); w.Write(e.Id); w.Write(e.WP); w.Write(e.WId); w.Write(e.Mesh);
+                w.Write(e.P); w.Write(e.Id); w.Write(e.WP); w.Write(e.WId);
+                w.Write(e.Mesh); w.Write(e.Mesh8); w.Write(e.Mesh16);
                 w.Write(e.R.Position.X); w.Write(e.R.Position.Y); w.Write(e.R.Position.Z);
                 w.Write(e.R.RotationRadians.X); w.Write(e.R.RotationRadians.Y); w.Write(e.R.RotationRadians.Z);
                 w.Write(e.R.Scale);
-                w.Write(e.D.ParentPlugin is { } pp ? Str2(pp) : 0xFFFF_FFFFu);
+                w.Write(e.D.ParentPlugin is { } pp ? Str2(pp) : NoneIndex);
                 w.Write(e.D.ParentLocalId);
                 w.Write(Flags(e.D));
             }
         }
         File.Move(path + ".tmp", path, overwrite: true);
 
-        // Default settings for the SKSE plugin, only if the user doesn't have their own yet.
         var ini = Path.Combine(outputFolder, "SKSE", "Plugins", "PenguLOD.ini");
         if (!File.Exists(ini))
             File.WriteAllText(ini, DefaultIni);
@@ -96,7 +115,7 @@ public static class DynamicLodWriter
 
     public static uint Flags(DynamicLodReference d) =>
         (d.ParentOpposite ? 1u : 0u) | (d.InitiallyDisabled ? 2u : 0u)
-        | (d.IsGridObject ? 4u : 0u) | (d.Grid == DynamicGrid.Near ? 8u : 0u) | (d.Grid == DynamicGrid.NeverFade ? 16u : 0u)
+        | (d.Grid != DynamicGrid.None ? 4u : 0u) | (d.Grid == DynamicGrid.Near ? 8u : 0u) | (d.Grid == DynamicGrid.NeverFade ? 16u : 0u)
         | (d.Glow ? 32u : 0u) | (d.StandIn ? 64u : 0u);
 
     public const string DefaultIni = """

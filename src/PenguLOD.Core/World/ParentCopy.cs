@@ -1,4 +1,5 @@
 using System.Numerics;
+using PenguLOD.Core.Lod;
 
 namespace PenguLOD.Core.World;
 
@@ -18,7 +19,8 @@ public sealed record ParentCopy(
     float Scale,
     int CellX, int CellY,                   // the parent cell the reference is in
     bool ChildCellExists,                   // the child worldspace has a cell at these coordinates
-    bool HasAlternateTextures);             // the base record swaps textures (snow / moss / tundra variants): the SKSE copy shows the default ones
+    bool HasAlternateTextures,              // the base record swaps textures (snow / moss / tundra variants)
+    IReadOnlyList<AltTexture>? AlternateTextures = null);
 
 /// <summary>What the Parent &gt; Child pass found and why it left things out, for the log and the report.</summary>
 public sealed record ParentCopyStats(

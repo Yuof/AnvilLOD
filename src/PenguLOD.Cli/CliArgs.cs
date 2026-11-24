@@ -36,9 +36,9 @@ public sealed class CliArgs
         F("no-grid-objects"), F("glow-windows"), F("parent-copies"), F("no-match-textures"), F("no-grass"), F("water-standins"),
         F("seasons"), F("seasons-strict"), V("only-seasons"), V("skse-dll"), V("esl-range"), F("native-grid-objects"), F("native-effects"), F("no-cs-grass"), F("cs-grass-only"), F("no-animated-ships"),
         F("no-detailed-ships"), V("ice-inset"), F("no-mountain-fit"), V("mountain-inset"), V("object-inset"), V("snow-cover"), V("snow-shader"),
-        V("map-objects"), V("grass-density"), V("grass-top"), V("grass-bottom"), V("tree-brightness"), V("object-brightness"),
-        F("occlusion"), V("occlusion-clearance"), V("occlusion-mode"), P("occlusion-folder"), F("object-atlas"), V("atlas-cell"),
-        F("optimize-object-textures"), V("object-texture-size"), F("auto-objects"), V("object-near-budget"), V("object-middle-budget"),
+        V("map-objects"), V("grass-density"), V("grass-top"), V("grass-bottom"), V("grass-max-level"), V("grass-tiers"), V("tree-brightness"), V("object-brightness"),
+        F("occlusion"), V("occlusion-clearance"), V("occlusion-mode"), P("occlusion-folder"), F("object-atlas"), F("no-object-atlas"), V("atlas-cell"), V("atlas-page"),
+        F("adaptive-quality"), F("optimize-object-textures"), V("object-texture-size"), F("auto-objects"), V("object-near-budget"), V("object-middle-budget"),
         V("object-far-budget"), V("object-min-size"), V("object-detail"), F("large-refs"), F("large-refs-no-esl"),
         F("pbr-lod"), V("pbr-lod-brightness"), V("pbr-lod-size"), F("pbr-waterfalls"), F("underside"), V("underside-detail"),
         // Trees.

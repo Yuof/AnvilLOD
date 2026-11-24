@@ -68,7 +68,7 @@ internal static class SeasonalAssets
     /// <param name="missingBillboard">Called with a swap target that has no billboard; the tree then keeps its base LOD for
     /// the season, as an unresolved swap does. Null (strict seasons): a missing billboard stops generation.</param>
     public static TreeReference SwapTree(GameContext game, AssetIndex assets, TreeReference tree, IReadOnlyDictionary<FormKey,FormKey> swaps, Tree3DSettings settings,
-        Action<FormKey>? missingBillboard = null)
+        Action<FormKey>? missingBillboard = null, LodMeshIndex? lodIndex = null, IReadOnlyDictionary<string, ParallaxGenDiff.Entry>? pgDiff = null)
     {
         if (tree.BaseFormKey is null || !swaps.TryGetValue(FormKey.Factory(tree.BaseFormKey),out var target)
             || target.ToString().Equals(tree.BaseFormKey,StringComparison.OrdinalIgnoreCase)) return tree;
@@ -96,14 +96,20 @@ internal static class SeasonalAssets
             missingBillboard(target); return tree;
         }
         string? lod = null; bool native = false;
-        if (settings.Enabled && tree.Model3D is not null)
+        if (settings.Enabled)
         {
-            string named = path[..^4] + "_lod_0.nif";
+            string? indexed = lodIndex?.Find(path)?.FirstOrDefault(p => !string.IsNullOrEmpty(p));
+            string named = indexed ?? (path[..^4] + "_lod_0.nif");
             if (settings.PreferNamedLod && assets.Exists(named)) lod = named;
             if (lod is null && assets.TryOpen(path,out var stream))
             {
-                using(stream) { using var bytes = new MemoryStream();stream.CopyTo(bytes);
-                    lod = Tree3DModels.Resolve(path,Tree3DModels.Crc32(bytes.ToArray()),settings.PlainNameFallback,assets.Exists)?.Path; }
+                using(stream)
+                {
+                    using var bytes = new MemoryStream();
+                    stream.CopyTo(bytes);
+                    var crcs = ParallaxGenDiff.LodCrcs(pgDiff, path, Tree3DModels.Crc32(bytes.ToArray()));
+                    lod = Tree3DModels.Resolve(path, crcs, settings.PlainNameFallback, assets.Exists)?.Path;
+                }
             }
             if (lod is null && settings.PlainNameFallback && assets.Exists(named)) lod = named;
             if (lod is null && settings.GenerateMissing

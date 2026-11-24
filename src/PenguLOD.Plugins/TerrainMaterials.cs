@@ -141,10 +141,11 @@ internal sealed class TerrainTextures(IAssetSource assets, CancellationToken ct)
 /// One worker's view of the landscape materials: which files make up a material, and the texture levels the current tile
 /// reads. Not shared between threads; <see cref="Fork"/> gives another worker its own over the same decoded textures.
 /// </summary>
-internal sealed class TerrainMaterials(IAssetSource assets, TerrainMaterialSettings settings, CancellationToken ct, TerrainTextures? textures = null)
+internal sealed class TerrainMaterials(IAssetSource assets, TerrainMaterialSettings settings, CancellationToken ct, TerrainTextures? textures = null, PenguLOD.Core.Lod.TruePbrCatalog? pbrCatalog = null)
 {
-    private sealed record Material(string Diffuse, string? Normal, string? Ao, bool Pbr);
+    private sealed record Material(string Diffuse, string? Normal, string? Ao, bool Pbr, Vector3 ColorScale);
     private readonly TerrainTextures _textures = textures ?? new(assets, ct);
+    private readonly PenguLOD.Core.Lod.TruePbrCatalog _pbrCatalog = pbrCatalog ?? PenguLOD.Core.Lod.TruePbrCatalog.Load(assets, (assets as AssetIndex)?.EnumeratePaths("pbrjsons\\"));
     private readonly Dictionary<(string, string?, string?), Material> _materials = [];
     private readonly Dictionary<(string, bool, float), TerrainTextures.Image> _samples = [];
     private readonly HashSet<string> _missing = new(StringComparer.Ordinal);
@@ -152,7 +153,7 @@ internal sealed class TerrainMaterials(IAssetSource assets, TerrainMaterialSetti
     private readonly HashSet<string> _warnings = new(StringComparer.Ordinal);
     /// <summary>How many times a texture file was opened and decoded, by this view and the others over the same textures.</summary>
     internal int Loads => _textures.Loads;
-    internal TerrainMaterials Fork() => new(assets, settings, ct, _textures);
+    internal TerrainMaterials Fork() => new(assets, settings, ct, _textures, _pbrCatalog);
     /// <summary>Forgets what the last tile used, so <see cref="Reports"/> and <see cref="Warnings"/> describe one tile and no
     /// texture level is held longer than the tile that read it.</summary>
     internal void Reset() { _materials.Clear(); _samples.Clear(); _missing.Clear(); _available.Clear(); _warnings.Clear(); }
@@ -174,8 +175,9 @@ internal sealed class TerrainMaterials(IAssetSource assets, TerrainMaterialSetti
                 ao = diffuse[..^4] + "_rmaos.dds";
             }
             if (pbr && ao is null) ao = diffuse[..^4] + "_rmaos.dds";
+            var rule = pbr ? _pbrCatalog.Match(diffuse) : null;
             material = new(diffuse, settings.NormalStrength > 0 ? normal : null,
-                pbr && settings.PbrAlbedo && settings.OcclusionStrength > 0 ? ao : null, pbr);
+                pbr && settings.PbrAlbedo && settings.OcclusionStrength > 0 ? ao : null, pbr, rule?.ColorScale ?? Vector3.One);
             _materials[key] = material;
         }
         Vector3 color = Read(material.Diffuse, u, v, footprint, color: true);
@@ -190,7 +192,8 @@ internal sealed class TerrainMaterials(IAssetSource assets, TerrainMaterialSetti
         {
             float occlusion = Optional(material.Ao, "ambient occlusion", out var aoPath)
                 ? Read(aoPath, u, v, footprint, color: false).Z : 1;
-            color = new Vector3(MathF.Pow(color.X, settings.PbrGamma), MathF.Pow(color.Y, settings.PbrGamma), MathF.Pow(color.Z, settings.PbrGamma))
+            color *= material.ColorScale;
+            color = new Vector3(MathF.Pow(Math.Max(0f, color.X), settings.PbrGamma), MathF.Pow(Math.Max(0f, color.Y), settings.PbrGamma), MathF.Pow(Math.Max(0f, color.Z), settings.PbrGamma))
                 * (settings.PbrScale * (1 - settings.OcclusionStrength * (1 - occlusion)));
         }
         return new(color, detail);

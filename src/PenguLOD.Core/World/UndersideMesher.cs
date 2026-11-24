@@ -38,14 +38,14 @@ public static class UndersideMesher
     }
 
     /// <summary>The underside of the LOD32 block whose south-west cell is (blockX, blockY), or null where it has no terrain.</summary>
-    public static Shape? Build(TerrainHeights terrain, string worldspace, int blockX, int blockY, int step = DefaultStep)
+    public static Shape? Build(TerrainHeights terrain, string worldspace, int blockX, int blockY, int step = DefaultStep, Func<float, float, float?>? fallbackHeight = null)
     {
         if (!IsValidStep(step)) throw new ArgumentOutOfRangeException(nameof(step), "Step must be 8, 16, 32, 64 or 128.");
         int n = BlockVertices / step;      // quads per side
         int stride = n + 2;                // blocks run from -1 to n so that border vertices see their outside neighbours
         int gx0 = blockX * (TerrainHeights.Grid - 1), gy0 = blockY * (TerrainHeights.Grid - 1);
 
-        // Lowest LAND height inside each block (edges included), NaN where there is none.
+        // Lowest LAND (or fallback BTR) height inside each block (edges included), NaN where there is none.
         var low = new float[stride * stride];
         for (int bj = -1; bj <= n; bj++)
             for (int bi = -1; bi <= n; bi++)
@@ -53,8 +53,14 @@ public static class UndersideMesher
                 float m = float.NaN;
                 for (int y = 0; y <= step; y++)
                     for (int x = 0; x <= step; x++)
-                        if (terrain.VertexAt(worldspace, gx0 + bi * step + x, gy0 + bj * step + y) is { } h && !(h >= m))
+                    {
+                        int gx = gx0 + bi * step + x, gy = gy0 + bj * step + y;
+                        float? vh = terrain.VertexAt(worldspace, gx, gy);
+                        if (vh is null && fallbackHeight is not null && (x == 0 || x == step || (x & 3) == 0) && (y == 0 || y == step || (y & 3) == 0))
+                            vh = fallbackHeight(gx * 128f, gy * 128f);
+                        if (vh is { } h && float.IsFinite(h) && !(h >= m))
                             m = h;
+                    }
                 low[(bj + 1) * stride + bi + 1] = m;
             }
 

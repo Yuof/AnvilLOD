@@ -43,6 +43,35 @@ public sealed class Mo2Profile
         return folders;
     }
 
+    /// <summary>
+    /// Game-root folders in priority order (highest first): <c>&lt;mod&gt;/Root</c> from Overwrite and enabled mods (MO2 Root Builder),
+    /// followed by <see cref="Mo2Instance.GamePath"/>.
+    /// </summary>
+    public IReadOnlyList<string> GameRootFolders()
+    {
+        var roots = new List<string>();
+        var modsLowToHigh = EnabledModFolders();
+        for (int i = modsLowToHigh.Count - 1; i >= 0; i--)
+        {
+            foreach (var rootSub in GamePath.ResolveAllExisting(modsLowToHigh[i], "Root").Reverse())
+                if (Directory.Exists(rootSub) && !rootSub.EndsWith(".mohidden", StringComparison.OrdinalIgnoreCase))
+                    roots.Add(rootSub);
+        }
+        roots.Add(Instance.GamePath);
+        return roots;
+    }
+
+    /// <summary>Resolves a game-root file (<c>SkyrimSE.exe</c>, <c>Skyrim.ccc</c>, <c>Skyrim_Default.ini</c>) across Root Builder layers and the game folder.</summary>
+    public string? ResolveGameRootFile(string fileName)
+    {
+        foreach (var rootDir in GameRootFolders())
+        {
+            if (GamePath.ResolveExisting(rootDir, fileName) is { } found && File.Exists(found) && !File.Exists(found + ".mohidden"))
+                return found;
+        }
+        return null;
+    }
+
     /// <summary>The Amethyst file rules of one layer (a mod folder or Overwrite), or null when its files land as they are.</summary>
     public AmethystLayerRules? LayerRules(string layer)
     {
@@ -56,6 +85,8 @@ public sealed class Mo2Profile
 
     private static readonly string[] BaseMasters =
         ["Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm"];
+    private static readonly string[] VrBaseMasters =
+        ["Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm"];
 
     private Mo2Profile(Mo2Instance instance, string name, string folder)
     {
@@ -80,7 +111,7 @@ public sealed class Mo2Profile
             EnabledModsLowToHigh = ReadModList(Path.Combine(folder, "modlist.txt"));
             UsesLocalInis = ReadLocalSettingsFlag(Path.Combine(folder, "settings.ini"));
         }
-        EnabledPlugins = ReadPlugins(folder, instance.GamePath, out var explicitSet);
+        EnabledPlugins = ReadPlugins(folder, instance.GamePath, out var explicitSet, ResolveGameRootFile);
         ExplicitlyEnabled = explicitSet;
     }
 
@@ -134,7 +165,7 @@ public sealed class Mo2Profile
     /// Order comes from loadorder.txt (it includes base masters and CC); "enabled" comes from
     /// plugins.txt ("*" prefix) plus the implicitly-active base masters and Skyrim.ccc entries.
     /// </summary>
-    internal static List<string> ReadPlugins(string profileFolder, string gamePath, out HashSet<string> explicitlyEnabled)
+    internal static List<string> ReadPlugins(string profileFolder, string gamePath, out HashSet<string> explicitlyEnabled, Func<string, string?>? rootResolver = null)
     {
         var enabled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pluginsTxtOrder = new List<string>();
@@ -151,12 +182,18 @@ public sealed class Mo2Profile
             }
         }
 
+        string? FindRoot(string name) => rootResolver is not null ? rootResolver(name) : GamePath.ResolveExisting(gamePath, name);
+        bool isVr = FindRoot("SkyrimVR.exe") is not null;
+        var baseMasters = isVr ? VrBaseMasters : BaseMasters;
         explicitlyEnabled = new HashSet<string>(enabled, StringComparer.OrdinalIgnoreCase);
-        foreach (var m in BaseMasters) enabled.Add(m);
-        var ccc = Path.Combine(gamePath, "Skyrim.ccc");
-        if (File.Exists(ccc))
+        foreach (var m in baseMasters) enabled.Add(m);
+        var cccPlugins = new List<string>();
+        if (!isVr && FindRoot("Skyrim.ccc") is { } ccc && File.Exists(ccc))
             foreach (var l in File.ReadLines(ccc).Select(l => l.Trim()).Where(l => l.Length > 0))
+            {
                 enabled.Add(l);
+                cccPlugins.Add(l);
+            }
 
         var result = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -173,7 +210,8 @@ public sealed class Mo2Profile
         }
         else
         {
-            foreach (var m in BaseMasters) if (seen.Add(m)) result.Add(m);
+            foreach (var m in baseMasters) if (seen.Add(m)) result.Add(m);
+            foreach (var c in cccPlugins) if (seen.Add(c)) result.Add(c);
         }
 
         // Anything enabled in plugins.txt but missing from loadorder.txt goes at the end, in plugins.txt order.
@@ -204,7 +242,7 @@ public sealed class Mo2Profile
             candidates.Add(Path.Combine(docs, "SkyrimCustom.ini"));
             candidates.Add(Path.Combine(docs, "Skyrim.ini"));
         }
-        candidates.Add(Path.Combine(Instance.GamePath, "Skyrim_Default.ini"));
+        candidates.Add(ResolveGameRootFile("Skyrim_Default.ini") ?? Path.Combine(Instance.GamePath, "Skyrim_Default.ini"));
         if (overrideIni is not null) candidates.Insert(0, overrideIni);
         return candidates;
     }

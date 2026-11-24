@@ -49,6 +49,7 @@ public enum LodReferenceFlags
     HasEnableParent = 1 << 2,
     BaseHasDistantLodFlag = 1 << 3,
     IsFullLod = 1 << 4,
+    BuggedLargeRef = 1 << 5,
 }
 
 /// <summary>

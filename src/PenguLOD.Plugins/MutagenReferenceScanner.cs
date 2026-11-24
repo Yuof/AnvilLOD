@@ -93,6 +93,7 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
         var baseObjectRemovals = BaseObjectRemovals.Load(_game, _assets, ct, progress);
         RemovedByBaseObjectSwapper = baseObjectRemovals.Excluded;
         _outdoorBases.Clear(); _outdoorBases.UnionWith(baseObjectRemovals.SwapTargets);
+        var questSwitched = options.DynamicLod ? QuestSwitchScanner.Scan(_game, ct) : [];
         var sw = Stopwatch.StartNew();
         var priority = _game.LoadOrder.PriorityOrder;
 
@@ -118,6 +119,7 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
             }
         }
         progress?.Report($"Worldspaces with LOD settings: {grids.Count}");
+        var buggedLargeRefs = LargeReferenceStage.FindBuggedLargeReferences(_game, grids.Keys);
 
         // 2) Base objects -> model + MNAM (cached), then rules + named-LOD index -> mesh per level
         var linkCache = _game.LinkCache;
@@ -254,6 +256,42 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
         }
         bool IsTree(FormKey fk) => linkCache.TryResolve<ITreeGetter>(fk, out _);
         var isTreeCache = new ConcurrentDictionary<FormKey, bool>();
+        var objBillboardCache = new ConcurrentDictionary<(FormKey BaseKey, string ModelPath), TreeBillboard?>();
+        TreeBillboardSynth? objSynth = options.RenderTreeBillboards ? new TreeBillboardSynth(_assets) : null;
+        TreeBillboard? ReadObjectBillboard(FormKey fk, string modelPath)
+        {
+            var stem = Path.GetFileNameWithoutExtension(modelPath.Replace('\\', '/')).ToLowerInvariant();
+            var name = $"{stem}_{fk.ID:x8}";
+            var folders = new List<string>();
+            foreach (var octx in linkCache.ResolveAllContexts<IPlaceableObject, IPlaceableObjectGetter>(fk))
+            {
+                var f = GamePath.Join("textures", "terrain", "lodgen", octx.ModKey.FileName.String.ToLowerInvariant());
+                if (!folders.Contains(f)) folders.Add(f);
+            }
+            var origin = GamePath.Join("textures", "terrain", "lodgen", fk.ModKey.FileName.String.ToLowerInvariant());
+            if (!folders.Contains(origin)) folders.Add(origin);
+            TreeBillboard? FindObj()
+            {
+                foreach (var folder in folders)
+                    foreach (var (dds, firstView) in new[] { (name + ".dds", false), (name + "_1.dds", true) })
+                    {
+                        var ddsPath = GamePath.Join(folder, dds);
+                        if (!_assets.Exists(ddsPath) || !_assets.TryOpen(GamePath.Join(folder, name + ".txt"), out var st)) continue;
+                        using var reader = new StreamReader(st);
+                        var bb = TreeBillboard.Parse(ddsPath, reader.ReadToEnd(), firstView);
+                        if (bb is not null) return bb;
+                    }
+                return null;
+            }
+            var found = FindObj();
+            if (found is null && objSynth is not null
+                && objSynth.TryRender(modelPath, fk.ModKey.FileName.String.ToLowerInvariant(), name, out _, minHeight: 32f))
+            {
+                Interlocked.Increment(ref renderedTrees);
+                found = FindObj();
+            }
+            return found;
+        }
 
         // 3D tree LOD: the model DynDOLOD would use for this tree, found by the CRC32 of the tree's mesh file
         // (or, when asked, by the plain tree name).
@@ -356,6 +394,9 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
                     navmeshCells.Add(cellCtx.Record.FormKey);
         }
         var copiedRefs = new HashSet<LodReference>(ReferenceEqualityComparer.Instance);
+        var keepBothRefs = new HashSet<LodReference>(ReferenceEqualityComparer.Instance);
+        var forceDynamic = new HashSet<LodReference>(ReferenceEqualityComparer.Instance);
+        var childCellsByParent = new Dictionary<string, HashSet<(int X, int Y)>>(StringComparer.OrdinalIgnoreCase);
         var baseEdid = new ConcurrentDictionary<FormKey, string?>();
         var copiedTrees = new List<TreeReference>();
         long childCopyIgnored = 0;
@@ -506,9 +547,19 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
                     var res = resolver.HasFormIdRule(refKey)
                         ? resolver.Resolve(refKey, info.FormIdKey, info.ModelPath, info.Mnam)
                         : resolved.GetOrAdd(baseKey.Value, _ => resolver.Resolve(null, info.FormIdKey, info.ModelPath, info.Mnam));
+                    if (res.Rule.Reference is ReferenceAction.Disable or ReferenceAction.Delete or ReferenceAction.Ignore or ReferenceAction.KeepChild) { pcIgnored++; continue; }
                     if (!res.Meshes.HasAny) { pcNoLod++; continue; }
                     model = info.ModelPath;
                     alt = info.Variant is { Alternates.Count: > 0 };
+                    var altList = alt ? info.Variant!.Alternates : null;
+                    if (IsFlatModel(model)) { pcFlat++; continue; }
+
+                    parentCopies.Add(new ParentCopy(t.Config.Child, t.WorldKey.ModKey.FileName.String, t.WorldKey.ID,
+                        r.FormKey.ModKey.FileName.String, r.FormKey.ID, edid, model,
+                        new Vector3(p.Position.X, p.Position.Y, p.Position.Z), new Vector3(p.Rotation.X, p.Rotation.Y, p.Rotation.Z),
+                        r.Scale ?? 1f, cx, cy, childCell, alt, altList));
+                    parentCopiesByChild[t.Config.Child] = parentCopiesByChild.GetValueOrDefault(t.Config.Child) + 1;
+                    continue;
                 }
                 if (model is null) { pcNoLod++; continue; }
                 if (IsFlatModel(model)) { pcFlat++; continue; }
@@ -555,8 +606,22 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
 
             void Handle(string wsId, ChildWorldCopy? copy)
             {
-                var baseKey = r.Base.FormKeyNullable;
-                if (baseKey is null || baseKey.Value.IsNull) return;
+                var rawBaseKey = r.Base.FormKeyNullable;
+                if (rawBaseKey is null || rawBaseKey.Value.IsNull || r.Placement is not { } rawP) return;
+                var cellFormKey = ctx.TryGetParentSimpleContext<ICellGetter>(out var hCellCtx) ? hCellCtx.Record.FormKey : (FormKey?)null;
+                var (effBase, effPos, effRot, effScale) = baseObjectRemovals.ResolvePlacement(
+                    r, rawBaseKey.Value, wsId, cellFormKey,
+                    new Vector3(rawP.Position.X, rawP.Position.Y, rawP.Position.Z),
+                    new Vector3(rawP.Rotation.X, rawP.Rotation.Y, rawP.Rotation.Z),
+                    r.Scale ?? 1f);
+                if (effBase != rawBaseKey.Value && isTreeCache.GetOrAdd(effBase, IsTree)
+                    && treeCache.GetOrAdd(effBase, ReadTree) is null && isTreeCache.GetOrAdd(rawBaseKey.Value, IsTree))
+                {
+                    // Keep the source tree's billboard rather than dropping the tree when a BOS target tree lacks billboards.
+                    effBase = rawBaseKey.Value;
+                }
+                _outdoorBases.Add(effBase);
+                FormKey? baseKey = effBase;
                 if (copy is not null && copy.IgnoresEditorId(baseEdid.GetOrAdd(baseKey.Value, k => linkCache.TryResolveAny(k, out var b) ? b.EditorID : null)))
                 { childCopyIgnored++; return; }
 
@@ -565,12 +630,8 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
                     var raw0 = r.MajorRecordFlagsRaw;
                     if ((raw0 & FlagInitiallyDisabled) != 0 && !options.IncludeInitiallyDisabled) { skippedDisabled++; return; }
                     bool parented = r.EnableParent is { } tep && !tep.Reference.IsNull;
-                    // Child world copies are drawn over the city while you're inside it (the engine doesn't hide the
-                    // parent's LOD under loaded child cells), so anything a quest can switch off must stay out:
-                    // Legacy of the Dragonborn's museum trees hang off build-stage markers, for example.
                     if (copy is not null && (parented || (raw0 & FlagInitiallyDisabled) != 0)) { childCopyIgnored++; return; }
                     if (parented && !options.IncludeEnableParented) { skippedDisabled++; return; }
-                    if (r.Placement is not { } tp) return;
 
                     var bb = treeCache.GetOrAdd(baseKey.Value, ReadTree);
                     if (bb is null)
@@ -585,7 +646,7 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
                     }
                     var m3 = tree3d is null ? null : tree3dCache.GetOrAdd(baseKey.Value, Find3D);
                     var tr = new TreeReference(r.FormKey.ToString(), wsId,
-                        new Vector3(tp.Position.X, tp.Position.Y, tp.Position.Z), tp.Rotation.Z, r.Scale ?? 1f,
+                        effPos, effRot.Z, effScale,
                         runtimeIds.Resolve(r.FormKey), bb, ObjectLod: copy is not null,
                         Model3D: m3?.Path, Model3DByName: m3?.Kind is Tree3DModels.MatchKind.PlainName or Tree3DModels.MatchKind.NamedLod, Model3DGenerated: m3?.Kind is Tree3DModels.MatchKind.Native, BaseFormKey: baseKey.Value.ToString(), MaterialVariant: TreeVariant(baseKey.Value));
                     if (copy is not null)
@@ -609,10 +670,33 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
                 var res = resolver.HasFormIdRule(refKey)
                     ? resolver.Resolve(refKey, info.FormIdKey, info.ModelPath, info.Mnam)
                     : resolved.GetOrAdd(baseKey.Value, _ => resolver.Resolve(null, info.FormIdKey, info.ModelPath, info.Mnam));
+
+                if (res.Rule.Reference is ReferenceAction.Disable or ReferenceAction.Delete or ReferenceAction.Ignore) return;
+                if (copy is not null && res.Rule.Reference == ReferenceAction.KeepParent) { childCopyIgnored++; return; }
+                if (copy is null && res.Rule.Reference == ReferenceAction.KeepChild)
+                {
+                    var rc = CellCoord.FromWorld(effPos.X, effPos.Y);
+                    if (parentCopyTargets.TryGetValue(wsId, out var kcTargets) && kcTargets.Any(t => t.Cells.Contains((rc.X, rc.Y)))) return;
+                }
+
+                var effectiveMeshes = res.Meshes;
+                if (res.Rule.HasBillboardChoice || (res.Rule.ForceTree && !effectiveMeshes.HasAny))
+                {
+                    if (objBillboardCache.GetOrAdd((baseKey.Value, info.ModelPath), k => ReadObjectBillboard(k.BaseKey, k.ModelPath)) is { } objBb)
+                    {
+                        bool forceAllTree = res.Rule.ForceTree && !effectiveMeshes.HasAny && !res.Rule.HasBillboardChoice;
+                        string? m4 = res.Rule.Lod4.Kind == LodChoiceKind.Billboard || forceAllTree ? TreeCardSource.CardPath(objBb.TexturePath, far: false) : effectiveMeshes.Lod4;
+                        string? m8 = res.Rule.Lod8.Kind == LodChoiceKind.Billboard || forceAllTree ? TreeCardSource.CardPath(objBb.TexturePath, far: true) : effectiveMeshes.Lod8;
+                        string? m16 = res.Rule.Lod16.Kind == LodChoiceKind.Billboard ? TreeCardSource.CardPath(objBb.TexturePath, far: true) : effectiveMeshes.Lod16;
+                        string? m32 = res.Rule.Lod32.Kind == LodChoiceKind.Billboard ? TreeCardSource.CardPath(objBb.TexturePath, far: true) : effectiveMeshes.Lod32;
+                        effectiveMeshes = new LodMeshSet(m4, m8, m16, m32);
+                    }
+                }
+
                 // DynDOLOD grid objects (all LOD columns empty, a Grid set): water planes, waterfalls, fires, windmills,
                 // ships. No static LOD; the SKSE plugin draws them beyond the loaded cells, with their animations.
                 string? gridMesh = null;
-                if (!res.Meshes.HasAny)
+                if (!effectiveMeshes.HasAny)
                 {
                     if (copy is null && options.GridObjects && res.Rule.IsGridObject)
                         gridMesh = gridMeshes.GetOrAdd((baseKey.Value, res.Rule.Grid), _ => LodMeshResolver.GridMesh(info.ModelPath, res.Rule.Grid, Exists, options.PbrWaterfalls ? IsPbrModel : null));
@@ -629,21 +713,19 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
                 if ((raw & FlagInitiallyDisabled) != 0) flags |= LodReferenceFlags.InitiallyDisabled;
                 if ((raw & FlagIsFullLod) != 0) flags |= LodReferenceFlags.IsFullLod;
                 if (r.EnableParent is not null) flags |= LodReferenceFlags.HasEnableParent;
-                if (info.DistantFlag) flags |= LodReferenceFlags.BaseHasDistantLodFlag;
+                if (info.DistantFlag || res.Rule.ForceVwd) flags |= LodReferenceFlags.BaseHasDistantLodFlag;
+                if (copy is null && buggedLargeRefs.Contains(r.FormKey)) flags |= LodReferenceFlags.BuggedLargeRef;
 
-                var p = r.Placement;
-                if (p is null) return;
                 // Same for child world copies of objects: switchable ones would stay visible inside the city.
                 if (copy is not null && (flags.HasFlag(LodReferenceFlags.HasEnableParent) || flags.HasFlag(LodReferenceFlags.InitiallyDisabled)))
                 { childCopyIgnored++; return; }
 
                 // Window glow: the model's <name>glow_lod_N.nif is drawn by the SKSE plugin beyond the loaded cells, lit at night.
-                if (options.GlowWindows && copy is null && p.Position.Z > -29000f && _resolver?.GlowMeshFor(info.ModelPath) is { } glow)
+                if (options.GlowWindows && !res.Rule.NoGlow && copy is null && effPos.Z > -29000f && _resolver?.GlowMeshFor(info.ModelPath) is { } glow)
                 {
                     var glowGrid = glow.Level switch { 0 => DynamicGrid.Near, 1 => DynamicGrid.Far, _ => DynamicGrid.NeverFade };
                     var glowRef = new LodReference(r.FormKey.ToString(), baseKey.Value.ToString(), info.EditorId, wsId, ctx.ModKey.ToString(),
-                        new Vector3(p.Position.X, p.Position.Y, p.Position.Z), new Vector3(p.Rotation.X, p.Rotation.Y, p.Rotation.Z),
-                        r.Scale ?? 1f, new LodMeshSet(glow.Path, null, null, null), flags);
+                        effPos, effRot, effScale, new LodMeshSet(glow.Path, null, null, null), flags);
                     var glowParent = r.EnableParent is { } gpe && !gpe.Reference.IsNull ? gpe.Reference.FormKey : (FormKey?)null;
                     glowWindows.Add(new DynamicLodReference(glowRef,
                         r.FormKey.ModKey.FileName.String, r.FormKey.ID,
@@ -655,10 +737,9 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
 
                 if (gridMesh is not null)
                 {
-                    if (p.Position.Z <= -29000f) return; // "undelete and disable" leftovers
+                    if (effPos.Z <= -29000f) return; // "undelete and disable" leftovers
                     var gref = new LodReference(r.FormKey.ToString(), baseKey.Value.ToString(), info.EditorId, wsId, ctx.ModKey.ToString(),
-                        new Vector3(p.Position.X, p.Position.Y, p.Position.Z), new Vector3(p.Rotation.X, p.Rotation.Y, p.Rotation.Z),
-                        r.Scale ?? 1f, new LodMeshSet(gridMesh, null, null, null), flags);
+                        effPos, effRot, effScale, new LodMeshSet(gridMesh, null, null, null), flags);
                     var gParent = r.EnableParent is { } gep && !gep.Reference.IsNull ? gep.Reference.FormKey : (FormKey?)null;
                     gridObjects.Add(new DynamicLodReference(gref,
                         r.FormKey.ModKey.FileName.String, r.FormKey.ID,
@@ -670,10 +751,13 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
                     return;
                 }
 
-                // Initially disabled refs may be enabled by a script later; with dynamic LOD they go to the controller.
-                // ("Undelete and disable" leftovers sit far below the world and are never enabled, so they're skipped.)
-                bool switchable = copy is null && options.DynamicLod && p.Position.Z > -29000f
-                    && (flags.HasFlag(LodReferenceFlags.InitiallyDisabled) || flags.HasFlag(LodReferenceFlags.HasEnableParent));
+                // Initially disabled refs, enable-parent switchable refs, FlagDynamic rules, and quest/Papyrus-toggled refs go to dynamic LOD.
+                bool hasRealDynamicMesh = (effectiveMeshes.Lod4 is { } dm4 && !dm4.StartsWith('~'))
+                    || (effectiveMeshes.Lod8 is { } dm8 && !dm8.StartsWith('~'))
+                    || (effectiveMeshes.Lod16 is { } dm16 && !dm16.StartsWith('~'));
+                bool scriptSwitched = hasRealDynamicMesh && (res.Rule.ForceDynamic || questSwitched.Contains(r.FormKey) || QuestSwitchScanner.HasToggleScript(r));
+                bool switchable = copy is null && options.DynamicLod && effPos.Z > -29000f && hasRealDynamicMesh
+                    && (flags.HasFlag(LodReferenceFlags.InitiallyDisabled) || flags.HasFlag(LodReferenceFlags.HasEnableParent) || scriptSwitched);
                 if (!switchable)
                 {
                     if (flags.HasFlag(LodReferenceFlags.InitiallyDisabled) && !options.IncludeInitiallyDisabled) { skippedDisabled++; return; }
@@ -686,17 +770,18 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
                     BaseEditorId: info.EditorId,
                     Worldspace: wsId,
                     WinningPlugin: ctx.ModKey.ToString(),
-                    Position: new Vector3(p.Position.X, p.Position.Y, p.Position.Z),
-                    RotationRadians: new Vector3(p.Rotation.X, p.Rotation.Y, p.Rotation.Z),
-                    Scale: r.Scale ?? 1f,
-                    Meshes: res.Meshes,
+                    Position: effPos,
+                    RotationRadians: effRot,
+                    Scale: effScale,
+                    Meshes: effectiveMeshes,
                     Flags: flags,
-                    TextureVariant: res.Meshes.HasAny ? info.Variant?.Id : null,
-                    Shader: info.Shader);
+                    TextureVariant: effectiveMeshes.HasAny ? info.Variant?.Id : null,
+                    Shader: res.Rule.NoMato ? LodShaderKind.None : info.Shader);
                 refs.Add(lodRef);
                 if (copy is not null)
                 {
                     copiedRefs.Add(lodRef);
+                    if (res.Rule.Reference == ReferenceAction.KeepBoth) keepBothRefs.Add(lodRef);
                     if (_childCopies.MatchedParents(refKey) is { Count: > 0 } mp) copyMatches[lodRef] = mp;
                 }
                 else presentKeys.Add(refKey);
@@ -711,6 +796,7 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
                         r.EnableParent?.Flags.HasFlag(EnableParent.Flag.SetEnableStateToOppositeOfParent) ?? false,
                         flags.HasFlag(LodReferenceFlags.InitiallyDisabled));
                     if (flags.HasFlag(LodReferenceFlags.InitiallyDisabled)) initiallyDisabled.Add(lodRef);
+                    if (scriptSwitched) forceDynamic.Add(lodRef);
                 }
             }
         }
@@ -747,8 +833,8 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
                 return false;
             }
             bool StandIn(object c) => copyMatches.TryGetValue(c, out var parents) && parents.Any(presentKeys.Contains);
-            int standIns = copiedRefs.Count(c => StandIn(c)) + copiedTrees.Count(t => StandIn(t));
-            var duplicates = copiedRefs.Where(c => StandIn(c) || Duplicate(c)).ToHashSet(ReferenceEqualityComparer.Instance);
+            int standIns = copiedRefs.Count(c => !keepBothRefs.Contains(c) && StandIn(c)) + copiedTrees.Count(t => StandIn(t));
+            var duplicates = copiedRefs.Where(c => !keepBothRefs.Contains(c) && (StandIn(c) || Duplicate(c))).ToHashSet(ReferenceEqualityComparer.Instance);
             int dup = refs.RemoveAll(duplicates.Contains);
             copiedRefs.ExceptWith(duplicates.Cast<LodReference>());
 
@@ -769,16 +855,15 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
             progress?.Report($"IgnoreWorlds rules: {ignoredByWorldRule:N0} references left out (plugins whose rule files ignore those worldspaces)");
 
         // 4a) Dynamic LOD: refs that are switched while playing go to the SKSE controller instead of static LOD:
-        //     initially disabled refs, refs whose parent chain starts disabled, and "opposite of parent" pairs
-        //     (the usual destroyed/rebuilt switch, e.g. Helgen Reborn). Parented refs that simply start enabled
-        //     and follow their parent stay in static LOD.
+        //     initially disabled refs, refs whose parent chain starts disabled, "opposite of parent" pairs, and
+        //     their intact/enabled counterparts sharing the same switch marker (e.g. Civil War / Helgen pairs).
         var dynamic = new List<DynamicLodReference>();
         if (options.DynamicLod && dynamicCandidates.Count > 0)
         {
             foreach (var (lr, dyn) in dynamicCandidates)
             {
-                bool toggles = initiallyDisabled.Contains(lr)
-                    || (parentOf.TryGetValue(lr, out var fk) && (!states.StartsEnabled(fk) || states.ChainHasOpposite(fk)));
+                bool toggles = forceDynamic.Contains(lr) || initiallyDisabled.Contains(lr)
+                    || (parentOf.TryGetValue(lr, out var fk) && (!states.StartsEnabled(fk) || states.ChainHasOpposite(fk) || states.ChainTouchesSwitchMarker(fk)));
                 if (toggles) dynamic.Add(dyn);
             }
             var moved = dynamic.Select(d => d.Ref).ToHashSet(ReferenceEqualityComparer.Instance);
@@ -854,7 +939,7 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
                 + $"left out: {pcNoLod:N0} without LOD, {pcSwitchable:N0} switchable, {pcIgnored:N0} by the ignore list, {pcNavmesh:N0} in navmesh cells, {pcStandIn:N0} city stand-ins listed in ChildworldMatches, {pcFlat:N0} flat ground pieces (roads)");
         BaseObjectSwaps = baseObjectRemovals.Report;
         if (BaseObjectSwaps.ConfigFiles > 0)
-            progress?.Report($"Base Object Swapper: {BaseObjectSwaps.RemovedReferences.Count:N0} exterior references excluded by invisible-marker swaps from {BaseObjectSwaps.ConfigFiles:N0} configuration files.");
+            progress?.Report($"Base Object Swapper: {BaseObjectSwaps.RemovedReferences.Count:N0} exterior references excluded, {BaseObjectSwaps.SwappedReferences:N0} swapped, and {BaseObjectSwaps.TransformedReferences:N0} transformed across {BaseObjectSwaps.ConfigFiles:N0} configuration files.");
         return new ScanResult(grids, refs, stats, trees, missingBillboards.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase), dynamic,
             options.MatchTextures ? variants.ToDictionary(kv => kv.Key, kv => kv.Value) : null,
             options.ParentCopies ? parentCopies : null,
@@ -868,6 +953,7 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
     private sealed class EnableStates(Mutagen.Bethesda.Plugins.Cache.ILinkCache linkCache)
     {
         private readonly HashSet<FormKey> _disabled = [];
+        private readonly HashSet<FormKey> _switchMarkers = [];
         private readonly Dictionary<FormKey, (FormKey Parent, bool Opposite)> _parents = [];
         private readonly Dictionary<FormKey, bool> _memo = [];
 
@@ -875,7 +961,11 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
         {
             if ((rawFlags & FlagInitiallyDisabled) != 0) _disabled.Add(key);
             if (parent is not null && !parent.Reference.IsNull)
-                _parents[key] = (parent.Reference.FormKey, parent.Flags.HasFlag(EnableParent.Flag.SetEnableStateToOppositeOfParent));
+            {
+                bool opposite = parent.Flags.HasFlag(EnableParent.Flag.SetEnableStateToOppositeOfParent);
+                _parents[key] = (parent.Reference.FormKey, opposite);
+                if (opposite) _switchMarkers.Add(parent.Reference.FormKey);
+            }
         }
 
         public bool StartsEnabled(FormKey key) => Evaluate(key, 0);
@@ -886,6 +976,20 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
             for (int depth = 0; depth < 32 && _parents.TryGetValue(key, out var link); depth++)
             {
                 if (link.Opposite) return true;
+                key = link.Parent;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// True if any parent in the chain is also used as an opposite-of-parent switch marker (e.g. an intact Civil War
+        /// house sharing a battle-damage marker with its rubble counterpart) or starts disabled.
+        /// </summary>
+        public bool ChainTouchesSwitchMarker(FormKey key)
+        {
+            for (int depth = 0; depth < 32 && _parents.TryGetValue(key, out var link); depth++)
+            {
+                if (_switchMarkers.Contains(link.Parent) || _disabled.Contains(link.Parent)) return true;
                 key = link.Parent;
             }
             return false;

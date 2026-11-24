@@ -89,7 +89,7 @@ public class ParentCopyTests
             var b = File.ReadAllBytes(Path.Combine(dir, ParentCopyWriter.RelativePath.Replace('\\', Path.DirectorySeparatorChar)));
             using var r = new BinaryReader(new MemoryStream(b));
             Assert.Equal("PLCP", Encoding.ASCII.GetString(r.ReadBytes(4)));
-            Assert.Equal(1u, r.ReadUInt32());
+            Assert.Equal(2u, r.ReadUInt32());
             var strings = new List<string>();
             for (uint i = 0, n = r.ReadUInt32(); i < n; i++) strings.Add(Encoding.UTF8.GetString(r.ReadBytes(r.ReadUInt16())));
             Assert.Equal(["Skyrim.esm", @"landscape\rocks\rockl01.nif", @"landscape\rocks\rockpilem02.nif"], strings);   // mesh paths are relative to Data\meshes
@@ -101,8 +101,9 @@ public class ParentCopyTests
             Assert.Equal(new Vector3(0.1f, 0.2f, 0.3f), new Vector3(r.ReadSingle(), r.ReadSingle(), r.ReadSingle()));
             Assert.Equal(1.5f, r.ReadSingle());
             Assert.Equal(1u, r.ReadUInt32());                    // flags: the child worldspace has the cell
-            Assert.Equal(44, 4 * 3 + 12 + 12 + 4 + 4);           // the entry size the SKSE plugin reads
-            Assert.Equal(b.Length, 8 + 4 + strings.Sum(s => 2 + Encoding.UTF8.GetByteCount(s)) + 4 + 2 * 44);
+            Assert.Equal((ushort)0, r.ReadUInt16());             // v2 altCount = 0
+            Assert.Equal(46, 4 * 3 + 12 + 12 + 4 + 4 + 2);       // the minimum v2 entry size the SKSE plugin reads
+            Assert.Equal(b.Length, 8 + 4 + strings.Sum(s => 2 + Encoding.UTF8.GetByteCount(s)) + 4 + 2 * 46);
 
             ParentCopyWriter.Remove(dir);
             Assert.False(File.Exists(Path.Combine(dir, ParentCopyWriter.RelativePath)));

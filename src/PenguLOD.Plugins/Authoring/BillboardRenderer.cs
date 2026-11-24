@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using PenguLOD.Core.Pipeline;
 using PenguLOD.Meshes;
 using PenguLOD.Textures;
@@ -7,22 +8,35 @@ using PenguLOD.Textures.Dds;
 
 namespace PenguLOD.Plugins.Authoring;
 
-/// <summary>A rendered tree billboard: RGBA image plus the world size it covers.</summary>
-/// <param name="NormalRgba">The normal map of the same size (tangent space of the card, DirectX style like TexGen's: red right, green down,
-/// blue towards the viewer), shaded from the model's own vertex normals; null if it wasn't made.</param>
 public sealed record BillboardImage(byte[] Rgba, int Width, int Height, float WorldWidth, float WorldHeight, float ShiftZ, float Coverage, byte[]? NormalRgba = null);
 
 /// <summary>
-/// Small software renderer for tree/plant billboards, the way TexGen makes them: the model seen from the front
-/// (looking along +Y, Z up), orthographic, alpha-tested with its own textures, 2× supersampled.
+/// Mipmapped orthographic software rasterizer for tree/grass billboards and TexGen <c>RenderedObjects</c>:
+/// analytical per-triangle screen-space UV footprint mip selection, normal-map gloss preservation,
+/// vertex-alpha overlay layer blending, and emissive glow (<c>_g.dds</c>) baking.
 /// </summary>
 public static class BillboardRenderer
 {
     public delegate (byte[] Rgba, int Width, int Height)? TextureLoader(string texturePath);
 
-    /// <param name="vertexColors">Multiply by the model's vertex colours (trees: baked shading). Grass uses them for wind, so off there.</param>
-    /// <param name="minCoverage">Thicken the cut-out until at least this share of the image is opaque (sparse grass blades
-    /// otherwise vanish at a distance; 0 = leave as rendered).</param>
+    private sealed class MipPyramid
+    {
+        public readonly List<(byte[] Rgba, int Width, int Height)> Levels = [];
+        public MipPyramid((byte[] Rgba, int Width, int Height) top, bool alphaWeighted)
+        {
+            Levels.Add(top);
+            var cur = top;
+            while (cur.Width > 1 || cur.Height > 1)
+            {
+                cur = TreeAtlasBuilder.Downsample(cur.Rgba, cur.Width, cur.Height, alphaWeighted);
+                Levels.Add(cur);
+            }
+        }
+    }
+
+    private static readonly ConditionalWeakTable<byte[], MipPyramid> ColorPyramids = new();
+    private static readonly ConditionalWeakTable<byte[], MipPyramid> DataPyramids = new();
+
     public static BillboardImage? Render(LodMesh model, TextureLoader loadTexture, int maxPixels = 512, bool vertexColors = true, float minCoverage = 0f, float unitsPerPixel = 0, (Vector3 Min, Vector3 Max)? viewport = null, float brightness = 1, bool shaded = true, (int W, int H)? pixelSize = null, MaterialBakeSettings? materials = null,
         BillboardView view = BillboardView.Front, bool originCentered = false, GrassTextureMode grassTextures = GrassTextureMode.Basic, float complexGrassThreshold = .1f,
         BillboardLight? light = null)
@@ -32,8 +46,6 @@ public static class BillboardRenderer
         if (model.HasIncompleteGeometry) throw new NotSupportedException("Cannot render incomplete geometry: " + string.Join("; ", model.Warnings));
         if (view == BillboardView.Side)
         {
-            // Side camera looks from +X, with +Y across the image and +Z up. Rotate the
-            // entire normal/tangent basis with positions so the generated side card lights correctly.
             static Vector3 Project(Vector3 p) => new(p.Y, -p.X, p.Z);
             model = new LodMesh { Path = model.Path, Parts = model.Parts.Select(p => p with
             {
@@ -46,8 +58,6 @@ public static class BillboardRenderer
         var (min, max) = viewport ?? Meshes.Authoring.LodMeshAuthor.Bounds(model);
         if (originCentered && viewport is null)
         {
-            // Padding around the model origin retains trunk alignment in both standard BTT
-            // billboards and crossed object cards; neither consumer needs a camera-dependent offset.
             float half = MathF.Max(MathF.Abs(min.X), MathF.Abs(max.X));
             min.X = -half; max.X = half;
         }
@@ -69,11 +79,17 @@ public static class BillboardRenderer
 
         var color = new byte[w * h * 4];
         var normalMap = new byte[w * h * 4];
+        var glossMap = !shaded ? new byte[w * h] : null;
+        if (glossMap is not null) Array.Fill(glossMap, (byte)255);
         var depth = new float[w * h];
         Array.Fill(depth, float.MaxValue);
+        int[]? blendStamp = null;
 
-        foreach (var part in model.Parts)
+        // Render opaque/cutout parts first, then alpha-blended decal/layer parts so overlays composite cleanly.
+        var orderedParts = model.Parts.OrderBy(pt => pt.Material.HasAlpha && (pt.Material.AlphaFlags & 1) != 0 && (pt.Material.AlphaFlags & 0x200) == 0 ? 1 : 0).ToArray();
+        for (int partIdx = 0; partIdx < orderedParts.Length; partIdx++)
         {
+            var part = orderedParts[partIdx];
             RunLimits.Check();
             if (part.Material.Textures.Count == 0 || string.IsNullOrWhiteSpace(part.Material.Textures[0]))
                 throw new InvalidDataException("Render shape has no diffuse texture: " + part.Name);
@@ -88,15 +104,45 @@ public static class BillboardRenderer
             }
             bool pbr = materials.PbrAlbedo && part.Material.Textures[0].Replace('/', '\\').Contains(@"\pbr\", StringComparison.OrdinalIgnoreCase);
             var occlusion = pbr && materials.OcclusionStrength > 0 && part.Material.Textures.Count > 5 ? Optional(part.Material.Textures[5]) : null;
-            byte threshold = part.Material.HasAlpha ? (part.Material.AlphaThreshold == 0 ? (byte)128 : part.Material.AlphaThreshold) : (byte)0;
+            bool hasEmissive = part.Material.EmissiveMultiple > 0 && part.Material.EmissiveColor.LengthSquared() > 1e-6f
+                && ((part.Material.ShaderFlags1 & (1u << 22)) != 0 || (part.Material.Textures.Count > 2 && !string.IsNullOrWhiteSpace(part.Material.Textures[2])));
+            var glowTexture = hasEmissive && part.Material.Textures.Count > 2 ? Optional(part.Material.Textures[2]) : null;
+
+            var texMips = GetPyramid(tex, alphaWeighted: part.Material.HasAlpha);
+            var normMips = normalTexture is { } nt ? GetPyramid(nt, alphaWeighted: false) : null;
+            var occMips = occlusion is { } ot ? GetPyramid(ot, alphaWeighted: false) : null;
+            var glowMips = glowTexture is { } gt ? GetPyramid(gt, alphaWeighted: false) : null;
+
+            bool alphaBlend = effect is null && part.Material.HasAlpha && (part.Material.AlphaFlags & 1) != 0 && (part.Material.AlphaFlags & 0x200) == 0;
+            byte threshold = part.Material.HasAlpha && !alphaBlend ? (part.Material.AlphaThreshold == 0 ? (byte)128 : part.Material.AlphaThreshold) : (byte)0;
+            Vector2 uvScale = part.Material.Passthru is { } sh ? new Vector2(sh.UvScaleX, sh.UvScaleY) : Vector2.One;
+            Vector2 uvOffset = part.Material.Passthru is { } shOff ? new Vector2(shOff.UvOffsetX, shOff.UvOffsetY) : Vector2.Zero;
             var p = part.Positions;
+
             for (int t = 0; t < part.TriangleCount; t++)
             {
                 RunLimits.Check();
                 int i0 = part.Triangles[t * 3], i1 = part.Triangles[t * 3 + 1], i2 = part.Triangles[t * 3 + 2];
                 var a = Screen(p[i0]); var b = Screen(p[i1]); var c = Screen(p[i2]);
                 float area = Edge(a, b, c.X, c.Y);
-                if (MathF.Abs(area) < 1e-6f) continue; // both sides are drawn
+                if (MathF.Abs(area) < 1e-6f) continue;
+
+                // Analytical orthographic screen-space UV footprint -> constant mip level across the triangle!
+                float invArea = 1f / area;
+                float dw0x = (b.Y - c.Y) * invArea, dw1x = (c.Y - a.Y) * invArea, dw2x = -dw0x - dw1x;
+                float dw0y = (c.X - b.X) * invArea, dw1y = (a.X - c.X) * invArea, dw2y = -dw0y - dw1y;
+                var uv0 = part.UVs[i0] * uvScale + uvOffset;
+                var uv1 = part.UVs[i1] * uvScale + uvOffset;
+                var uv2 = part.UVs[i2] * uvScale + uvOffset;
+                Vector2 dudx = (uv0 * dw0x + uv1 * dw1x + uv2 * dw2x) * new Vector2(tex.Width, tex.Height);
+                Vector2 dudy = (uv0 * dw0y + uv1 * dw1y + uv2 * dw2y) * new Vector2(tex.Width, tex.Height);
+                float maxRhoSq = MathF.Max(dudx.LengthSquared(), dudy.LengthSquared());
+                int mipLod = maxRhoSq > 1f && float.IsFinite(maxRhoSq) ? Math.Max(0, (int)MathF.Floor(0.5f * MathF.Log2(maxRhoSq))) : 0;
+                var activeTex = texMips.Levels[Math.Min(mipLod, texMips.Levels.Count - 1)];
+                var activeNorm = normMips is null ? ((byte[], int, int)?)null : normMips.Levels[Math.Min(mipLod, normMips.Levels.Count - 1)];
+                var activeOcc = occMips is null ? ((byte[], int, int)?)null : occMips.Levels[Math.Min(mipLod, occMips.Levels.Count - 1)];
+                var activeGlow = glowMips is null ? ((byte[], int, int)?)null : glowMips.Levels[Math.Min(mipLod, glowMips.Levels.Count - 1)];
+
                 int x0 = Math.Max(0, (int)MathF.Floor(MathF.Min(a.X, MathF.Min(b.X, c.X))));
                 int x1 = Math.Min(w - 1, (int)MathF.Ceiling(MathF.Max(a.X, MathF.Max(b.X, c.X))));
                 int y0 = Math.Max(0, (int)MathF.Floor(MathF.Min(a.Y, MathF.Min(b.Y, c.Y))));
@@ -106,29 +152,32 @@ public static class BillboardRenderer
                 {
                     if (x == x0) RunLimits.Check();
                     float px = x + 0.5f, py = y + 0.5f;
-                    float w0 = Edge(b, c, px, py) / area, w1 = Edge(c, a, px, py) / area, w2 = 1f - w0 - w1;
+                    float w0 = Edge(b, c, px, py) * invArea, w1 = Edge(c, a, px, py) * invArea, w2 = 1f - w0 - w1;
                     if (w0 < 0 || w1 < 0 || w2 < 0) continue;
                     float z = w0 * a.Z + w1 * b.Z + w2 * c.Z;
                     int idx = y * w + x;
-                    if (z >= depth[idx]) continue;
+                    if (alphaBlend ? z > depth[idx] + 0.5f : z >= depth[idx]) continue;
 
-                    var uv = part.UVs[i0] * w0 + part.UVs[i1] * w1 + part.UVs[i2] * w2;
-                    if (part.Material.Passthru is { } shader)
-                        uv = uv * new Vector2(shader.UvScaleX, shader.UvScaleY) + new Vector2(shader.UvOffsetX, shader.UvOffsetY);
-                    var (r, g, bl, al) = Sample(tex, uv, part.Material.ClampMode);
+                    var uv = uv0 * w0 + uv1 * w1 + uv2 * w2;
+                    var (r, g, bl, al) = Sample(activeTex, uv, part.Material.ClampMode);
                     al *= (part.Material.Passthru?.Alpha ?? 1) * (effect?.Tint.W ?? 1);
-                    if (effect is not null && (part.Material.ShaderFlags1 & 8u) != 0 && part.Colors is { } alphaColors)
+                    if ((alphaBlend || (effect is not null && (part.Material.ShaderFlags1 & 8u) != 0)) && part.Colors is { } alphaColors)
                         al *= ((alphaColors[i0] >> 24) * w0 + (alphaColors[i1] >> 24) * w1 + (alphaColors[i2] >> 24) * w2) / 255f;
                     if (effect is not null)
                     {
                         if (part.Material.HasAlpha && (part.Material.AlphaFlags & 0x200) != 0
                             && !AlphaPasses(al, part.Material.AlphaThreshold, (part.Material.AlphaFlags >> 10) & 7)) continue;
                     }
+                    else if (alphaBlend)
+                    {
+                        if (al <= 1f) continue;
+                    }
                     else if (part.Material.HasAlpha && (al < threshold || al <= 0)) continue;
+
                     if (effect is not null) { r *= effect.Tint.X; g *= effect.Tint.Y; bl *= effect.Tint.Z; }
                     if (pbr)
                     {
-                        float ao = occlusion is null ? 1 : Sample(occlusion, uv, part.Material.ClampMode).B / 255f;
+                        float ao = activeOcc is null ? 1 : Sample(activeOcc, uv, part.Material.ClampMode).B / 255f;
                         float factor = materials.PbrScale * (1 - materials.OcclusionStrength * (1 - ao));
                         r = 255 * MathF.Pow(r / 255, materials.PbrGamma) * factor;
                         g = 255 * MathF.Pow(g / 255, materials.PbrGamma) * factor;
@@ -141,11 +190,11 @@ public static class BillboardRenderer
                     }
                     var n = Vector3.Normalize(part.Normals[i0] * w0 + part.Normals[i1] * w1 + part.Normals[i2] * w2);
                     if (!float.IsFinite(n.X)) n = -Vector3.UnitY;
-                    if (normalTexture is not null)
+                    float gloss = 255f;
+                    if (activeNorm is not null)
                     {
-                        var ns = Sample(normalTexture, uv, part.Material.ClampMode);
-                        // NIF convention (LodMeshPart.Tangents): the bitangent field runs along +U and the tangent field along +V.
-                        // Red follows U and green follows V.
+                        var ns = Sample(activeNorm, uv, part.Material.ClampMode);
+                        gloss = ns.A;
                         var alongU = part.Bitangents[i0] * w0 + part.Bitangents[i1] * w1 + part.Bitangents[i2] * w2;
                         alongU -= n * Vector3.Dot(alongU, n);
                         if (alongU.LengthSquared() > 1e-8f)
@@ -160,37 +209,78 @@ public static class BillboardRenderer
                     }
                     float shade = brightness * (shaded ? light.Shade(n) : 1);
                     if (effect is not null) shade = brightness + (shade - brightness) * effect.LightingInfluence;
-                    depth[idx] = z;
+                    float outR = r * shade, outG = g * shade, outB = bl * shade;
+                    if (hasEmissive)
+                    {
+                        var em = activeGlow is not null ? Sample(activeGlow, uv, part.Material.ClampMode) : (R: 255f, G: 255f, B: 255f, A: 255f);
+                        outR += em.R * part.Material.EmissiveColor.X * part.Material.EmissiveMultiple;
+                        outG += em.G * part.Material.EmissiveColor.Y * part.Material.EmissiveMultiple;
+                        outB += em.B * part.Material.EmissiveColor.Z * part.Material.EmissiveMultiple;
+                    }
+
                     int o = idx * 4;
-                    // The card faces the viewer (looking along +Y): a back-facing normal is turned round, as both sides are drawn.
                     var nv = float.IsFinite(n.X) ? n : -Vector3.UnitY;
                     if (nv.Y > 0) nv = -nv;
-                    normalMap[o] = (byte)Math.Clamp(MathF.Round(128f + 127f * nv.X), 0, 255);
-                    normalMap[o + 1] = (byte)Math.Clamp(MathF.Round(128f - 127f * nv.Z), 0, 255);   // green down: the top of a crown has a low green
-                    normalMap[o + 2] = (byte)Math.Clamp(MathF.Round(128f - 127f * nv.Y), 0, 255);
-                    normalMap[o + 3] = 255;
-                    color[o] = (byte)Math.Clamp(r * shade, 0, 255);
-                    color[o + 1] = (byte)Math.Clamp(g * shade, 0, 255);
-                    color[o + 2] = (byte)Math.Clamp(bl * shade, 0, 255);
-                    color[o + 3] = 255;
+                    byte encNx = (byte)Math.Clamp(MathF.Round(128f + 127f * nv.X), 0, 255);
+                    byte encNy = (byte)Math.Clamp(MathF.Round(128f - 127f * nv.Z), 0, 255);
+                    byte encNz = (byte)Math.Clamp(MathF.Round(128f - 127f * nv.Y), 0, 255);
+
+                    if (alphaBlend && color[o + 3] > 0)
+                    {
+                        if (blendStamp is null) { blendStamp = new int[w * h]; Array.Fill(blendStamp, -1); }
+                        if (blendStamp[idx] == partIdx) continue;
+                        blendStamp[idx] = partIdx;
+                        float blend = Math.Clamp(al / 255f, 0f, 1f);
+                        color[o] = (byte)Math.Clamp(MathF.Round(color[o] * (1f - blend) + outR * blend), 0, 255);
+                        color[o + 1] = (byte)Math.Clamp(MathF.Round(color[o + 1] * (1f - blend) + outG * blend), 0, 255);
+                        color[o + 2] = (byte)Math.Clamp(MathF.Round(color[o + 2] * (1f - blend) + outB * blend), 0, 255);
+                        normalMap[o] = (byte)Math.Clamp(MathF.Round(normalMap[o] * (1f - blend) + encNx * blend), 0, 255);
+                        normalMap[o + 1] = (byte)Math.Clamp(MathF.Round(normalMap[o + 1] * (1f - blend) + encNy * blend), 0, 255);
+                        normalMap[o + 2] = (byte)Math.Clamp(MathF.Round(normalMap[o + 2] * (1f - blend) + encNz * blend), 0, 255);
+                        if (glossMap is not null)
+                            glossMap[idx] = (byte)Math.Clamp(MathF.Round(glossMap[idx] * (1f - blend) + gloss * blend), 0, 255);
+                    }
+                    else
+                    {
+                        depth[idx] = z;
+                        normalMap[o] = encNx;
+                        normalMap[o + 1] = encNy;
+                        normalMap[o + 2] = encNz;
+                        normalMap[o + 3] = 255;
+                        if (glossMap is not null) glossMap[idx] = (byte)Math.Clamp(MathF.Round(gloss), 0, 255);
+                        color[o] = (byte)Math.Clamp(outR, 0, 255);
+                        color[o + 1] = (byte)Math.Clamp(outG, 0, 255);
+                        color[o + 2] = (byte)Math.Clamp(outB, 0, 255);
+                        color[o + 3] = 255;
+                    }
                 }
             }
         }
 
-        // 2x2 down to the output size (alpha-weighted), then bleed colour into transparent texels for clean mips.
         var (img, iw, ih) = TreeAtlasBuilder.Downsample(color, w, h);
-        for (int i = 3; i < img.Length; i += 4) img[i] = img[i] >= 96 ? (byte)255 : (byte)0; // crisp cut-out
+        for (int i = 3; i < img.Length; i += 4) img[i] = img[i] >= 96 ? (byte)255 : (byte)0;
         for (int pass = 0; pass < 6 && minCoverage > 0 && Coverage(img, 1f) < minCoverage; pass++) Thicken(img, iw, ih);
         Bleed(img, iw, ih, 6);
         var (nimg, _, _) = TreeAtlasBuilder.Downsample(normalMap, w, h);
         for (int i = 0; i < nimg.Length; i += 4) nimg[i + 3] = img[i + 3];
         Bleed(nimg, iw, ih, 6);
-        for (int i = 0; i < nimg.Length; i += 4)
-        {
-            if (nimg[i] == 0 && nimg[i + 1] == 0 && nimg[i + 2] == 0) { nimg[i] = 128; nimg[i + 1] = 128; nimg[i + 2] = 255; }
-            Renormalize(nimg, i);
-            nimg[i + 3] = 255;
-        }
+        for (int py = 0; py < ih; py++)
+            for (int px = 0; px < iw; px++)
+            {
+                int i = (py * iw + px) * 4;
+                if (nimg[i] == 0 && nimg[i + 1] == 0 && nimg[i + 2] == 0) { nimg[i] = 128; nimg[i + 1] = 128; nimg[i + 2] = 255; }
+                Renormalize(nimg, i);
+                if (glossMap is not null)
+                {
+                    int gSum = glossMap[(py * 2) * w + (px * 2)] + glossMap[(py * 2) * w + (px * 2 + 1)]
+                             + glossMap[(py * 2 + 1) * w + (px * 2)] + glossMap[(py * 2 + 1) * w + (px * 2 + 1)];
+                    nimg[i + 3] = (byte)((gSum + 2) >> 2);
+                }
+                else
+                {
+                    nimg[i + 3] = 255;
+                }
+            }
         int opaque = 0;
         for (int i = 3; i < img.Length; i += 4) if (img[i] >= 128) opaque++;
         if (opaque == 0) return null;
@@ -205,7 +295,10 @@ public static class BillboardRenderer
         }
     }
 
-    /// <summary>Writes the image as a BC7 DDS with coverage-preserving mips (alpha-tested cutouts stay as thick as on top).</summary>
+    private static MipPyramid GetPyramid((byte[] Rgba, int Width, int Height) tex, bool alphaWeighted)
+        => (alphaWeighted ? ColorPyramids : DataPyramids).GetValue(tex.Rgba, _ => new MipPyramid(tex, alphaWeighted));
+
+    /// <summary>Writes the image as a BC7 DDS with coverage-preserving mips, downsampling each level from unboosted alpha.</summary>
     public static void WriteDds(Stream output, byte[] rgba, int width, int height)
     {
         float coverage = Coverage(rgba, 1f);
@@ -221,40 +314,38 @@ public static class BillboardRenderer
                 if (Coverage(cur, mid) < coverage) lo = mid; else hi = mid;
             }
             float s = (lo + hi) / 2;
-            for (int i = 3; i < cur.Length; i += 4) cur[i] = (byte)Math.Min(255f, cur[i] * s);
-            mips.Add(Bc7Encoder.EncodeImage(cur, w, h));
+            var shown = (byte[])cur.Clone();
+            for (int i = 3; i < shown.Length; i += 4) shown[i] = (byte)Math.Min(255f, shown[i] * s);
+            mips.Add(Bc7Encoder.EncodeImage(shown, w, h));
         }
         DdsFile.WriteBc7(output, width, height, mips);
     }
 
-    /// <summary>A normal map as BC7 with mips that are renormalised at every step (averaging shortens the vectors).</summary>
     public static void WriteNormalDds(Stream output, byte[] rgba, int width, int height)
     {
         var mips = new List<byte[]> { Bc7Encoder.EncodeImage(rgba, width, height) };
         var (cur, w, h) = (rgba, width, height);
         while (w > 4 || h > 4)
         {
-            (cur, w, h) = TreeAtlasBuilder.Downsample(cur, w, h);
+            (cur, w, h) = TreeAtlasBuilder.Downsample(cur, w, h, alphaWeighted: false);
             for (int i = 0; i < cur.Length; i += 4) { Renormalize(cur, i); cur[i + 3] = 255; }
             mips.Add(Bc7Encoder.EncodeImage(cur, w, h));
         }
         DdsFile.WriteBc7(output, width, height, mips);
     }
 
-    /// <summary>Scales the encoded vector at <paramref name="i"/> back to length 1 (a zero or unusable vector becomes flat).</summary>
     internal static void Renormalize(byte[] px, int i)
     {
         float x = (px[i] - 128f) / 127f, y = (px[i + 1] - 128f) / 127f, z = (px[i + 2] - 128f) / 127f;
         float len = MathF.Sqrt(x * x + y * y + z * z);
         if (!(len > 1e-3f)) { px[i] = 128; px[i + 1] = 128; px[i + 2] = 255; return; }
-        if (z < 0.05f) z = 0.05f;   // always towards the viewer
+        if (z < 0.05f) z = 0.05f;
         len = MathF.Sqrt(x * x + y * y + z * z);
         px[i] = (byte)Math.Clamp(MathF.Round(128f + 127f * x / len), 0, 255);
         px[i + 1] = (byte)Math.Clamp(MathF.Round(128f + 127f * y / len), 0, 255);
         px[i + 2] = (byte)Math.Clamp(MathF.Round(128f + 127f * z / len), 0, 255);
     }
 
-    /// <summary>A flat normal map (facing the camera) of the given size, as BC7.</summary>
     public static void WriteFlatNormalDds(Stream output, int width, int height)
     {
         var px = new byte[width * height * 4];
@@ -277,7 +368,6 @@ public static class BillboardRenderer
         return n / (float)total;
     }
 
-    /// <summary>Grows the opaque area by one pixel (colour from the opaque neighbours).</summary>
     private static void Thicken(byte[] img, int w, int h)
     {
         var src = (byte[])img.Clone();

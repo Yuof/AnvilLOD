@@ -12,18 +12,66 @@ using PenguLOD.Plugins.Authoring;
 using PenguLOD.Plugins.Mo2;
 using PenguLOD.Textures;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Platform.Storage;
+using Avalonia.VisualTree;
 
 namespace PenguLOD.Desktop;
 
 public sealed partial class MainWindow
 {
+    private bool _busyUi;
+    private readonly HashSet<InputElement> _busyDisabled = [];
+    private readonly HashSet<DataGrid> _busyReadOnlyGrids = [];
+    private static readonly HashSet<string> SafeBusyButtons = new(StringComparer.Ordinal)
+    {
+        "View scan results", "Change game source", "Generation overview", "Settings", "Open saved job", "Open project on GitHub"
+    };
+
+    private void SetBusyUi(bool busy)
+    {
+        _busyUi = busy;
+        if (_pageActions is not null) _pageActions.IsEnabled = !busy;
+        if (busy)
+        {
+            LockCurrentPageForBusy();
+            return;
+        }
+        foreach (var el in _busyDisabled) el.IsEnabled = true;
+        _busyDisabled.Clear();
+        foreach (var grid in _busyReadOnlyGrids) grid.IsReadOnly = false;
+        _busyReadOnlyGrids.Clear();
+    }
+
+    private void LockCurrentPageForBusy()
+    {
+        _page.UpdateLayout();
+        foreach (var desc in _page.GetVisualDescendants())
+        {
+            if (desc is DataGrid dg && !dg.IsReadOnly)
+            {
+                dg.IsReadOnly = true;
+                _busyReadOnlyGrids.Add(dg);
+                continue;
+            }
+            if (desc is not InputElement el || !el.IsEnabled) continue;
+            bool lockIt = desc switch
+            {
+                Button b when b.GetType() == typeof(Button) => b.Content is not string label || !SafeBusyButtons.Contains(label),
+                CheckBox or ComboBox or NumericUpDown => true,
+                TextBox tb => !tb.IsReadOnly,
+                _ => false,
+            };
+            if (lockIt && _busyDisabled.Add(el)) el.IsEnabled = false;
+        }
+    }
+
     private async Task RunJob<T>(string title, DesktopSettings snapshot, Func<IProgress<string>, CancellationToken, T> work,
         Action<T, string, TimeSpan> completed, bool saveSettings = true)
     {
         if (_runner.IsRunning) throw new InvalidOperationException("Wait for the active job to finish.");
         if (saveSettings) { GenerationOptions.Validate(snapshot); Save(); }
-        _page.IsEnabled = false; if (_pageActions is not null) _pageActions.IsEnabled = false; _cancel.IsEnabled = true; _progress.IsVisible = true;
+        SetBusyUi(true); _cancel.IsEnabled = true; _progress.IsVisible = true;
         _watch.Restart(); _status.Text = title; Notice("");
         try
         {
@@ -53,7 +101,7 @@ public sealed partial class MainWindow
         finally
         {
             _watch.Stop(); _elapsed.Text = _watch.Elapsed.ToString(@"hh\:mm\:ss");
-            _page.IsEnabled = true; if (_pageActions is not null) _pageActions.IsEnabled = true; _cancel.IsEnabled = false; _progress.IsVisible = false;
+            SetBusyUi(false); _cancel.IsEnabled = false; _progress.IsVisible = false;
             if (_closing) { _allowClose = true; Close(); }
         }
     }

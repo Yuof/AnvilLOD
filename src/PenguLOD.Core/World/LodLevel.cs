@@ -36,3 +36,24 @@ public static class LodLevels
         return cells is 4 or 8 or 16 or 32;
     }
 }
+
+/// <summary>Per-LOD-level configuration values (LOD4, LOD8, LOD16, LOD32).</summary>
+public sealed record TerrainLevelValues<T>(T Lod4, T Lod8, T Lod16, T Lod32)
+{
+    public T For(LodLevel level) => level switch
+    {
+        LodLevel.Lod4 => Lod4,
+        LodLevel.Lod8 => Lod8,
+        LodLevel.Lod16 => Lod16,
+        LodLevel.Lod32 => Lod32,
+        _ => throw new ArgumentOutOfRangeException(nameof(level)),
+    };
+
+    public IEnumerable<T> All()
+    {
+        yield return Lod4;
+        yield return Lod8;
+        yield return Lod16;
+        yield return Lod32;
+    }
+}

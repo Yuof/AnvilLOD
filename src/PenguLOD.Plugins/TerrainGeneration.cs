@@ -20,7 +20,24 @@ public sealed record TerrainGenerationRequest(GameContextOptions Game, string Ou
     bool FillUncoveredLand = true, bool SubstituteMissingTextures = true, bool SeasonsStrict = false,
     // With Seasons: the seasons to generate, as SeasonSwaps.SelectionText writes them ("WIN" or "WIN,SUM"); null = all four.
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    string? OnlySeasons = null);
+    string? OnlySeasons = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    TerrainLevelValues<int>? DiffuseSizes = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    TerrainLevelValues<int>? NormalSizes = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    TerrainLevelValues<string>? DiffuseFormats = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    TerrainLevelValues<float>? MeshMaxErrors = null,
+    bool ProtectCellBorders = true,
+    bool OptimizeUnseen = true)
+{
+    public static readonly TerrainLevelValues<float> DefaultMaxErrors = new(6f, 16f, 36f, 72f);
+    public int DiffuseSizeFor(LodLevel level) => DiffuseSizes?.For(level) ?? TextureSize;
+    public int NormalSizeFor(LodLevel level) => NormalSizes?.For(level) ?? DiffuseSizeFor(level);
+    public string DiffuseFormatFor(LodLevel level) => DiffuseFormats?.For(level) ?? "BC7";
+    public float MaxErrorFor(LodLevel level) => MeshMaxErrors?.For(level) ?? DefaultMaxErrors.For(level);
+}
 public sealed record TerrainTileResult(string Worldspace, int Level, int X, int Y, int Triangles, int WaterCells, string? Season = null);
 public sealed record TerrainWorldResult(string Worldspace, int LandscapeCells, int ExistingTilesUsed, int Tiles, string? Heightmap);
 public sealed record TerrainPerformance(int BuiltTiles, int ReusedTiles, IReadOnlyDictionary<string,double> Timings);
@@ -39,7 +56,22 @@ public static class TerrainGeneration
         GenerationDestination.Validate(r.Game, r.OutputFolder);
         (r.Materials ?? new()).Validate();
         PenguLOD.Core.Lod.SeasonSwaps.Selection(r.OnlySeasons);
-        if(r.TextureSize is <64 or >2048 || (r.TextureSize&(r.TextureSize-1))!=0) throw new ArgumentException("Terrain texture size must be a power of two from 64 to 2048.");
+        static void CheckPot(int s)
+        {
+            if (s is < 64 or > 2048 || (s & (s - 1)) != 0)
+                throw new ArgumentException("Terrain texture size must be a power of two from 64 to 2048.");
+        }
+        CheckPot(r.TextureSize);
+        if (r.DiffuseSizes is { } ds) foreach (int s in ds.All()) CheckPot(s);
+        if (r.NormalSizes is { } ns) foreach (int s in ns.All()) CheckPot(s);
+        if (r.DiffuseFormats is { } df)
+            foreach (string f in df.All())
+                if (!f.Equals("BC7", StringComparison.OrdinalIgnoreCase) && !f.Equals("BC1", StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException("Terrain diffuse format must be BC7 or BC1.");
+        if (r.MeshMaxErrors is { } me)
+            foreach (float e in me.All())
+                if (!float.IsFinite(e) || e is < 0f or > 4096f)
+                    throw new ArgumentException("Terrain mesh max error must be between 0 and 4096 game units.");
         if(r.HeightmapMaximumSize is <128 or >16384 || (r.HeightmapMaximumSize&(r.HeightmapMaximumSize-1))!=0)throw new ArgumentException("Heightmap size limit must be a power of two from 128 to 16384.");
         if(!float.IsFinite(r.Brightness) || r.Brightness is <.1f or >4 || !float.IsFinite(r.VertexColorStrength) || r.VertexColorStrength is <0 or >1
             || !float.IsFinite(r.TextureRepeatsPerCell) || r.TextureRepeatsPerCell is <1 or >128 || !float.IsFinite(r.SkirtDepth) || r.SkirtDepth is <0 or >16384)
@@ -122,12 +154,20 @@ public static class TerrainGeneration
             {
                 progress?.Report("Exporting terrain-shadow heightmap: "+name);
                 int minX=planned.Min(t=>t.X),minY=planned.Min(t=>t.Y),maxX=planned.Max(t=>t.X+(int)t.Level)-1,maxY=planned.Max(t=>t.Y+(int)t.Level)-1;
+                var (defaultLand,_)=TerrainInputs.Defaults(world);
                 // Each worker samples heights through its own view of the landscape.
                 var samplers=new System.Collections.Concurrent.ConcurrentBag<TerrainSource>();
-                var export=Measure("terrain-heightmap",()=>TerrainHeightmap.Export(name,minX,minY,maxX,maxY,request.HeightmapMaximumSize,source.Height,ct,
-                    ()=>{var fork=source.Fork();samplers.Add(fork);return fork.Height;}));
-                foreach(var fork in samplers)fallbackUsed.UnionWith(fork.FallbackUsed);
-                heightmap=export.Path;Write(heightmap,export.Bytes);
+                try
+                {
+                    var export=Measure("terrain-heightmap",()=>TerrainHeightmap.Export(name,minX,minY,maxX,maxY,request.HeightmapMaximumSize,source.Height,ct,
+                        ()=>{var fork=source.Fork();samplers.Add(fork);return fork.Height;}, request.FillUncoveredLand ? (float?)defaultLand : null, Warn));
+                    foreach(var fork in samplers)fallbackUsed.UnionWith(fork.FallbackUsed);
+                    heightmap=export.Path;Write(heightmap,export.Bytes);
+                }
+                catch(InvalidDataException e)
+                {
+                    Warn($"{name}: skipped terrain-shadow heightmap export ({e.Message})");
+                }
             }
             reports.Add(new(name,source.Cells.Count,fallbackUsed.Count,planned.Length*(1+seasons.Count),heightmap));
             if(fallbackUsed.Count>0)Warn($"{name}: sampled {fallbackUsed.Count} existing terrain tiles for missing LAND. Those areas retain the source terrain's detail.");
@@ -198,10 +238,13 @@ public static class TerrainGeneration
             source.BeginTile();
             var written=new Dictionary<string,string>();
             void Add(string relative,byte[] bytes) { var (file,hash)=Put(relative,bytes);written[file]=hash; }
-            var mesh=Measure("terrain-mesh",()=>TerrainTileBuilder.Build(tile,source.Height,(x,y)=>request.Water&&source.HasLodWater?source.Water(x,y):null,request.SkirtDepth,ct,season));
+            var waterSampler = (int x, int y) => request.Water && source.HasLodWater ? source.Water(x, y) : null;
+            var mesh=Measure("terrain-mesh",()=>TerrainTileBuilder.Build(tile,source.Height,waterSampler,request.SkirtDepth,ct,season,
+                request.MaxErrorFor(tile.Level),request.ProtectCellBorders,request.OptimizeUnseen));
             Add(files[0],mesh.Bytes);
             var (diffuse,normal)=Measure("terrain-sampling",()=>Bake(tile,source,request,ct));
-            Add(files[1],Measure("terrain-encoding",()=>TextureImages.Encode(diffuse)));
+            bool bc1 = request.DiffuseFormatFor(tile.Level).Equals("BC1", StringComparison.OrdinalIgnoreCase);
+            Add(files[1],Measure("terrain-encoding",()=> bc1 ? TextureImages.EncodeBc1(diffuse) : TextureImages.Encode(diffuse)));
             Add(files[2],Measure("terrain-encoding",()=>TextureImages.Encode(normal,normal:true)));
             var receipt=new TerrainTileReceipt(identity with {Triangles=mesh.Land.Indices.Length/3,WaterCells=mesh.WaterCells},
                 new OutputSnapshot {Files=files.ToDictionary(f=>f,f=>written[f])},source.FallbackUsed.ToArray(),source.MaterialReports.ToArray(),source.MaterialWarnings.ToArray());
@@ -221,7 +264,9 @@ public static class TerrainGeneration
     private static (TextureImage Diffuse,TextureImage Normal) Bake(QuadKey tile,TerrainSource source,TerrainGenerationRequest settings,CancellationToken ct)
     {
         float strength = (settings.Materials ?? new()).NormalStrength;
-        int size=settings.TextureSize;var diffuse=TextureImages.Blank(size,size);var normal=TextureImages.Blank(size,size);
+        int diffuseSize = settings.DiffuseSizeFor(tile.Level), normalSize = settings.NormalSizeFor(tile.Level);
+        int size = Math.Max(diffuseSize, normalSize);
+        var diffuse=TextureImages.Blank(size,size);var normal=TextureImages.Blank(size,size);
         float span=(int)tile.Level*4096f,footprint=span/size;
         for(int y=0;y<size;y++)
         {
@@ -241,6 +286,17 @@ public static class TerrainGeneration
                 normal.Pixels[o]=(byte)Math.Clamp(MathF.Round((n.X+1)*127.5f),0,255);normal.Pixels[o+1]=(byte)Math.Clamp(MathF.Round((n.Y+1)*127.5f),0,255);
                 normal.Pixels[o+2]=(byte)Math.Clamp(MathF.Round((n.Z+1)*127.5f),0,255);normal.Pixels[o+3]=255;
             }
+        }
+        while (diffuse.Width > diffuseSize)
+        {
+            var d = TreeAtlasBuilder.Downsample(diffuse.Pixels, diffuse.Width, diffuse.Height, alphaWeighted: false);
+            diffuse = new(d.Rgba, d.W, d.H);
+        }
+        while (normal.Width > normalSize)
+        {
+            var d = TreeAtlasBuilder.Downsample(normal.Pixels, normal.Width, normal.Height, alphaWeighted: false);
+            for (int i = 0; i < d.Rgba.Length; i += 4) TextureImages.Normalize(d.Rgba, i);
+            normal = new(d.Rgba, d.W, d.H);
         }
         return(diffuse,normal);
     }

@@ -79,7 +79,8 @@ public sealed class AssetIndex : IAssetSource
         IReadOnlyList<string>? pluginOrder = null, IReadOnlyList<string>? iniPaths = null)
     {
         var archives = SkyrimArchives.Select(release, Directory.EnumerateFiles(dataFolder), pluginOrder ?? [],
-            SkyrimArchives.ReadIniLists(iniPaths ?? []));
+            SkyrimArchives.ReadIniLists(iniPaths ?? []),
+            iniName => GamePath.ResolveExisting(dataFolder, iniName));
         // Folders that differ only in case ("meshes", "Meshes") are one folder to the game; the last in ordinal order wins.
         IEnumerable<string> EnumerateLoose(string prefix)
         {

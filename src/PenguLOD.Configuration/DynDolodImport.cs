@@ -33,9 +33,9 @@ public static class DynDolodImport
     // Choices that change the output and have no PenguLOD counterpart; reported when the file sets them.
     private static readonly string[] DynDolodNotImported =
     [
-        "TreeLargeRef", "SeasonsSnow", "SeasonsToGenerate", "FakeLights", "WindowsHigh", "UpgradeLargeReferences", "DowngradeNormalReferences",
+        "TreeLargeRef", "SeasonsSnow", "FakeLights", "WindowsHigh", "UpgradeLargeReferences", "DowngradeNormalReferences",
         "TreeLODMaxTileSize", "TreeLODBrightness", "GrassLODMaxTileSize", "GrassLODBrightness", "ObjectLODBrightness",
-        "FullTextureBrightness", "GrassLODMode", "TerrainUndersideQuality", "TerrainUndersideHeight",
+        "FullTextureBrightness", "GrassLODMode", "TerrainUndersideHeight",
     ];
 
     private static readonly string[] TexGenNotImported =
@@ -102,7 +102,28 @@ public static class DynDolodImport
         if (Flag("DoGrass") is { } grass) Option("grass", grass);
         if (ini.TryGetValue("GrassLODDensity", out var density) && Number(density) is { } percent and >= 0 and <= 100) Option("grassDensity", percent / 100);
         if (Flag("DoTerrainUnderside") is { } underside) Option("underside", underside);
+        if (Set(ini, "TerrainUndersideQuality") && Number(ini["TerrainUndersideQuality"]) is { } uq)
+        {
+            string step = (int)uq switch
+            {
+                8 or 16 or 32 or 64 or 128 => ((int)uq).ToString(CultureInfo.InvariantCulture),
+                >= 10 => "8",
+                >= 7 => "16",
+                >= 4 => "32",
+                >= 2 => "64",
+                >= 1 => "128",
+                _ => "16",
+            };
+            Option("undersideStep", step);
+        }
         if (Flag("DoSeasons") is { } seasons) Option("seasons", seasons);
+        if (Set(ini, "SeasonsToGenerate") && TryParseSeasons(ini["SeasonsToGenerate"], out var sWin, out var sSpr, out var sSum, out var sAut))
+        {
+            Option("seasonWinter", sWin);
+            Option("seasonSpring", sSpr);
+            Option("seasonSummer", sSum);
+            Option("seasonAutumn", sAut);
+        }
         if (Flag("LoadCandles") is { } candles) Option("candles", candles);
         if (Flag("LoadFXGlow") is { } glow) Option("fxGlow", glow);
         if (Flag("Windows") is { } windows) Option("glowWindows", windows);
@@ -151,6 +172,26 @@ public static class DynDolodImport
     private static string? Size(string text, int min, int max) =>
         Number(text) is { } v && v == decimal.Truncate(v) && v >= 1 && v <= 65536 && ((int)v & ((int)v - 1)) == 0
             ? Math.Clamp((int)v, min, max).ToString(CultureInfo.InvariantCulture) : null;
+
+    private static bool TryParseSeasons(string text, out bool winter, out bool spring, out bool summer, out bool autumn)
+    {
+        winter = spring = summer = autumn = false;
+        if (Number(text) is { } mask && mask == decimal.Truncate(mask) && mask is >= 1 and <= 15)
+        {
+            int bits = (int)mask;
+            winter = (bits & 1) != 0; spring = (bits & 2) != 0; summer = (bits & 4) != 0; autumn = (bits & 8) != 0;
+            return true;
+        }
+        foreach (var token in text.Split([',', ';', '|', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var t = token.ToLowerInvariant();
+            if (t.StartsWith("win", StringComparison.Ordinal)) winter = true;
+            else if (t.StartsWith("spr", StringComparison.Ordinal)) spring = true;
+            else if (t.StartsWith("sum", StringComparison.Ordinal)) summer = true;
+            else if (t.StartsWith("aut", StringComparison.Ordinal) || t.StartsWith("fal", StringComparison.Ordinal)) autumn = true;
+        }
+        return winter || spring || summer || autumn;
+    }
 
     private static decimal? Number(string text) =>
         decimal.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : null;

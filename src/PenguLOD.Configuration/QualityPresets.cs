@@ -23,8 +23,8 @@ public sealed class QualityPreset
 /// </summary>
 public static class QualityPresets
 {
-    public const string High = "High", Balanced = "Balanced", Performance = "Performance";
-    public static readonly IReadOnlyList<string> BuiltInNames = [High, Balanced, Performance];
+    public const string Ultra = "Ultra", High = "High", Balanced = "Balanced", Performance = "Performance";
+    public static readonly IReadOnlyList<string> BuiltInNames = [Ultra, High, Balanced, Performance];
 
     /// <summary>Options that describe the installed game, not the output. No preset sets them.</summary>
     public static readonly IReadOnlySet<string> InstallOptions = new HashSet<string>(StringComparer.Ordinal) { "skse", "esl" };
@@ -46,7 +46,13 @@ public static class QualityPresets
         nameof(DesktopSettings.TextureGenGrassAmbient), nameof(DesktopSettings.TextureGenGrassDirect),
         nameof(DesktopSettings.TextureGenTrunkAmbient), nameof(DesktopSettings.TextureGenTrunkDirect),
         // Terrain
-        nameof(DesktopSettings.TerrainTextureSize), nameof(DesktopSettings.TerrainBrightness), nameof(DesktopSettings.TerrainVertexColor),
+        nameof(DesktopSettings.TerrainTextureSize),
+        nameof(DesktopSettings.TerrainDiffuseSizeLod8), nameof(DesktopSettings.TerrainDiffuseSizeLod16), nameof(DesktopSettings.TerrainDiffuseSizeLod32),
+        nameof(DesktopSettings.TerrainNormalSizeLod4), nameof(DesktopSettings.TerrainNormalSizeLod8), nameof(DesktopSettings.TerrainNormalSizeLod16), nameof(DesktopSettings.TerrainNormalSizeLod32),
+        nameof(DesktopSettings.TerrainDiffuseFormatLod4), nameof(DesktopSettings.TerrainDiffuseFormatLod8), nameof(DesktopSettings.TerrainDiffuseFormatLod16), nameof(DesktopSettings.TerrainDiffuseFormatLod32),
+        nameof(DesktopSettings.TerrainMaxErrorLod4), nameof(DesktopSettings.TerrainMaxErrorLod8), nameof(DesktopSettings.TerrainMaxErrorLod16), nameof(DesktopSettings.TerrainMaxErrorLod32),
+        nameof(DesktopSettings.TerrainProtectBorders), nameof(DesktopSettings.TerrainOptimizeUnseen),
+        nameof(DesktopSettings.TerrainBrightness), nameof(DesktopSettings.TerrainVertexColor),
         nameof(DesktopSettings.TerrainNormalStrength), nameof(DesktopSettings.TerrainPbr), nameof(DesktopSettings.TerrainPbrTwins),
         nameof(DesktopSettings.TerrainPbrScale), nameof(DesktopSettings.TerrainPbrGamma), nameof(DesktopSettings.TerrainAo),
         nameof(DesktopSettings.TerrainRepeats), nameof(DesktopSettings.TerrainSkirt), nameof(DesktopSettings.TerrainWater),
@@ -123,6 +129,9 @@ public static class QualityPresets
         var preset = BuiltIn(Balanced, screenHeight);
         preset.Name = DynDolodDefaults;
         foreach (var (key, value) in ShippedTicks) preset.Options[key] = Element(value);
+        preset.Options["tree3d8"] = Element(false);
+        preset.Options["occClearance"] = Element(3072m);
+        preset.Options["occParent"] = Element(3072m);
         foreach (var (name, value) in ShippedTextureKinds) preset.Settings[name] = Element(value);
         return preset;
     }
@@ -130,20 +139,71 @@ public static class QualityPresets
     public static bool IsBuiltIn(string name) => BuiltInNames.Contains(name, StringComparer.OrdinalIgnoreCase) || name.Equals(DynDolodDefaults, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// What DynDOLOD and TexGen ship with: DynDOLOD's High, Medium or Low mesh rules (High, Balanced, Performance), and the texture
-    /// sizes the two programs choose for a game running at this screen height.
+    /// PenguLOD's unified 4-tier quality presets (<see cref="Ultra"/>, <see cref="High"/>, <see cref="Balanced"/>, <see cref="Performance"/>),
+    /// spanning Object/Tree/Grass LOD, Terrain simplification &amp; texture sizing/formats, Object Atlasing, and screen-scaled TexGen sizes.
     /// </summary>
     public static QualityPreset BuiltIn(string name, int screenHeight)
     {
         string canonical = BuiltInNames.FirstOrDefault(n => n.Equals(name, StringComparison.OrdinalIgnoreCase))
-            ?? throw new ArgumentException($"Unknown preset '{name}' (use High, Balanced or Performance).");
+            ?? throw new ArgumentException($"Unknown preset '{name}' (use Ultra, High, Balanced or Performance).");
         var sizes = ScreenSizes.For(screenHeight);
         var preset = new QualityPreset { Name = canonical };
         preset.Options["preset"] = Element(canonical == Performance ? "Low" : canonical == Balanced ? "Medium" : "High");
+        preset.Options["lod32"] = Element(canonical == Ultra);
         // DynDOLOD "Max tile size full" and "Max tile size LOD".
         preset.Options["atlasCell"] = Element(sizes.AtlasCell.ToString(System.Globalization.CultureInfo.InvariantCulture));
         preset.Options["objectTextureSize"] = Element(sizes.LodTexture.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        preset.Options["objectAtlas"] = Element(true);
+        preset.Options["atlasPageSize"] = Element(canonical is High or Ultra ? "8192" : "4096");
+        preset.Options["tree3d"] = Element(canonical != Performance);
+        preset.Options["tree3d8"] = Element(canonical == Ultra);
+        preset.Options["grassMaxLevel"] = Element(canonical == Ultra ? "16" : "4");
+        preset.Options["grassTiers"] = Element(canonical is High or Ultra ? "4" : "1");
+        decimal clearance = canonical == Ultra ? 3072m : 1024m;
+        preset.Options["occClearance"] = Element(clearance);
+        preset.Options["occParent"] = Element(clearance);
         foreach (var (key, value) in ShippedOptions) preset.Options[key] = Element(value);
+
+        var (err4, err8, err16, err32) = canonical switch
+        {
+            Performance => (12m, 28m, 56m, 112m),
+            Balanced => (6m, 16m, 36m, 72m),
+            High => (3m, 10m, 24m, 48m),
+            _ => (1.5m, 6m, 16m, 32m),
+        };
+        var (d4, d8, d16, d32, f4, f8) = canonical switch
+        {
+            Performance => (512m, 256m, 128m, 128m, "BC1", "BC1"),
+            Balanced => (512m, 256m, 256m, 128m, "BC7", "BC1"),
+            High => (1024m, 512m, 256m, 256m, "BC7", "BC1"),
+            _ => (1024m, 512m, 512m, 256m, "BC7", "BC7"),
+        };
+        var (n4, n8, n16, n32) = canonical switch
+        {
+            Performance => (256m, 256m, 128m, 128m),
+            Balanced => (512m, 256m, 256m, 128m),
+            High => (1024m, 512m, 256m, 256m),
+            _ => (1024m, 512m, 512m, 256m),
+        };
+        preset.Settings[nameof(DesktopSettings.TerrainMaxErrorLod4)] = Element(err4);
+        preset.Settings[nameof(DesktopSettings.TerrainMaxErrorLod8)] = Element(err8);
+        preset.Settings[nameof(DesktopSettings.TerrainMaxErrorLod16)] = Element(err16);
+        preset.Settings[nameof(DesktopSettings.TerrainMaxErrorLod32)] = Element(err32);
+        preset.Settings[nameof(DesktopSettings.TerrainTextureSize)] = Element(d4);
+        preset.Settings[nameof(DesktopSettings.TerrainDiffuseSizeLod8)] = Element(d8);
+        preset.Settings[nameof(DesktopSettings.TerrainDiffuseSizeLod16)] = Element(d16);
+        preset.Settings[nameof(DesktopSettings.TerrainDiffuseSizeLod32)] = Element(d32);
+        preset.Settings[nameof(DesktopSettings.TerrainDiffuseFormatLod4)] = Element(f4);
+        preset.Settings[nameof(DesktopSettings.TerrainDiffuseFormatLod8)] = Element(f8);
+        preset.Settings[nameof(DesktopSettings.TerrainDiffuseFormatLod16)] = Element("BC1");
+        preset.Settings[nameof(DesktopSettings.TerrainDiffuseFormatLod32)] = Element("BC1");
+        preset.Settings[nameof(DesktopSettings.TerrainNormalSizeLod4)] = Element(n4);
+        preset.Settings[nameof(DesktopSettings.TerrainNormalSizeLod8)] = Element(n8);
+        preset.Settings[nameof(DesktopSettings.TerrainNormalSizeLod16)] = Element(n16);
+        preset.Settings[nameof(DesktopSettings.TerrainNormalSizeLod32)] = Element(n32);
+        preset.Settings[nameof(DesktopSettings.TerrainProtectBorders)] = Element(true);
+        preset.Settings[nameof(DesktopSettings.TerrainOptimizeUnseen)] = Element(true);
+
         preset.Settings[nameof(DesktopSettings.TextureGenBaseSize)] = Element((decimal)sizes.BaseSize);
         preset.Settings[nameof(DesktopSettings.TextureGenUnitsPerPixel)] = Element(sizes.UnitsPerPixel);
         preset.Settings[nameof(DesktopSettings.TextureGenMaxSize)] = Element((decimal)sizes.MaxBillboard);

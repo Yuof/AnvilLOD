@@ -52,7 +52,8 @@ public static class OcclusionStage
         // The winning exterior cells of each worldspace. An Occlusion.esp from an earlier xLODGen, DynDOLOD or PenguLOD run would otherwise
         // be the winning override: its stale cell data would be copied forward over later cell edits by other mods, and every cell it
         // holds would count as one that already has occlusion data.
-        var mod = new SkyrimMod(ModKey.FromNameAndExtension(FileName), SkyrimRelease.SkyrimSE) { IsSmallMaster = true };
+        bool allowEsl = game.Release != Mutagen.Bethesda.GameRelease.SkyrimVR || assets.Exists("skse\\plugins\\skyrimvresl.dll");
+        var mod = new SkyrimMod(ModKey.FromNameAndExtension(FileName), SkyrimRelease.SkyrimSE) { IsSmallMaster = allowEsl };
         mod.ModHeader.Stats.NextFormID = 0x800;
         var cellsOf = new Dictionary<string, List<IModContext<ISkyrimMod, ISkyrimModGetter, ICell, ICellGetter>>>(StringComparer.OrdinalIgnoreCase);
         foreach (var ctx in game.LoadOrder.PriorityOrder.Where(l => l.ModKey != mod.ModKey).Cell().WinningContextOverrides(game.LinkCache))
@@ -66,13 +67,17 @@ public static class OcclusionStage
             list.Add(ctx);
         }
 
-        var boundsCache = new Dictionary<string, (float Radius, float Top)?>(StringComparer.OrdinalIgnoreCase);
+        var boundsCache = new Dictionary<string, (System.Numerics.Vector3 Min, System.Numerics.Vector3 Max)?>(StringComparer.OrdinalIgnoreCase);
+        var meshCache = new Dictionary<string, PenguLOD.Meshes.LodMesh?>(StringComparer.OrdinalIgnoreCase);
+        var activeMasters = new HashSet<ModKey>();
+        int overMasterCells = 0;
+        var overMasterPlugins = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         int worlds = 0, cellsTotal = 0, objectsTotal = 0, treesTotal = 0;
 
         foreach (var (ws, grid) in grids.OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
         {
             ct.ThrowIfCancellationRequested();
-            if (children.Contains(ws) || !worldspaces.TryGetValue(ws, out var wrld)) { skipped.Add(ws); continue; }
+            if (children.Contains(ws) || !worldspaces.TryGetValue(ws, out var wrld) || grid.Settings.Stride < 16) { skipped.Add(ws); continue; }
             // Small worlds are left alone, as xLODGen (by the size of the LOD grid) and DynDOLOD (by the Small World flag) leave them,
             // unless the rules switch the worldspace on by name. The worlds that get no underside get no occlusion either, unless the
             // rules give them a mode of their own.
@@ -114,27 +119,41 @@ public static class OcclusionStage
             if (todo.Count == 0 && childCells.Count == 0) { skipped.Add(ws); continue; }
 
             float seaLevel = wrld.LandDefaults?.DefaultWaterHeight is { } wh && float.IsFinite(wh) ? wh : -14000f;
+            var bareHeights = new OcclusionGrid(x0, y0, x1 - x0 + 1, y1 - y0 + 1, seaLevel);
             var heights = new OcclusionGrid(x0, y0, x1 - x0 + 1, y1 - y0 + 1, seaLevel);
             foreach (var c in landCells)
             {
-                if (terrain.TryGetCell(ws, c.X, c.Y, out var v)) heights.SetTerrain(c.X, c.Y, v);
+                if (terrain.TryGetCell(ws, c.X, c.Y, out var v))
+                {
+                    bareHeights.SetTerrain(c.X, c.Y, v);
+                    heights.SetTerrain(c.X, c.Y, v);
+                }
                 if (terrain.WaterAt(ws, c.X * 4096f + 2048f, c.Y * 4096f + 2048f) is { } water)
                     heights.RaiseTop(c.X * 4096f, c.Y * 4096f, (c.X + 1) * 4096f - 1f, (c.Y + 1) * 4096f - 1f, water);
             }
 
             // The tops of what stands in LOD: objects by their LOD mesh, trees by their billboard.
-            int objects = 0, treeCount = 0;
+            // Large opaque static LOD4 meshes (mountains, cliffs >= 2048u footprint) also stamp conservative occluder heights into heights.Terrain.
+            int objects = 0, treeCount = 0, mountainOccluders = 0;
             var owned = new List<(float X, float Y, float Radius, float Top)>();
             foreach (var r in refs)
             {
                 if (!string.Equals(r.Worldspace, ws, StringComparison.OrdinalIgnoreCase)) continue;
                 var mesh = r.Meshes.Lod4 ?? r.Meshes.Lod8 ?? r.Meshes.Lod16 ?? r.Meshes.Lod32;
                 if (string.IsNullOrEmpty(mesh)) continue;
-                var b = MeshBounds(assets, mesh, boundsCache);
+                var b = MeshBounds(assets, mesh, boundsCache, meshCache);
                 if (b is null) continue;
-                float scale = r.Scale <= 0f ? 1f : r.Scale, radius = b.Value.Radius * scale;
-                float top = r.Position.Z + b.Value.Top * scale;
-                heights.RaiseTop(r.Position.X - radius, r.Position.Y - radius, r.Position.X + radius, r.Position.Y + radius, top);
+                float scale = r.Scale <= 0f ? 1f : r.Scale;
+                var (minX, minY, maxX, maxY, topOffset) = RotatedBounds(b.Value.Min, b.Value.Max, r.RotationRadians, scale);
+                float radius = MathF.Max(MathF.Max(MathF.Abs(minX), MathF.Abs(maxX)), MathF.Max(MathF.Abs(minY), MathF.Abs(maxY)));
+                float top = r.Position.Z + topOffset;
+                heights.RaiseTop(r.Position.X + minX, r.Position.Y + minY, r.Position.X + maxX, r.Position.Y + maxY, top);
+                if (r.Meshes.Lod4 is { Length: > 0 } lod4 && !lod4.StartsWith('~')
+                    && maxX - minX >= 2048f && maxY - minY >= 2048f
+                    && StampOpaqueMountain(heights, assets, lod4, r, scale, meshCache, verticalInset: 128f))
+                {
+                    mountainOccluders++;
+                }
                 owned.Add((r.Position.X, r.Position.Y, radius, top));
                 objects++;
             }
@@ -149,27 +168,42 @@ public static class OcclusionStage
                 }
 
             var compute = todo.Concat(childCells.Select(c => (c.Record.Grid!.Point.X, c.Record.Grid.Point.Y))).Distinct().ToList();
-            progress?.Report($"Occlusion {ws}: {compute.Count:N0} cells (mode {mode}), {objects:N0} objects and {treeCount:N0} trees in the height grid ({heights.Width}x{heights.Height} samples)");
+            progress?.Report($"Occlusion {ws}: {compute.Count:N0} cells (mode {mode}), {objects:N0} objects ({mountainOccluders:N0} mountain occluders) and {treeCount:N0} trees in the height grid ({heights.Width}x{heights.Height} samples)");
             var calc = new OcclusionCalculator(heights, grid.Settings.SwCellX, grid.Settings.SwCellY, settings, grid.Settings.Stride);
             calc.AddOwnedTargets(owned);
             int last = 0;
             var data = calc.ComputeMany(compute, new Progress<int>(n => { if (n - last >= 2000) { last = n; progress?.Report($"Occlusion {ws}: {n:N0} of {compute.Count:N0} cells"); } }), ct);
 
             int written = 0;
+            var wsMastersCache = new Dictionary<(ModKey Mod, FormKey Form), HashSet<ModKey>>();
             foreach (var ctx in own.Where(c => todo.Contains((c.Record.Grid!.Point.X, c.Record.Grid.Point.Y))).Concat(childCells))
             {
                 var g = ctx.Record.Grid!;
                 if (!data.TryGetValue((g.Point.X, g.Point.Y), out var tvdt)) continue;
+                var cellMasters = BoundsFixStage.Masters(ctx.Record, mod.ModKey);
+                if (ctx.TryGetParentSimpleContext<IWorldspaceGetter>(out var cellWsCtx))
+                {
+                    var wsKey = (cellWsCtx.ModKey, cellWsCtx.Record.FormKey);
+                    if (!wsMastersCache.TryGetValue(wsKey, out var wsMasters))
+                        wsMastersCache[wsKey] = wsMasters = BoundsFixStage.Masters(cellWsCtx.Record, mod.ModKey);
+                    cellMasters.UnionWith(wsMasters);
+                }
+                var addedMasters = cellMasters.Where(m => !activeMasters.Contains(m)).ToList();
+                if (activeMasters.Count + addedMasters.Count > BoundsFixStage.MaxMasters)
+                {
+                    overMasterCells++;
+                    overMasterPlugins.Add(ctx.ModKey.FileName.String);
+                    continue;
+                }
+                foreach (var m in addedMasters) activeMasters.Add(m);
                 var cell = ctx.GetOrAddAsOverride(mod);
-                // A cell keeps the max-height data it has, as DynDOLOD's Occlusion.esp does. The base game's is not the bare landscape: in
-                // Skyrim.esm it stands on average 1,366 units above it (rock and mountain statics are in it), and objects in loaded cells
-                // are culled against it, so a lower surface computed here is not known to be safe. A cell without any gets the bare landscape.
+                // Keep loaded-cell MaxHeightData computed strictly from bare LAND (never raised by mountain meshes) so caves/arches inside cells aren't culled.
                 if (cell.MaxHeightData is null)
                 {
-                    var (offset, steps) = OcclusionCalculator.BuildMaxHeight(heights, g.Point.X, g.Point.Y);
+                    var (offset, steps) = OcclusionCalculator.BuildMaxHeight(bareHeights, g.Point.X, g.Point.Y);
                     var map = new Array2d<byte>(new byte[32, 32]);
                     for (int i = 0; i < 32; i++)
-                        for (int j = 0; j < 32; j++) map[j, i] = steps[i * 32 + j];   // Mutagen: [column, row]; the file's rows run along X
+                        for (int j = 0; j < 32; j++) map[j, i] = steps[i * 32 + j];
                     cell.MaxHeightData = new CellMaxHeightData { Offset = offset, HeightMap = map };
                 }
                 cell.OcclusionData = tvdt.ToBytes();
@@ -178,6 +212,10 @@ public static class OcclusionStage
             progress?.Report($"Occlusion {ws}: {written:N0} cells written" + (childCells.Count > 0 ? $", {childCells.Count:N0} of them in child worldspaces" : ""));
             worlds++; cellsTotal += written; objectsTotal += objects; treesTotal += treeCount;
         }
+
+        if (overMasterCells > 0)
+            warn($"Occlusion: {overMasterCells:N0} exterior cells were left without new occlusion overrides because their winning plugins would take {FileName} over {BoundsFixStage.MaxMasters} masters. Plugins: {string.Join(", ", overMasterPlugins.Take(12))}"
+                 + (overMasterPlugins.Count > 12 ? $" and {overMasterPlugins.Count - 12} more." : "."));
 
         // Statics with empty bounds are culled by the occlusion data in loaded cells (Base Object Swapper replacements, hand-made statics).
         BoundsFixStage.Result? bounds = null;
@@ -207,11 +245,55 @@ public static class OcclusionStage
         return new Result(path, worlds, cellsTotal, objectsTotal, treesTotal, sw.Elapsed, skipped, bounds);
     }
 
-    /// <summary>A LOD mesh's footprint radius and top (local units), cached by path. Null when it can't be read.</summary>
-    private static (float Radius, float Top)? MeshBounds(IAssetSource assets, string path, Dictionary<string, (float Radius, float Top)?> cache)
+    /// <summary>World-axis bounds relative to the reference origin after applying 3D rotation and scale.</summary>
+    internal static (float MinX, float MinY, float MaxX, float MaxY, float MaxZ) RotatedBounds(
+        System.Numerics.Vector3 lo, System.Numerics.Vector3 hi, System.Numerics.Vector3 rotationRadians, float scale)
+    {
+        if (MathF.Abs(rotationRadians.X) < 1e-6f && MathF.Abs(rotationRadians.Y) < 1e-6f && MathF.Abs(rotationRadians.Z) < 1e-6f)
+            return (lo.X * scale, lo.Y * scale, hi.X * scale, hi.Y * scale, hi.Z * scale);
+        var mat = PenguLOD.Meshes.Transforms.Reference(System.Numerics.Vector3.Zero, rotationRadians, scale);
+        float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+        for (int mask = 0; mask < 8; mask++)
+        {
+            var corner = new System.Numerics.Vector3((mask & 1) == 0 ? lo.X : hi.X, (mask & 2) == 0 ? lo.Y : hi.Y, (mask & 4) == 0 ? lo.Z : hi.Z);
+            var w = System.Numerics.Vector3.Transform(corner, mat);
+            minX = MathF.Min(minX, w.X); maxX = MathF.Max(maxX, w.X);
+            minY = MathF.Min(minY, w.Y); maxY = MathF.Max(maxY, w.Y);
+            maxZ = MathF.Max(maxZ, w.Z);
+        }
+        return (minX, minY, maxX, maxY, maxZ);
+    }
+
+    /// <summary>A LOD mesh's local-space bounding box, cached by path. Null when it can't be read.</summary>
+    private static (System.Numerics.Vector3 Min, System.Numerics.Vector3 Max)? MeshBounds(
+        IAssetSource assets, string path,
+        Dictionary<string, (System.Numerics.Vector3 Min, System.Numerics.Vector3 Max)?> cache,
+        Dictionary<string, PenguLOD.Meshes.LodMesh?> meshCache)
     {
         if (cache.TryGetValue(path, out var known)) return known;
-        (float Radius, float Top)? result = null;
+        (System.Numerics.Vector3 Min, System.Numerics.Vector3 Max)? result = null;
+        if (LoadMesh(assets, path, meshCache) is { } mesh)
+        {
+            var lo = new System.Numerics.Vector3(float.MaxValue);
+            var hi = new System.Numerics.Vector3(float.MinValue);
+            bool any = false;
+            foreach (var part in mesh.Parts)
+                foreach (var p in part.Positions)
+                {
+                    lo = System.Numerics.Vector3.Min(lo, p);
+                    hi = System.Numerics.Vector3.Max(hi, p);
+                    any = true;
+                }
+            if (any) result = (lo, hi);
+        }
+        cache[path] = result;
+        return result;
+    }
+
+    private static PenguLOD.Meshes.LodMesh? LoadMesh(IAssetSource assets, string path, Dictionary<string, PenguLOD.Meshes.LodMesh?> meshCache)
+    {
+        if (meshCache.TryGetValue(path, out var cached)) return cached;
+        PenguLOD.Meshes.LodMesh? mesh = null;
         try
         {
             var rel = path.StartsWith("meshes\\", StringComparison.OrdinalIgnoreCase) ? path : "meshes\\" + path;
@@ -219,19 +301,136 @@ public static class OcclusionStage
             {
                 byte[] bytes;
                 using (stream) { using var ms = new MemoryStream(); stream.CopyTo(ms); bytes = ms.ToArray(); }
-                var mesh = PenguLOD.Meshes.Nif.NifGeometryReader.Read(rel, bytes);
-                float radius = 0f, top = float.MinValue;
-                foreach (var part in mesh.Parts)
-                    foreach (var p in part.Positions)
-                    {
-                        radius = MathF.Max(radius, MathF.Sqrt(p.X * p.X + p.Y * p.Y));
-                        top = MathF.Max(top, p.Z);
-                    }
-                if (top > float.MinValue) result = (radius, top);
+                mesh = PenguLOD.Meshes.Nif.NifGeometryReader.Read(rel, bytes);
             }
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or InvalidDataException or NotSupportedException or IOException) { }
-        cache[path] = result;
-        return result;
+        meshCache[path] = mesh;
+        return mesh;
+    }
+
+    /// <summary>
+    /// Rasterizes upward-facing solid opaque triangles of a large LOD4 mesh onto <paramref name="grid"/>'s <c>Terrain</c>
+    /// at 128-unit sample centers, recessed by <paramref name="verticalInset"/> so silhouette edges never over-occlude.
+    /// </summary>
+    internal static bool StampOpaqueMountain(OcclusionGrid grid, IAssetSource assets, string lod4Path, LodReference r, float scale,
+        Dictionary<string, PenguLOD.Meshes.LodMesh?> meshCache, float verticalInset = 128f)
+    {
+        if (LoadMesh(assets, lod4Path, meshCache) is not { } mesh) return false;
+        var xf = PenguLOD.Meshes.Transforms.Reference(r.Position, r.RotationRadians, scale);
+        float originX = grid.CellX0 * 4096f, originY = grid.CellY0 * 4096f;
+        bool anyRaised = false;
+
+        foreach (var part in mesh.Parts)
+        {
+            if (part.Material.HasAlpha) continue;
+            var pos = part.Positions;
+            var tris = part.Triangles;
+            for (int t = 0; t + 2 < tris.Length; t += 3)
+            {
+                var a = System.Numerics.Vector3.Transform(pos[tris[t]], xf);
+                var b = System.Numerics.Vector3.Transform(pos[tris[t + 1]], xf);
+                var c = System.Numerics.Vector3.Transform(pos[tris[t + 2]], xf);
+                var n = System.Numerics.Vector3.Cross(b - a, c - a);
+                // Only stamp upward-facing solid rock surfaces (n.Z > 0 in XY area = counter-clockwise upward); also accept flipped winding if substantial XY area.
+                float area2 = (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
+                if (MathF.Abs(area2) < 256f) continue;
+                float nLen = n.Length();
+                if (nLen < 1e-3f || MathF.Abs(n.Z) / nLen < 0.15f) continue;
+
+                float minX = MathF.Min(a.X, MathF.Min(b.X, c.X)), maxX = MathF.Max(a.X, MathF.Max(b.X, c.X));
+                float minY = MathF.Min(a.Y, MathF.Min(b.Y, c.Y)), maxY = MathF.Max(a.Y, MathF.Max(b.Y, c.Y));
+                int gx0 = Math.Max(0, (int)MathF.Floor((minX - originX) / OcclusionGrid.SampleSize));
+                int gx1 = Math.Min(grid.Width - 1, (int)MathF.Floor((maxX - originX) / OcclusionGrid.SampleSize));
+                int gy0 = Math.Max(0, (int)MathF.Floor((minY - originY) / OcclusionGrid.SampleSize));
+                int gy1 = Math.Min(grid.Height - 1, (int)MathF.Floor((maxY - originY) / OcclusionGrid.SampleSize));
+                float invArea = 1f / area2;
+
+                for (int gy = gy0; gy <= gy1; gy++)
+                {
+                    float py = originY + (gy + 0.5f) * OcclusionGrid.SampleSize;
+                    for (int gx = gx0; gx <= gx1; gx++)
+                    {
+                        float px = originX + (gx + 0.5f) * OcclusionGrid.SampleSize;
+                        float w0 = ((b.X - px) * (c.Y - py) - (b.Y - py) * (c.X - px)) * invArea;
+                        float w1 = ((c.X - px) * (a.Y - py) - (c.Y - py) * (a.X - px)) * invArea;
+                        float w2 = 1f - w0 - w1;
+                        if (w0 < 0f || w1 < 0f || w2 < 0f) continue;
+                        float hz = w0 * a.Z + w1 * b.Z + w2 * c.Z - verticalInset;
+                        if (grid.RaiseTerrainSample(gx, gy, hz)) anyRaised = true;
+                    }
+                }
+            }
+        }
+        return anyRaised;
+    }
+
+    /// <summary>
+    /// Exports mountain-stamped Community Shaders <c>.Terrain.HeightMap.</c> DDS files into <paramref name="lodOutputFolder"/>
+    /// for worldspaces that already have a terrain heightmap installed and contain mountain occluders taller than bare LAND.
+    /// </summary>
+    public static int ExportMountainHeightmaps(GameContext game, TerrainHeights terrain, IReadOnlyDictionary<string, LodGrid> grids,
+        IReadOnlyList<LodReference> refs, IAssetSource assets, string lodOutputFolder, IProgress<string>? progress, Action<string> warn, CancellationToken ct)
+    {
+        var boundsCache = new Dictionary<string, (System.Numerics.Vector3 Min, System.Numerics.Vector3 Max)?>(StringComparer.OrdinalIgnoreCase);
+        var meshCache = new Dictionary<string, PenguLOD.Meshes.LodMesh?>(StringComparer.OrdinalIgnoreCase);
+        var worldspaces = game.LoadOrder.PriorityOrder.Worldspace().WinningOverrides()
+            .Where(w => w.EditorID is not null).ToDictionary(w => w.EditorID!, w => w, StringComparer.OrdinalIgnoreCase);
+        int exported = 0;
+
+        foreach (var (ws, _) in grids.OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            ct.ThrowIfCancellationRequested();
+            string prefix = $"textures\\terrain\\{ws.ToLowerInvariant()}\\";
+            var existingMap = (assets as AssetIndex)?.EnumeratePaths(prefix).FirstOrDefault(p => p.Contains(".terrain.heightmap.", StringComparison.OrdinalIgnoreCase));
+            if (existingMap is null) continue;
+
+            var landCells = terrain.CellsOf(ws).ToList();
+            if (landCells.Count == 0) continue;
+            int x0 = landCells.Min(c => c.X), x1 = landCells.Max(c => c.X), y0 = landCells.Min(c => c.Y), y1 = landCells.Max(c => c.Y);
+            float defaultLand = worldspaces.TryGetValue(ws, out var wrld) && wrld.LandDefaults?.DefaultLandHeight is { } dl && float.IsFinite(dl) ? dl : -2048f;
+            var grid = new OcclusionGrid(x0, y0, x1 - x0 + 1, y1 - y0 + 1, defaultLand);
+            foreach (var c in landCells)
+                if (terrain.TryGetCell(ws, c.X, c.Y, out var v)) grid.SetTerrain(c.X, c.Y, v);
+
+            int stamped = 0;
+            foreach (var r in refs)
+            {
+                if (!string.Equals(r.Worldspace, ws, StringComparison.OrdinalIgnoreCase)) continue;
+                if (r.Meshes.Lod4 is not { Length: > 0 } lod4 || lod4.StartsWith('~')) continue;
+                var b = MeshBounds(assets, lod4, boundsCache, meshCache);
+                if (b is null) continue;
+                float scale = r.Scale <= 0f ? 1f : r.Scale;
+                var (minX, minY, maxX, maxY, _) = RotatedBounds(b.Value.Min, b.Value.Max, r.RotationRadians, scale);
+                if (maxX - minX < 2048f || maxY - minY < 2048f) continue;
+                if (StampOpaqueMountain(grid, assets, lod4, r, scale, meshCache, verticalInset: 0f))
+                    stamped++;
+            }
+            if (stamped == 0) continue;
+
+            float Sample(float wx, float wy)
+            {
+                float? bare = terrain.HeightAt(ws, wx, wy);
+                int gx = (int)MathF.Floor((wx - x0 * 4096f) / OcclusionGrid.SampleSize);
+                int gy = (int)MathF.Floor((wy - y0 * 4096f) / OcclusionGrid.SampleSize);
+                float mtn = grid.TerrainAt(gx, gy);
+                return bare is { } bh ? MathF.Max(bh, mtn) : mtn;
+            }
+
+            try
+            {
+                var hm = TerrainHeightmap.Export(ws, x0, y0, x1, y1, 8192, (wx, wy) => Sample(wx, wy), ct, fallbackHeight: defaultLand, warn: warn);
+                string full = GamePath.ToFileSystemPath(lodOutputFolder, hm.Path);
+                Directory.CreateDirectory(System.IO.Path.GetDirectoryName(full)!);
+                File.WriteAllBytes(full, hm.Bytes);
+                exported++;
+                progress?.Report($"Mountain heightmap {ws}: stamped {stamped:N0} mountain/cliff models into {hm.Path} for Community Shaders Terrain Shadows.");
+            }
+            catch (Exception ex) when (ex is InvalidDataException or ArgumentException)
+            {
+                warn($"{ws}: skipped mountain-stamped heightmap export ({ex.Message}).");
+            }
+        }
+        return exported;
     }
 }

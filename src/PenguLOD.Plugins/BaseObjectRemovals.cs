@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Text.RegularExpressions;
 using PenguLOD.Core.World;
 using PenguLOD.Core.Pipeline;
@@ -11,32 +12,67 @@ namespace PenguLOD.Plugins;
 public sealed record BaseObjectRemoval(string Reference, string Base, string Worldspace, string File, int Line);
 public sealed record BaseObjectSwapDiagnostic(string File, int Line, string Reason);
 public sealed record BaseObjectSwapReport(bool RuntimeInstalled, int ConfigFiles, int RemovalRules,
-    IReadOnlyList<BaseObjectRemoval> RemovedReferences, IReadOnlyList<BaseObjectSwapDiagnostic> Diagnostics);
+    IReadOnlyList<BaseObjectRemoval> RemovedReferences, IReadOnlyList<BaseObjectSwapDiagnostic> Diagnostics,
+    int SwappedReferences = 0, int TransformedReferences = 0);
 
 /// <summary>
-/// Applies the deterministic invisible-marker subset of Base Object Swapper. A rule we cannot
-/// evaluate blocks an earlier removal for that source; it must never become an unconditional removal.
-/// Files come from the winning virtual Data layer, in BOS's case-sensitive filename order.
+/// Evaluates Base Object Swapper (<c>*_SWAP.ini</c>) rules for static LOD:
+/// deterministic invisible-marker removals (<c>XMarker</c>), deterministic <c>100%</c> and FormID-seeded <c>chanceS</c>
+/// visible model swaps (<c>STAT</c>, <c>MSTT</c>, <c>ACTI</c>, <c>TREE</c>, <c>FURN</c>, <c>CONT</c>), and deterministic
+/// <c>[Transforms]</c> / inline <c>posA</c>/<c>posR</c>/<c>rotA</c>/<c>rotR</c>/<c>scale</c> adjustments.
+/// Non-deterministic <c>chance(&lt;100)</c> / <c>chanceR</c> rules block earlier unconditional removals and leave the winning base intact.
 /// </summary>
 internal sealed partial class BaseObjectRemovals
 {
-    private sealed record Rule(bool Remove, string File, int Line);
+    internal readonly record struct TransformOverride(
+        Vector3? PosAbs, Vector3? PosRel, Vector3? RotAbsRad, Vector3? RotRelRad, float? Scale, bool ScaleIsAbs)
+    {
+        public bool HasAny => PosAbs.HasValue || PosRel.HasValue || RotAbsRad.HasValue || RotRelRad.HasValue || Scale.HasValue;
+
+        public (Vector3 Pos, Vector3 RotRad, float Scale) Apply(Vector3 pos, Vector3 rotRad, float scale)
+        {
+            if (PosAbs is { } pa) pos = pa;
+            if (PosRel is { } pr) pos += pr;
+            if (RotAbsRad is { } ra) rotRad = ra;
+            if (RotRelRad is { } rr) rotRad += rr;
+            if (Scale is { } sc) scale = ScaleIsAbs ? sc : scale * sc;
+            return (pos, rotRad, scale);
+        }
+    }
+
+    private sealed record Rule(
+        bool Remove,
+        FormKey[]? Targets,
+        float SeededChance,     // >0 and <100 when deterministic chanceS(p[, seed]) applies to visible targets
+        uint ExtraSeed,
+        TransformOverride Transform,
+        string File,
+        int Line);
+
+    private sealed record ConditionalRule(
+        HashSet<string>? Worldspaces,
+        HashSet<FormKey>? Cells,
+        Rule Inner);
+
     private static readonly FormKey XMarker = new(ModKey.FromNameAndExtension("Skyrim.esm"), 0x3B);
     private readonly Dictionary<FormKey, Rule> _references = [], _forms = [];
+    private readonly Dictionary<FormKey, TransformOverride> _refTransforms = [], _formTransforms = [];
+    private readonly Dictionary<FormKey, List<ConditionalRule>> _conditionalRules = [];
     private readonly HashSet<FormKey> _conditionalForms = [];
     private readonly List<BaseObjectRemoval> _removed = [];
     private readonly List<BaseObjectSwapDiagnostic> _diagnostics = [];
     private readonly HashSet<FormKey> _excluded = [];
+    private readonly HashSet<FormKey> _swappedRefs = [];
+    private readonly HashSet<FormKey> _transformedRefs = [];
     private readonly HashSet<FormKey> _swapTargets = [];
     private bool _runtime;
     private int _files;
 
     public IReadOnlySet<FormKey> Excluded => _excluded;
-    /// <summary>Every base record a swap can put in, conditional and chance-based ones included: they can stand wherever their source does.</summary>
     public IReadOnlySet<FormKey> SwapTargets => _swapTargets;
     public BaseObjectSwapReport Report => new(_runtime, _files,
         _references.Values.Count(r => r.Remove) + _forms.Count(p => p.Value.Remove && !_conditionalForms.Contains(p.Key)),
-        _removed.ToArray(), _diagnostics.ToArray());
+        _removed.ToArray(), _diagnostics.ToArray(), _swappedRefs.Count, _transformedRefs.Count);
 
     public static BaseObjectRemovals Load(GameContext game, IAssetSource assets, CancellationToken ct, IProgress<string>? progress = null)
     {
@@ -70,6 +106,10 @@ internal sealed partial class BaseObjectRemovals
             resolved[(identifier, typeof(T))] = record;
             return record;
         }
+
+        static bool IsSwappableLodBase(IPlaceableObjectGetter r) =>
+            r is IStaticGetter or IMoveableStaticGetter or IActivatorGetter or ITreeGetter or IFurnitureGetter or IContainerGetter;
+
         foreach (var file in files)
         {
             ct.ThrowIfCancellationRequested();
@@ -89,36 +129,111 @@ internal sealed partial class BaseObjectRemovals
                 if (line[0] == '[' && line.EndsWith(']')) { section = line[1..^1]; continue; }
                 if (section.Length == 0) continue;
                 void Diagnostic(string reason) => result._diagnostics.Add(new(name, i + 1, reason));
-                bool conditional = section.Contains('|'), forms = section.Split('|')[0] == "Forms";
-                // Conditional sections other than Forms are property overrides, not reference swaps.
-                if (section is "Properties" or "Transforms" || (conditional && !forms))
+
+                var secParts = section.Split('|');
+                string secHead = secParts[0].Trim();
+                bool conditional = secParts.Length > 1;
+                bool isForms = secHead.Equals("Forms", StringComparison.OrdinalIgnoreCase);
+                bool isRefs = secHead.Equals("References", StringComparison.OrdinalIgnoreCase);
+                bool isTransforms = secHead.Equals("Transforms", StringComparison.OrdinalIgnoreCase);
+
+                if (isTransforms && !conditional)
+                {
+                    var tfFields = line.Split('|');
+                    if (tfFields.Length < 2) { Diagnostic("Malformed transform entry."); continue; }
+                    bool tfCertain = tfFields.Length < 3 || CertainChance(tfFields[2]);
+                    if (!tfCertain || !TryParseTransforms(tfFields[1], out var tfOnly) || !tfOnly.HasAny)
+                    {
+                        Diagnostic("Random or unsupported transform override is not applied to LOD.");
+                        continue;
+                    }
+                    foreach (var rawId in tfFields[0].Split(','))
+                    {
+                        if (Resolve<IPlacedObjectGetter>(rawId) is { } pr) result._refTransforms[pr.FormKey] = tfOnly;
+                        else if (Resolve<IPlaceableObjectGetter>(rawId) is { } pb) result._formTransforms[pb.FormKey] = tfOnly;
+                    }
+                    continue;
+                }
+
+                if (secHead.Equals("Properties", StringComparison.OrdinalIgnoreCase) || isTransforms || (conditional && !isForms))
                 { Diagnostic("Property overrides are not applied to LOD."); continue; }
+                if (!isForms && !isRefs)
+                { Diagnostic("Unsupported swap section."); continue; }
+
                 var fields = line.Split('|');
                 if (fields.Length < 2) { Diagnostic("Malformed swap entry."); continue; }
-                var sources = fields[0].Split(',').Select(id => forms ? Resolve<IPlaceableObjectGetter>(id) : Resolve<IPlacedObjectGetter>(id))
+                var sources = fields[0].Split(',').Select(id => isForms ? Resolve<IPlaceableObjectGetter>(id) : Resolve<IPlacedObjectGetter>(id))
                     .OfType<IMajorRecordGetter>().Select(r => r.FormKey).Distinct().ToArray();
                 if (sources.Length == 0) { Diagnostic("Source is unresolved in the selected load order."); continue; }
-                // BOS ignores unresolved targets. Keep valid entries from a target list, as BOS does.
-                var targets = fields[1].Split(',').Select(Resolve<IPlaceableObjectGetter>).OfType<IPlaceableObjectGetter>()
-                    .Where(r => !r.IsDeleted).Select(r => r.FormKey).Distinct().ToArray();
+
+                var targetRecords = fields[1].Split(',').Select(Resolve<IPlaceableObjectGetter>).OfType<IPlaceableObjectGetter>()
+                    .Where(r => !r.IsDeleted).DistinctBy(r => r.FormKey).ToArray();
+                var targets = targetRecords.Select(r => r.FormKey).ToArray();
                 if (targets.Length == 0) { Diagnostic("Replacement is unresolved or is not a placeable object."); continue; }
                 result._swapTargets.UnionWith(targets);
+
+                TransformOverride inlineTf = default;
+                bool tfDeterministic = fields.Length < 3 || string.IsNullOrWhiteSpace(fields[2]) || TryParseTransforms(fields[2], out inlineTf);
+
+                string chanceField = fields.Length >= 4 ? fields[3] : "";
+                bool certain = string.IsNullOrWhiteSpace(chanceField) || CertainChance(chanceField);
+                float seededPct = 0f;
+                uint extraSeed = 0u;
+                bool seededVisible = !certain && targets.All(t => t != XMarker) && targetRecords.All(IsSwappableLodBase)
+                    && TryParseSeededChance(chanceField, out seededPct, out extraSeed);
+
                 if (conditional)
                 {
                     result._conditionalForms.UnionWith(sources);
+                    if ((certain || seededVisible) && targets.All(t => t != XMarker) && targetRecords.All(IsSwappableLodBase)
+                        && TryResolveConditions(secParts[1], Resolve<IWorldspaceGetter>, Resolve<ICellGetter>, out var wsFilter, out var cellFilter))
+                    {
+                        var condRule = new ConditionalRule(wsFilter, cellFilter,
+                            new Rule(false, certain && targets.Length == 1 ? targets : seededVisible ? targets : null,
+                                seededVisible ? seededPct : 100f, extraSeed, tfDeterministic ? inlineTf : default, name, i + 1));
+                        if (condRule.Inner.Targets is not null)
+                        {
+                            foreach (var src in sources)
+                            {
+                                if (!result._conditionalRules.TryGetValue(src, out var list)) result._conditionalRules[src] = list = [];
+                                list.Add(condRule);
+                            }
+                            continue;
+                        }
+                    }
                     Diagnostic("Conditional base swaps are not applied; they block unconditional base removals.");
                     continue;
                 }
-                bool certain = fields.Length < 4 || CertainChance(fields[3]);
+
                 bool remove = targets.Length == 1 && targets[0] == XMarker && certain;
+                FormKey[]? activeTargets = null;
+                if (!remove)
+                {
+                    if (certain && targets.Length == 1 && targetRecords.All(IsSwappableLodBase))
+                        activeTargets = targets;
+                    else if (seededVisible)
+                        activeTargets = targets;
+                }
+
                 foreach (var source in sources)
                 {
                     if (targets.Length == 1 && source == targets[0]
                         && (fields.Length < 3 || !PropertyFunction().IsMatch(fields[2]))) continue;
-                    (forms ? result._forms : result._references)[source] = new(remove, name, i + 1);
+                    (isForms ? result._forms : result._references)[source] =
+                        new Rule(remove, activeTargets, seededVisible ? seededPct : (activeTargets is not null ? 100f : 0f),
+                            extraSeed, tfDeterministic ? inlineTf : default, name, i + 1);
                 }
-                if (!remove) Diagnostic(!certain ? "Chance-based swap is not evaluated."
-                    : targets.Length > 1 ? "Random replacement choice is not evaluated." : "Visible model replacement is not applied to LOD.");
+
+                if (!remove && activeTargets is null)
+                {
+                    Diagnostic(!certain ? "Chance-based swap is not evaluated."
+                        : targets.Length > 1 ? "Random replacement choice is not evaluated."
+                        : "Replacement object type is not supported for static LOD.");
+                }
+                else if (seededVisible)
+                {
+                    Diagnostic("Evaluated deterministic FormID-seeded chanceS swap.");
+                }
             }
         }
         return result;
@@ -127,7 +242,6 @@ internal sealed partial class BaseObjectRemovals
     public bool Exclude(IPlacedObjectGetter reference, string worldspace)
     {
         if (reference.Base.FormKeyNullable is not { } baseKey) return false;
-        // A reference-specific swap takes precedence over conditional and unconditional base swaps.
         if (!_references.TryGetValue(reference.FormKey, out var rule))
         {
             if (_conditionalForms.Contains(baseKey) || !_forms.TryGetValue(baseKey, out rule)) return false;
@@ -138,9 +252,169 @@ internal sealed partial class BaseObjectRemovals
         return true;
     }
 
+    /// <summary>
+    /// Resolves deterministic or <c>chanceS</c>-seeded base object swap and placement transform for an exterior placed object.
+    /// </summary>
+    public (FormKey EffectiveBase, Vector3 Position, Vector3 RotationRadians, float Scale) ResolvePlacement(
+        IPlacedObjectGetter reference, FormKey originalBase, string worldspace, FormKey? cellKey,
+        Vector3 position, Vector3 rotationRadians, float scale)
+    {
+        FormKey effectiveBase = originalBase;
+        TransformOverride ruleTf = default;
+
+        Rule? chosen = null;
+        if (_references.TryGetValue(reference.FormKey, out var refRule))
+        {
+            chosen = refRule;
+        }
+        else if (_conditionalRules.TryGetValue(originalBase, out var condList))
+        {
+            for (int i = condList.Count - 1; i >= 0; i--)
+            {
+                var c = condList[i];
+                bool wsOk = c.Worldspaces is null || c.Worldspaces.Contains(worldspace);
+                bool cellOk = c.Cells is null || (cellKey is { } ck && c.Cells.Contains(ck));
+                if (wsOk && cellOk) { chosen = c.Inner; break; }
+            }
+        }
+        else if (!_conditionalForms.Contains(originalBase) && _forms.TryGetValue(originalBase, out var formRule))
+        {
+            chosen = formRule;
+        }
+
+        if (chosen is { Remove: false, Targets: { Length: > 0 } targets })
+        {
+            ruleTf = chosen.Transform;
+            if (chosen.SeededChance >= 100f && targets.Length == 1)
+            {
+                effectiveBase = targets[0];
+            }
+            else if (chosen.SeededChance > 0f)
+            {
+                uint hash = DeterministicSeed(reference.FormKey, chosen.ExtraSeed);
+                float roll = (hash & 0xFFFFFFu) / 16777216f * 100f;
+                if (roll < chosen.SeededChance)
+                {
+                    int pick = targets.Length == 1 ? 0 : (int)((hash >> 24) % (uint)targets.Length);
+                    effectiveBase = targets[pick];
+                }
+            }
+        }
+
+        if (effectiveBase != originalBase) _swappedRefs.Add(reference.FormKey);
+
+        bool anyTransform = false;
+        if (_formTransforms.TryGetValue(originalBase, out var ftf) && ftf.HasAny)
+        {
+            (position, rotationRadians, scale) = ftf.Apply(position, rotationRadians, scale);
+            anyTransform = true;
+        }
+        if (_refTransforms.TryGetValue(reference.FormKey, out var rtf) && rtf.HasAny)
+        {
+            (position, rotationRadians, scale) = rtf.Apply(position, rotationRadians, scale);
+            anyTransform = true;
+        }
+        if (ruleTf.HasAny && (effectiveBase != originalBase || chosen?.Targets is { Length: 1 } self && self[0] == originalBase))
+        {
+            (position, rotationRadians, scale) = ruleTf.Apply(position, rotationRadians, scale);
+            anyTransform = true;
+        }
+        if (anyTransform) _transformedRefs.Add(reference.FormKey);
+
+        return (effectiveBase, position, rotationRadians, scale);
+    }
+
+    private static uint DeterministicSeed(FormKey refKey, uint extraSeed)
+    {
+        uint h = 2166136261u;
+        foreach (char ch in refKey.ModKey.FileName.String)
+            h = (h ^ char.ToLowerInvariant(ch)) * 16777619u;
+        h = (h ^ refKey.ID) * 16777619u;
+        h = (h ^ extraSeed) * 16777619u;
+        h ^= h >> 16;
+        h *= 0x85ebca6bu;
+        h ^= h >> 13;
+        return h;
+    }
+
+    private static bool TryResolveConditions(
+        string conditionList,
+        Func<string, IMajorRecordGetter?> resolveWorld,
+        Func<string, IMajorRecordGetter?> resolveCell,
+        out HashSet<string>? worldspaces,
+        out HashSet<FormKey>? cells)
+    {
+        worldspaces = null;
+        cells = null;
+        foreach (var raw in conditionList.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (raw.StartsWith('-') || raw.Contains('(')) return false; // exclusions / function conditions stay conservative
+            if (resolveWorld(raw) is IWorldspaceGetter ws && !string.IsNullOrEmpty(ws.EditorID))
+            {
+                worldspaces ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                worldspaces.Add(ws.EditorID);
+            }
+            else if (resolveCell(raw) is ICellGetter cell)
+            {
+                cells ??= [];
+                cells.Add(cell.FormKey);
+            }
+            else return false;
+        }
+        return worldspaces is not null || cells is not null;
+    }
+
+    private static bool TryParseSeededChance(string traits, out float pct, out uint seed)
+    {
+        pct = 0f;
+        seed = 0u;
+        var m = SeededChanceRegex().Match(traits);
+        if (!m.Success) return false;
+        if (!float.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out pct)
+            || !float.IsFinite(pct) || pct <= 0f || pct >= 100f)
+            return false;
+        if (m.Groups[2].Success && uint.TryParse(m.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out uint parsedSeed))
+            seed = parsedSeed;
+        return true;
+    }
+
+    private static bool TryParseTransforms(string traits, out TransformOverride tf)
+    {
+        tf = default;
+        if (traits.Contains('/')) return false; // BOS min/max random range e.g. scale(0.8/1.2) is non-deterministic
+        const float DegToRad = MathF.PI / 180f;
+        Vector3? posA = null, posR = null, rotA = null, rotR = null;
+        float? scale = null;
+        bool scaleAbs = false;
+
+        foreach (Match m in Vec3TraitRegex().Matches(traits))
+        {
+            if (!float.TryParse(m.Groups[2].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float x)
+                || !float.TryParse(m.Groups[3].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float y)
+                || !float.TryParse(m.Groups[4].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float z))
+                return false;
+            switch (m.Groups[1].Value)
+            {
+                case "posA": posA = new Vector3(x, y, z); break;
+                case "posR": posR = new Vector3(x, y, z); break;
+                case "rotA": rotA = new Vector3(x * DegToRad, y * DegToRad, z * DegToRad); break;
+                case "rotR": rotR = new Vector3(x * DegToRad, y * DegToRad, z * DegToRad); break;
+            }
+        }
+        var sm = ScaleTraitRegex().Match(traits);
+        if (sm.Success)
+        {
+            if (!float.TryParse(sm.Groups[2].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float s) || s <= 0f || !float.IsFinite(s))
+                return false;
+            scale = s;
+            scaleAbs = sm.Groups[1].Value.EndsWith('A');
+        }
+        tf = new TransformOverride(posA, posR, rotA, rotR, scale, scaleAbs);
+        return true;
+    }
+
     private static bool CertainChance(string traits)
     {
-        // Legacy removers put flag(...) here. BOS treats this field as chance, not record flags.
         if (!traits.Contains("chance", StringComparison.Ordinal)) return true;
         var match = Chance().Match(traits);
         return match.Success && float.TryParse(match.Groups[1].Value, NumberStyles.Float,
@@ -151,6 +425,12 @@ internal sealed partial class BaseObjectRemovals
 
     [GeneratedRegex(@"chance[SLR]?\(\s*([^,)]+)")]
     private static partial Regex Chance();
+    [GeneratedRegex(@"chanceS\(\s*([^,)]+)(?:\s*,\s*(\d+))?\s*\)")]
+    private static partial Regex SeededChanceRegex();
+    [GeneratedRegex(@"\b(posA|posR|rotA|rotR)\(\s*([^,)]+)\s*,\s*([^,)]+)\s*,\s*([^,)]+)\s*\)")]
+    private static partial Regex Vec3TraitRegex();
+    [GeneratedRegex(@"\b(scaleA?)\(\s*([^,)]+)\s*\)")]
+    private static partial Regex ScaleTraitRegex();
     [GeneratedRegex(@"(?:pos[AR]?|rot[AR]?|scaleA?|flagsC?)\(")]
     private static partial Regex PropertyFunction();
 }

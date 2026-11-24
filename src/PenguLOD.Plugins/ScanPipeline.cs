@@ -68,7 +68,11 @@ public sealed record ScanRequest(
     bool SeasonsStrict = false,                    // stop on an unresolved season swap instead of skipping and reporting it
     // With Seasons: the seasons to generate, as SeasonSwaps.SelectionText writes them ("WIN" or "WIN,SUM"); null = all four.
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    string? OnlySeasons = null);
+    string? OnlySeasons = null,
+    int AtlasPageSize = ObjectAtlasStage.PageSize,
+    int GrassMaxLevel = 4,
+    int GrassTiers = 1,
+    bool AdaptiveQuality = false);
 
 public sealed record ScanSummary(
     ScanStats Stats,
@@ -114,7 +118,7 @@ public static class ScanPipeline
     /// ESL size for the plugins PenguLOD splits (the effects plugins): game 1.6.1130 and newer read 4,096 FormIDs per ESL, older ones 2,048,
     /// and a plugin made for the larger range does not load on an older game. Auto reads the installed game's version and falls back to 2,048.
     /// </summary>
-    internal static bool ResolveLargeEsl(int choice, string dataFolder, IProgress<string>? progress)
+    internal static bool ResolveLargeEsl(int choice, string dataFolder, IProgress<string>? progress, IReadOnlyList<string>? gameRootFolders = null)
     {
         if (choice == 2048) return false;
         if (choice == 4096)
@@ -122,7 +126,7 @@ public static class ScanPipeline
             progress?.Report("ESL size: 4,096 records per plugin (your choice; needs game 1.6.1130 or newer).");
             return true;
         }
-        var v = SksePluginInstaller.GameVersion(dataFolder);
+        var v = SksePluginInstaller.GameVersion(dataFolder, gameRootFolders);
         bool large = v is not null && v >= new Version(1, 6, 1130, 0);
         progress?.Report(v is null
             ? "ESL size: 2,048 records per plugin (the game version could not be read; pick 4,096 yourself if you run 1.6.1130 or newer)."
@@ -140,6 +144,12 @@ public static class ScanPipeline
         // Checked before the scan so a bad value does not waste a full run. Only generation with the option uses them.
         if (req.Generate && req.ObjectAtlas && (req.AtlasCellSize is < 64 or > 512 || (req.AtlasCellSize & (req.AtlasCellSize - 1)) != 0))
             throw new ArgumentException("Atlas cell size must be a power of two from 64 to 512.");
+        if (req.Generate && req.ObjectAtlas && (req.AtlasPageSize is < 512 or > 8192 || (req.AtlasPageSize & (req.AtlasPageSize - 1)) != 0 || req.AtlasPageSize < req.AtlasCellSize))
+            throw new ArgumentException("Atlas page size must be a power of two from 512 to 8192 and at least the cell size.");
+        if (req.GrassMaxLevel is not (4 or 8 or 16))
+            throw new ArgumentException("Grass maximum LOD level must be 4, 8 or 16.");
+        if (req.GrassTiers is not (1 or PenguLOD.Core.Lod.LodLayers.GrassTiers))
+            throw new ArgumentException("Grass runtime tiers must be 1 or 4.");
         if (req.Generate && req.OptimizeObjectTextures && (req.ObjectTextureSize is < 128 or > 4096 || (req.ObjectTextureSize & (req.ObjectTextureSize - 1)) != 0))
             throw new ArgumentException("Object texture size must be a power of two from 128 to 4096.");
         if (req.AutomaticObjects is { Enabled: true })
@@ -248,6 +258,7 @@ public static class ScanPipeline
             p => p.StartsWith("meshes\\", StringComparison.Ordinal) || p.StartsWith("lodsettings\\", StringComparison.Ordinal)
                  || p.StartsWith("dyndolod\\", StringComparison.Ordinal) || p.StartsWith("textures\\terrain\\lodgen\\", StringComparison.Ordinal)
                  || p.StartsWith("grass\\", StringComparison.Ordinal) || p.StartsWith("seasons\\", StringComparison.Ordinal)
+                 || p.StartsWith("pbrjsons\\", StringComparison.Ordinal)
                  || p.StartsWith("textures\\", StringComparison.Ordinal)); // grass model textures (rendered grass billboards), the textures 3D tree LOD models need, and so the texture audit can tell a BSA texture from a missing one
         progress?.Report($"Indexed {assets.ArchivedFileCount:N0} files from {assets.ArchiveCount} archives in {assets.IndexTime.TotalSeconds:F1}s");
         if (req.GeneratedTerrainFolder is { } terrainFolder)
@@ -343,8 +354,10 @@ public static class ScanPipeline
             File.WriteAllLines(cellsPath + ".cells", dumpRegions.SelectMany(r => r.ChildCells.Select(c => $"{r.ChildWorldspace}	{c.X}	{c.Y}")));
         progress?.Report($"Scan: {scan.Stats.LodReferencesFound:N0} LOD refs from {scan.Stats.PlacedObjectsVisited:N0} refs in {scan.Stats.Elapsed.TotalSeconds:F1}s");
 
+        bool hasExistingHeightmaps = req.Generate && scan.Grids.Keys.Any(ws =>
+            assets.EnumeratePaths($"textures\\terrain\\{ws.ToLowerInvariant()}\\").Any(p => p.Contains(".terrain.heightmap.", StringComparison.OrdinalIgnoreCase)));
         TerrainReader.Result? terrain = null;
-        if ((req.RemoveBuried || req.Generate && (req.Underside || req.Occlusion is not null)) && scan.Grids.Count > 0)
+        if ((req.RemoveBuried || req.Generate && (req.Underside || req.Occlusion is not null || hasExistingHeightmaps)) && scan.Grids.Count > 0)
         {
             progress?.Report("Reading terrain heights (LAND)...");
             terrain = TerrainReader.Read(game, scan.Grids.Keys.ToList(), ct);
@@ -360,9 +373,11 @@ public static class ScanPipeline
         if (req.GrassLod && !grassInBlocks)
             progress?.Report("Grass LOD: left out of the blocks, because Community Shaders' Grass Optimizations is installed and \"Leave grass to Grass Optimizations\" is on. "
                              + "Beyond the game's grass distance there is no grass. The feature's LOD meshes are used only when its mesh LOD setting is on in the Community Shaders menu.");
-        if (grassInBlocks && scan.Grids.Count > 0 && (req.Levels is not { Count: > 0 } || req.Levels.Contains(LodLevel.Lod4)))
+        if (grassInBlocks && scan.Grids.Count > 0 && (req.Levels is not { Count: > 0 } || req.Levels.Any(l => (int)l <= req.GrassMaxLevel)))
         {
-            grass = new GrassLodSource(game, assets, req.GrassDensity, req.GrassSize, req.Generate ? req.OutputFolder : null, req.GrassTop, req.GrassBottom);
+            int effectiveGrassTiers = req.AdaptiveQuality || AdaptiveEnabledInIni(assets, req.OutputFolder)
+                ? PenguLOD.Core.Lod.LodLayers.GrassTiers : req.GrassTiers;
+            grass = new GrassLodSource(game, assets, req.GrassDensity, req.GrassSize, req.Generate ? req.OutputFolder : null, req.GrassTop, req.GrassBottom, req.GrassMaxLevel, effectiveGrassTiers);
             var grassRefs = grass.Discover(scan.Grids, req.Seasons, onlySeasons);
             if (req.Generate && grassRefs.Count > 0)
             {
@@ -510,20 +525,53 @@ public static class ScanPipeline
             }
 
             var light = allTrees.Where(t => TreeCardSource.NeedsCards(t) && !in3d.Contains(t)).ToList();
-            if (light.Count > 0 || in3d.Count > 0)
+            var seasonalCardTrees = new List<TreeReference>();
+            var seasonal3dTrees = new List<TreeReference>();
+            if (req.Seasons && (light.Count > 0 || in3d.Count > 0))
+            {
+                var preSeasons = SeasonalAssets.Read(game, assets, "Trees", strict: false, warn: null, onlySeasons);
+                if (preSeasons.Count > 0)
+                {
+                    Dictionary<string, ParallaxGenDiff.Entry>? prePgDiff = null;
+                    if (t3.Enabled && assets.TryOpen(ParallaxGenDiff.FileName, out var prePgStream))
+                    {
+                        using (prePgStream) prePgDiff = ParallaxGenDiff.Parse(prePgStream, out _);
+                        if (prePgDiff.Count == 0) prePgDiff = null;
+                    }
+                    foreach (var swaps in preSeasons.Values)
+                        foreach (var tree in light.Concat(in3d))
+                        {
+                            var swapped = SeasonalAssets.SwapTree(game, assets, tree, swaps, t3, missingBillboard: null, lodIndex, prePgDiff);
+                            if (swapped == tree) continue;
+                            seasonalCardTrees.Add(swapped);
+                            if (tree3d is not null && swapped.Model3D is not null && tree3d.Validate(swapped.Model3D, swapped.MaterialVariant, swapped.Model3DGenerated) is null)
+                                seasonal3dTrees.Add(swapped);
+                        }
+                }
+            }
+            var preObjCards = allRefs.SelectMany(r => new[] { r.Meshes.Lod4, r.Meshes.Lod8, r.Meshes.Lod16, r.Meshes.Lod32 })
+                .Where(m => m is not null && m.StartsWith(TreeCardSource.Prefix, StringComparison.Ordinal))
+                .Select(m => m!.StartsWith(TreeCardSource.FarPrefix, StringComparison.Ordinal) ? m[TreeCardSource.FarPrefix.Length..] : m[TreeCardSource.Prefix.Length..])
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (light.Count > 0 || in3d.Count > 0 || preObjCards.Count > 0)
             {
                 cards = new TreeCardSource(assets, req.TreeBrightness);
                 if (req.Generate && req.OutputFolder is { } cardOutput)
                 {
-                    progress?.Report("Tree cards: packing the tree billboards into one atlas...");
-                    cards.PrepareAtlas(cardOutput, light.Concat(in3d).Select(t => t.Billboard.TexturePath));
+                    progress?.Report("Tree cards: packing the tree billboards into near and far atlases...");
+                    var cardPaths = light.Concat(in3d).Concat(seasonalCardTrees).Select(t => t.Billboard.TexturePath).Concat(preObjCards).ToList();
+                    cards.PrepareAtlas(cardOutput, cardPaths);
+                    cards.PrepareNearAtlas(cardOutput, cardPaths);
                     if (cards.Atlas is { } packed)
-                        progress?.Report($"Tree cards: {packed.Tiles:N0} billboards in one {packed.Size}x{packed.Size} atlas (tiles up to {Math.Min(TreeCardSource.AtlasTile, packed.SizeCap)} px, {packed.Reduced:N0} scaled down), so each block from LOD8 on needs one tree card material.");
+                        progress?.Report($"Tree cards: {packed.Tiles:N0} billboards in one {packed.Size}x{packed.Size} far atlas (tiles up to {Math.Min(TreeCardSource.AtlasTile, packed.SizeCap)} px, {packed.Reduced:N0} scaled down), so each block from LOD8 on needs one tree card material.");
+                    if (cards.NearAtlas is { } nearPacked)
+                        progress?.Report($"Tree cards (LOD4): {nearPacked.Tiles:N0} billboards in one {nearPacked.Size}x{nearPacked.Size} near atlas (tiles up to {Math.Min(TreeCardSource.NearAtlasTile, nearPacked.SizeCap)} px, {nearPacked.Reduced:N0} scaled down).");
                 }
             }
             if (in3d.Count > 0)
             {
                 allRefs = [.. allRefs, .. tree3d!.ToReferences(in3d, t3)];
+                if (seasonal3dTrees.Count > 0) _ = tree3d.ToReferences(seasonal3dTrees, t3).ToArray();
                 if (req.Generate && req.OutputFolder is { } trunkOutput)
                 {
                     tree3d.PrepareTrunkAtlas(trunkOutput);
@@ -541,6 +589,20 @@ public static class ScanPipeline
             if (light.Count > 0 || in3d.Count > 0)
                 bttTrees = allTrees.Where(t => !TreeCardSource.NeedsCards(t) && !in3d.Contains(t)).ToList();
         }
+        // Object rules requesting Billboard1..6 or FlagTree also emit ~pengulod-treecard| synthetic meshes, even if TreeLod is off or has no light/3D trees.
+        var objCardTextures = allRefs.SelectMany(r => new[] { r.Meshes.Lod4, r.Meshes.Lod8, r.Meshes.Lod16, r.Meshes.Lod32 })
+            .Where(m => m is not null && m.StartsWith(TreeCardSource.Prefix, StringComparison.Ordinal))
+            .Select(m => m!.StartsWith(TreeCardSource.FarPrefix, StringComparison.Ordinal) ? m[TreeCardSource.FarPrefix.Length..] : m[TreeCardSource.Prefix.Length..])
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (objCardTextures.Count > 0 && cards is null)
+        {
+            cards = new TreeCardSource(assets, req.TreeBrightness);
+            if (req.Generate && req.OutputFolder is { } objCardOut)
+            {
+                cards.PrepareAtlas(objCardOut, objCardTextures);
+                cards.PrepareNearAtlas(objCardOut, objCardTextures);
+            }
+        }
         string? Fingerprint(string p) => grass?.Fingerprint(p) ?? cards?.Fingerprint(p) ?? tree3d?.Fingerprint(p) ?? ships?.Fingerprint(p) ?? assets.Fingerprint(p);
 
         RecipeTextureMapper? recipeMapper = null;
@@ -552,14 +614,19 @@ public static class ScanPipeline
             var recipeSet = generated?.Recipes ?? readRules!.Program;
             if (recipeSet.Entries.Count > 0)
             {
-                byte[]? RecipeSource(string path)
+                Stream? OpenRecipeSource(string path)
                 {
                     if (generated?.RecipeInputs.TryGetValue(path, out var saved) == true)
-                        return File.ReadAllBytes(GamePath.ToFileSystemPath(req.GeneratedTextureFolder!, saved));
-                    if (!assets.TryOpenSource(path, out var stream)) return null;
-                    using (stream) { using var buffer = new MemoryStream(); stream.CopyTo(buffer); return buffer.ToArray(); }
+                        return File.OpenRead(GamePath.ToFileSystemPath(req.GeneratedTextureFolder!, saved));
+                    return assets.TryOpenSource(path, out var stream) ? stream : null;
                 }
-                recipeMapper = new(recipeSet, assets, req.OutputFolder ?? Path.GetTempPath(), RecipeSource, Warn, req.PbrLod ? req.PbrLodBrightness : null);
+                byte[]? RecipeSource(string path)
+                {
+                    using var stream = OpenRecipeSource(path);
+                    if (stream is null) return null;
+                    using var buffer = new MemoryStream(); stream.CopyTo(buffer); return buffer.ToArray();
+                }
+                recipeMapper = new(recipeSet, assets, req.OutputFolder ?? Path.GetTempPath(), RecipeSource, Warn, req.PbrLod ? req.PbrLodBrightness : null, openSource: OpenRecipeSource);
                 progress?.Report("Fingerprinting recipe sources and record texture variants...");
                 req = req with { SettingsFingerprint = req.SettingsFingerprint + "|recipes5:" + recipeMapper.InputFingerprint(scan.TextureVariants?.Values ?? []) };
             }
@@ -572,12 +639,82 @@ public static class ScanPipeline
         if (req.Levels is { Count: > 0 } levels)
             quads = quads.Where(kv => levels.Contains(kv.Key.Level)).ToDictionary(kv => kv.Key, kv => kv.Value);
 
+        LodGenerator? preparedGenerator = null;
+        Dictionary<string, string>? meshTransformStamps = null;
+        if (req.Generate)
+        {
+            var output = req.OutputFolder!;
+            if (!req.ObjectAtlas)
+            {
+                File.Delete(Path.Combine(output, "PenguLOD.atlas.json"));
+                File.Delete(Path.Combine(output, ObjectAtlasStage.LayoutFileName));
+            }
+            if (!req.OptimizeObjectTextures) File.Delete(Path.Combine(output, "PenguLOD.object-textures.json"));
+            var pbrCatalog = req.PbrLod ? TruePbrCatalog.Load(assets, assets.EnumeratePaths("pbrjsons\\")) : null;
+            if (pbrCatalog is { Count: > 0 }) progress?.Report($"TruePBR catalog: {pbrCatalog.Count:N0} PBRJSON material rule(s) indexed.");
+            var pbrLod = req.PbrLod ? new PbrLodTextures(assets, pbrCatalog) : null;
+            var opaqueLod = req.OpaqueAlpha ? new OpaqueLodTextures(assets, OpaqueLodStage.IsTranslucent) : null;
+            var seasonalVariants = scan.TextureVariants?.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+            preparedGenerator = new LodGenerator(assets, cullTerrain?.Heights, new CompositeSyntheticSource(grass, cards, tree3d, ships))
+            {
+                RemoveUnderwater = req.RemoveUnderwater, Brightness = req.ObjectBrightness, SnowShaderMode = req.SnowShaderMode, SnowCover = req.SnowCover,
+                FitMountains = req.MountainFit && req.MountainInset > 0f, Pbr = pbrLod, Opaque = opaqueLod, Categorize = SizeBreakdown.Categorize,
+                Inset = req.IceInset > 0f || req.MountainInset > 0f || req.ObjectInset > 0f || req.DetailedShips ? path => LodInset.For(path, req.IceInset, req.MountainInset, req.DetailedShips ? LodInset.DefaultShip : 0f, req.ObjectInset) : null,
+                TextureVariants = seasonalVariants, RecipeMapper = recipeMapper is null ? null : recipeMapper.Map,
+            };
+            if (req.ObjectAtlas || req.OptimizeObjectTextures)
+            {
+                var uniqueKeys = quads.SelectMany(kv => kv.Value.Select(r => (Path: r.Meshes.For(kv.Key.Level), r.TextureVariant)))
+                    .Where(r => r.Path is { Length: > 0 } && !r.Path.StartsWith('~'))
+                    .Select(r => LodMeshKey.Make(r.Path!, r.TextureVariant))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                progress?.Report($"Preparing {uniqueKeys.Length:N0} object LOD meshes & recipe variants...");
+                var meshBag = new System.Collections.Concurrent.ConcurrentDictionary<string, PenguLOD.Meshes.LodMesh>(StringComparer.OrdinalIgnoreCase);
+                int doneMeshes = 0;
+                Parallel.ForEach(uniqueKeys, RunLimits.Parallel(ct), key =>
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (preparedGenerator.GetMesh(key) is { } mesh) meshBag[key] = mesh;
+                    int n = Interlocked.Increment(ref doneMeshes);
+                    if (n % 250 == 0 || n == uniqueKeys.Length)
+                        progress?.Report($"Prepared {n:N0}/{uniqueKeys.Length:N0} object LOD meshes & recipe variants...");
+                });
+                var meshByKey = new Dictionary<string, PenguLOD.Meshes.LodMesh>(meshBag, StringComparer.OrdinalIgnoreCase);
+                var models = meshByKey.Values.ToArray();
+                if (pbrLod is not null && PbrLodStage.Run(assets, pbrLod, output, req.PbrLodSize, req.PbrLodBrightness, progress, ct) is { Failed: > 0 } pbrFailure)
+                    throw new InvalidDataException("Cannot prepare failed PBR material inputs: " + string.Join("; ", pbrFailure.Errors));
+                if (opaqueLod is not null && OpaqueLodStage.Run(assets, opaqueLod, output, progress, ct) is { Failed: > 0 } opaqueFailure)
+                    throw new InvalidDataException("Cannot prepare failed opaque material inputs: " + string.Join("; ", opaqueFailure.Errors));
+                var atlas = req.ObjectAtlas ? ObjectAtlasStage.Build(models, assets, output, req.AtlasCellSize, progress, ct, MaterialBlocks(quads, meshByKey), req.AtlasPageSize) : null;
+                var optimized = req.OptimizeObjectTextures ? ObjectTextureOptimizationStage.Build(
+                    atlas is null ? models : models.Select(atlas.Transform), assets, output, req.ObjectTextureSize, progress, ct) : null;
+                if (atlas?.Report.Warnings is { Count: > 0 } atlasWarnings)
+                    Warn($"Object atlas retained source materials for {atlasWarnings.Count:N0} texture inputs; see PenguLOD.atlas.json. First: {atlasWarnings[0]}");
+                if (optimized?.Report.Warnings is { Count: > 0 } textureWarnings)
+                    Warn($"Object texture optimization retained {textureWarnings.Count:N0} source inputs; see PenguLOD.object-textures.json. First: {textureWarnings[0]}");
+                preparedGenerator.ObjectAtlasTransform = mesh =>
+                {
+                    var mapped = atlas?.Transform(mesh) ?? mesh;
+                    return optimized?.Transform(mapped) ?? mapped;
+                };
+                meshTransformStamps = new Dictionary<string, string>(meshByKey.Count, StringComparer.OrdinalIgnoreCase);
+                foreach (var (key, original) in meshByKey)
+                    meshTransformStamps[key] = ObjectAtlasStage.TransformStamp(original, preparedGenerator.ObjectAtlasTransform(original), atlas?.Mappings);
+            }
+        }
+
+        string? MeshStamp(string? path, string? variant) =>
+            meshTransformStamps is not null && path is { Length: > 0 } && !path.StartsWith('~')
+            && meshTransformStamps.TryGetValue(LodMeshKey.Make(path, variant), out var stamp) ? stamp : null;
+
         var hashes = new System.Collections.Concurrent.ConcurrentDictionary<QuadKey, string>();
         Parallel.ForEach(quads, RunLimits.Parallel(ct), kv =>
             hashes[kv.Key] = QuadHasher.Hash(kv.Key, kv.Value, Fingerprint,
-                req.SettingsFingerprint + (req.ObjectAtlas ? $"|atlas{ObjectAtlasStage.Version}:{req.AtlasCellSize}" : "") + (req.OptimizeObjectTextures ? $"|objecttextures{ObjectTextureOptimizationStage.Version}:{req.ObjectTextureSize}" : "") + (mapObjectLevel >= 0 ? $"|map32:{mapObjectLevel}" : "") + (MathF.Abs(req.ObjectBrightness - 1f) > 0.001f ? $"|bright:{req.ObjectBrightness:F2}" : "") + (req.PbrLod ? FormattableString.Invariant($"|pbr:{req.PbrLodBrightness:F2}:{req.PbrLodSize}") : "") + (ruleOptions.Candles ? "|candles" : "") + (ruleOptions.FxGlow ? "|fxglow" : "") + (ruleOptions.CustomFile is { } cf ? $"|rules:{new FileInfo(cf).Length}:{new FileInfo(cf).LastWriteTimeUtc.Ticks}" : "") + (req.SnowShaderMode != 0 ? $"|snowmode:{req.SnowShaderMode}" : "") + (req.SnowCover != 0 ? $"|snowcover:{req.SnowCover}" : "") + (req.MountainFit && req.MountainInset > 0f ? "|mtnfit1" : "") + (req.OpaqueAlpha ? "|opaque1" : "") + (req.DetailedShips ? FormattableString.Invariant($"|ships2:{LodInset.DefaultShip:F1}") : "") + (req.IceInset > 0f ? FormattableString.Invariant($"|iceinset:{req.IceInset:F1}") : "") + (req.MountainInset > 0f ? FormattableString.Invariant($"|mtninset:{req.MountainInset:F1}") : "") + (req.ObjectInset > 0f ? FormattableString.Invariant($"|objinset:{req.ObjectInset:F1}") : "") + (cullTerrain is null ? "|keep-buried"
+                req.SettingsFingerprint + (req.ObjectAtlas ? $"|atlas{ObjectAtlasStage.Version}:{req.AtlasCellSize}:{req.AtlasPageSize}" : "") + (req.OptimizeObjectTextures ? $"|objecttextures{ObjectTextureOptimizationStage.Version}:{req.ObjectTextureSize}" : "") + (mapObjectLevel >= 0 ? $"|map32:{mapObjectLevel}" : "") + (MathF.Abs(req.ObjectBrightness - 1f) > 0.001f ? $"|bright:{req.ObjectBrightness:F2}" : "") + (req.PbrLod ? FormattableString.Invariant($"|pbr:{req.PbrLodBrightness:F2}:{req.PbrLodSize}") : "") + (ruleOptions.Candles ? "|candles" : "") + (ruleOptions.FxGlow ? "|fxglow" : "") + (ruleOptions.CustomFile is { } cf ? $"|rules:{new FileInfo(cf).Length}:{new FileInfo(cf).LastWriteTimeUtc.Ticks}" : "") + (req.SnowShaderMode != 0 ? $"|snowmode:{req.SnowShaderMode}" : "") + (req.SnowCover != 0 ? $"|snowcover:{req.SnowCover}" : "") + (req.MountainFit && req.MountainInset > 0f ? "|mtnfit1" : "") + (req.OpaqueAlpha ? "|opaque1" : "") + (req.DetailedShips ? FormattableString.Invariant($"|ships2:{LodInset.DefaultShip:F1}") : "") + (req.IceInset > 0f ? FormattableString.Invariant($"|iceinset:{req.IceInset:F1}") : "") + (req.MountainInset > 0f ? FormattableString.Invariant($"|mtninset:{req.MountainInset:F1}") : "") + (req.ObjectInset > 0f ? FormattableString.Invariant($"|objinset:{req.ObjectInset:F1}") : "") + (cullTerrain is null ? "|keep-buried"
                     : "|terrain:" + (cullTerrain.Fingerprints.TryGetValue(kv.Key.Worldspace, out var tf) ? tf : "none") + (req.RemoveUnderwater ? "|water:" + cullTerrain.Heights.WaterFingerprint(kv.Key.Worldspace) : "")),
-                id => scan.TextureVariants is { } tv && tv.TryGetValue(id, out var v) ? Fingerprint(v.FullModel) : null));
+                id => scan.TextureVariants is { } tv && tv.TryGetValue(id, out var v) ? Fingerprint(v.FullModel) : null,
+                meshTransformStamps is null ? null : MeshStamp));
         sw.Stop();
 
         // A cleared output has no earlier build to compare with: every block is written again.
@@ -588,7 +725,7 @@ public static class ScanPipeline
             && scopeWorldspaces.Contains(ws)
             && (req.Levels is not { Count: > 0 } || req.Levels.Contains((LodLevel)lv));
         var plan = manifest.Plan(hashes, staged?.Output ?? req.OutputFolder, InScope);
-        if (req.ObjectAtlas || req.OptimizeObjectTextures) plan = new BuildPlan(hashes.Keys.ToArray(),[],plan.StaleFiles); // material layout and texture inputs can affect every block
+        if (!req.Generate && (req.ObjectAtlas || req.OptimizeObjectTextures)) plan = new BuildPlan(hashes.Keys.ToArray(), [], plan.StaleFiles);
         if (staged is not null) plan = staged.SeedLodBlocks(plan, progress);
 
         GenerateStats? gen = null;
@@ -620,39 +757,14 @@ public static class ScanPipeline
         if (req.Generate)
         {
             var output = req.OutputFolder!;
-            if (!req.ObjectAtlas) File.Delete(Path.Combine(output, "PenguLOD.atlas.json"));
-            if (!req.OptimizeObjectTextures) File.Delete(Path.Combine(output, "PenguLOD.object-textures.json"));
             progress?.Report($"Generating {plan.Rebuild.Count:N0} blocks ({plan.Unchanged.Count:N0} unchanged, skipped) into {output}...");
-            var pbrLod = req.PbrLod ? new PbrLodTextures(assets) : null;
-            var opaqueLod = req.OpaqueAlpha ? new OpaqueLodTextures(assets, OpaqueLodStage.IsTranslucent) : null;
-            var seasonalVariants=scan.TextureVariants?.ToDictionary(p=>p.Key,p=>p.Value,StringComparer.Ordinal);
-            var generator = new LodGenerator(assets, cullTerrain?.Heights, new CompositeSyntheticSource(grass, cards, tree3d, ships)) { RemoveUnderwater = req.RemoveUnderwater, Brightness = req.ObjectBrightness, SnowShaderMode = req.SnowShaderMode, SnowCover = req.SnowCover, FitMountains = req.MountainFit && req.MountainInset > 0f, Pbr = pbrLod, Opaque = opaqueLod, Categorize = SizeBreakdown.Categorize, Inset = req.IceInset > 0f || req.MountainInset > 0f || req.ObjectInset > 0f || req.DetailedShips ? path => LodInset.For(path, req.IceInset, req.MountainInset, req.DetailedShips ? LodInset.DefaultShip : 0f, req.ObjectInset) : null, TextureVariants = seasonalVariants, RecipeMapper = recipeMapper is null ? null : recipeMapper.Map };
-            if (req.ObjectAtlas || req.OptimizeObjectTextures)
-            {
-                var meshByKey=quads.SelectMany(kv=>kv.Value.Select(r=>(Path:r.Meshes.For(kv.Key.Level),r.TextureVariant)))
-                    .Where(r=>r.Path is {Length:>0} && !r.Path.StartsWith('~')).Select(r=>LodMeshKey.Make(r.Path!,r.TextureVariant)).Distinct(StringComparer.OrdinalIgnoreCase)
-                    .Select(p=>{ct.ThrowIfCancellationRequested();return (Key:p,Mesh:generator.GetMesh(p));}).Where(m=>m.Mesh is not null)
-                    .ToDictionary(m=>m.Key,m=>m.Mesh!,StringComparer.OrdinalIgnoreCase);
-                var models=meshByKey.Values.ToArray();
-                // Mapping above discovers converted PBR/opaque inputs. Materialize them before packing paired pages.
-                if(pbrLod is not null && PbrLodStage.Run(assets,pbrLod,output,req.PbrLodSize,req.PbrLodBrightness,progress,ct) is {Failed:>0} pbrFailure)
-                    throw new InvalidDataException("Cannot prepare failed PBR material inputs: "+string.Join("; ",pbrFailure.Errors));
-                if(opaqueLod is not null && OpaqueLodStage.Run(assets,opaqueLod,output,progress,ct) is {Failed:>0} opaqueFailure)
-                    throw new InvalidDataException("Cannot prepare failed opaque material inputs: "+string.Join("; ",opaqueFailure.Errors));
-                var atlas = req.ObjectAtlas ? ObjectAtlasStage.Build(models, assets, output, req.AtlasCellSize, progress, ct, MaterialBlocks(quads, meshByKey)) : null;
-                var optimized = req.OptimizeObjectTextures ? ObjectTextureOptimizationStage.Build(
-                    atlas is null ? models : models.Select(atlas.Transform), assets, output, req.ObjectTextureSize, progress, ct) : null;
-                if (atlas?.Report.Warnings is { Count: > 0 } atlasWarnings)
-                    Warn($"Object atlas retained source materials for {atlasWarnings.Count:N0} texture inputs; see PenguLOD.atlas.json. First: {atlasWarnings[0]}");
-                if (optimized?.Report.Warnings is { Count: > 0 } textureWarnings)
-                    Warn($"Object texture optimization retained {textureWarnings.Count:N0} source inputs; see PenguLOD.object-textures.json. First: {textureWarnings[0]}");
-                generator.ObjectAtlasTransform = mesh =>
-                {
-                    var mapped = atlas?.Transform(mesh) ?? mesh;
-                    return optimized?.Transform(mapped) ?? mapped;
-                };
-            }
+            var seasonalVariants = preparedGenerator!.TextureVariants as Dictionary<string, TextureVariant>;
+            var generator = preparedGenerator;
+            var pbrLod = generator.Pbr;
+            var opaqueLod = generator.Opaque;
             gen = generator.Generate(quads, plan.Rebuild, output, progress, ct);
+            if (hasExistingHeightmaps && terrain is not null)
+                OcclusionStage.ExportMountainHeightmaps(game, terrain.Heights, scan.Grids, scan.References, assets, output, progress, Warn, ct);
             recipeMapper?.ThrowIfFailed();
             if (ships is not null && ships.Built() is { Count: > 0 } builtShips)
                 progress?.Report($"Detailed ships: {builtShips.Count} ship models drawn from their real models ("
@@ -702,13 +814,21 @@ public static class ScanPipeline
                 trees = TreeLodGenerator.Generate(scan.Grids, treeRefs, assets, output, manifest, progress, ct, req.TreeBrightness, objectLodWorlds);
                 foreach (var w in trees.Warnings) Warn(w);
                 if (req.Seasons)
+                {
+                    Dictionary<string, ParallaxGenDiff.Entry>? bttPgDiff = null;
+                    if (req.Scan.Tree3D is { Enabled: true } && assets.TryOpen(ParallaxGenDiff.FileName, out var bttPgStream))
+                    {
+                        using (bttPgStream) bttPgDiff = ParallaxGenDiff.Parse(bttPgStream, out _);
+                        if (bttPgDiff.Count == 0) bttPgDiff = null;
+                    }
                     foreach (var (season, swaps) in treeSeasons)
                     {
                         var missingBillboard = SeasonalAssets.MissingBillboardWarning(req.SeasonsStrict, season, Warn);
-                        var seasonalRefs = treeRefs.Select(t=>SeasonalAssets.SwapTree(game,assets,t,swaps,req.Scan.Tree3D??Tree3DSettings.Off,missingBillboard)).ToArray();
+                        var seasonalRefs = treeRefs.Select(t=>SeasonalAssets.SwapTree(game,assets,t,swaps,req.Scan.Tree3D??Tree3DSettings.Off,missingBillboard,lodIndex,bttPgDiff)).ToArray();
                         var seasonalResult = TreeLodGenerator.Generate(scan.Grids,seasonalRefs,assets,output,manifest,progress,ct,req.TreeBrightness,objectLodWorlds,season);
                         foreach (var warning in seasonalResult.Warnings) Warn(season + ": " + warning);
                     }
+                }
                 progress?.Report($"Tree LOD: {trees.Instances:N0} trees, {trees.TreeTypes} types, {trees.Blocks:N0} blocks"
                                  + $" ({trees.WorldspacesWritten} worldspaces written, {trees.WorldspacesUnchanged} unchanged) in {trees.Elapsed.TotalSeconds:F1}s");
             }
@@ -716,7 +836,7 @@ public static class ScanPipeline
             var nativeKinds = (req.NativeGridObjects ? PenguLOD.Plugins.NativeGridObjects.Kinds.Waterworks : 0)
                               | (req.NativeEffects ? PenguLOD.Plugins.NativeGridObjects.Kinds.Effects : 0)
                               | (ruleOptions.AnimatedShips ? PenguLOD.Plugins.NativeGridObjects.Kinds.Ships : 0);
-            var largeEsl = ResolveLargeEsl(req.EslRange, game.DataFolder, progress);
+            var largeEsl = ResolveLargeEsl(req.EslRange, game.DataFolder, progress, game.GameRootFolders);
             // Other worldspaces than Tamriel and Solstheim (mod worlds, small worlds) get them too, unless they are children of another one.
             var childWorlds = UndersidePluginWriter.ChildWorldspaces(game);
             var otherWorlds = (scan.Dynamic ?? []).Where(d => d.IsGridObject && !d.Glow).Select(d => d.Ref.Worldspace)
@@ -737,7 +857,7 @@ public static class ScanPipeline
             // Left out of PenguLOD.dyn entirely: the engine draws the real references in the walled cities too (tested at Whiterun: they are
             // there and they turn), so a model drawn by the plugin as well showed up as a second, motionless fan.
             var dynamicList = natives.Count == 0 ? scan.Dynamic ?? [] : (scan.Dynamic ?? []).Where(d => !nativeSources.Contains(d)).ToList();
-            if (req.Scan.DynamicLod || req.Scan.GridObjects)
+            if (req.Scan.DynamicLod || req.Scan.GridObjects || req.Scan.GlowWindows)
             {
                 IReadOnlyDictionary<string, string>? waterMap = null;
                 if (req.WaterStandIns && req.Scan.GridObjects)
@@ -753,7 +873,8 @@ public static class ScanPipeline
                 }
                 int n = DynamicLodWriter.Write(output, dynamicList, waterMap);
                 int g = dynamicList.Count(d => d.IsGridObject);
-                progress?.Report($"Dynamic LOD: {n - g:N0} switchable references and {g:N0} grid objects written to {DynamicLodWriter.RelativePath} for the PenguLOD SKSE plugin");
+                int w = dynamicList.Count(d => d.Glow);
+                progress?.Report($"Dynamic LOD: {n - g - w:N0} switchable references, {g:N0} grid objects and {w:N0} window glow entries written to {DynamicLodWriter.RelativePath} for the PenguLOD SKSE plugin");
             }
             else
             {
@@ -780,15 +901,12 @@ public static class ScanPipeline
                     try { tpl = PenguLOD.Meshes.Nif.NifGeometryReader.Read(tplPath, File.ReadAllBytes(tplPath)).Parts.FirstOrDefault(); }
                     catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or InvalidDataException or NotSupportedException) { }
                 }
-                if (tpl is null) progress?.Report("Parent > Child copies: no water stand-in to take the water material from (turn on the water stand-ins), so the cell water around the cities is not drawn.");
-                else
+                tpl ??= WaterCopies.DefaultTemplate();
+                var wc = WaterCopies.Build(terrain.Heights, wCells, wRegions, tpl, output, ct);
+                if (wc.Copies.Count > 0)
                 {
-                    var wc = WaterCopies.Build(terrain.Heights, wCells, wRegions, tpl, output, ct);
-                    if (wc.Copies.Count > 0)
-                    {
-                        parentCopies = [.. parentCopies ?? [], .. wc.Copies];
-                        progress?.Report($"Parent > Child copies: water for {wc.Cells:N0} cells around the walled cities ({wc.Runs:N0} water strips in meshes\\{WaterCopies.Folder}), the terrain LOD water is switched off there");
-                    }
+                    parentCopies = [.. parentCopies ?? [], .. wc.Copies];
+                    progress?.Report($"Parent > Child copies: water for {wc.Cells:N0} cells around the walled cities ({wc.Runs:N0} water strips in meshes\\{WaterCopies.Folder}), the terrain LOD water is switched off there");
                 }
             }
             if (req.Scan.ParentCopies && parentCopies is { Count: > 0 })
@@ -820,7 +938,7 @@ public static class ScanPipeline
                 int written = ParentCopyWriter.Write(output, pcs);
                 int altTex = pcs.Count(c => c.HasAlternateTextures), inCells = pcs.Count(c => c.ChildCellExists);
                 progress?.Report($"Parent > Child copies: {written:N0} references written to {ParentCopyWriter.RelativePath} for the PenguLOD SKSE plugin"
-                                 + $" ({inCells:N0} in cells the child worldspace has; {altTex:N0} use texture variants the plugin can't apply, they show the default textures)");
+                                 + $" ({inCells:N0} in cells the child worldspace has; {altTex:N0} with alternate texture overrides)");
             }
             else ParentCopyWriter.Remove(output);
 
@@ -901,7 +1019,7 @@ public static class ScanPipeline
             {
                 try
                 {
-                    var u = UndersideStage.Run(game, terrain.Heights, scan.Grids, output, req.UndersideStep, progress, Warn, ct, natives, largeEsl);
+                    var u = UndersideStage.Run(game, terrain.Heights, scan.Grids, output, req.UndersideStep, progress, Warn, ct, natives, largeEsl, assets);
                     progress?.Report($"Underside: {u.Worldspaces} worldspaces, {u.Blocks:N0} blocks, {u.Triangles:N0} triangles in {u.Elapsed.TotalSeconds:F1}s"
                                      + (u.Plugin is null ? "" : $". Enable {UndersidePluginWriter.FileName} in your mod manager{(u.PluginLight ? " (flagged ESL, no plugin slot)" : " (too many records for an ESL: it is a regular plugin and takes a slot)")}."));
                 }
@@ -957,7 +1075,7 @@ public static class ScanPipeline
             }
             try
             {
-                var skse = SksePluginInstaller.Install(output, game.DataFolder, req.SkseDll);
+                var skse = SksePluginInstaller.Install(output, game.DataFolder, req.SkseDll, gameRootFolders: game.GameRootFolders);
                 if (skse.Installed || req.SkseDll == SkseDllChoice.None) progress?.Report(skse.Message);
                 else Warn(skse.Message);
                 if (skse.Message.Contains("WARNING")) Warn(skse.Message);
@@ -1085,5 +1203,36 @@ public static class ScanPipeline
                 }
             }
         return usage;
+    }
+
+    private static bool AdaptiveEnabledInIni(AssetIndex assets, string? outputFolder)
+    {
+        static bool HasAdaptive(string text)
+        {
+            foreach (var raw in text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (raw.StartsWith(';') || raw.StartsWith('#')) continue;
+                int eq = raw.IndexOf('=');
+                if (eq <= 0) continue;
+                if (!raw[..eq].Trim().Equals("bAdaptiveQuality", StringComparison.OrdinalIgnoreCase)) continue;
+                var val = raw[(eq + 1)..].Trim();
+                return val.Equals("1", StringComparison.OrdinalIgnoreCase) || val.Equals("true", StringComparison.OrdinalIgnoreCase);
+            }
+            return false;
+        }
+        if (outputFolder is not null)
+        {
+            var local = Path.Combine(outputFolder, "SKSE", "Plugins", "PenguLOD.ini");
+            if (File.Exists(local))
+            {
+                try { return HasAdaptive(File.ReadAllText(local)); } catch (IOException) { }
+            }
+        }
+        if (assets.TryOpen(@"skse\plugins\pengulod.ini", out var stream))
+        {
+            using (stream) using (var reader = new StreamReader(stream))
+                return HasAdaptive(reader.ReadToEnd());
+        }
+        return false;
     }
 }

@@ -11,73 +11,167 @@ public static class TerrainTileBuilder
     public sealed record Geometry(Vector3[] Positions, ushort[] Indices, int SurfaceVertices);
     public sealed record Result(byte[] Bytes, Geometry Land, int WaterCells);
 
-    public static Geometry Surface(QuadKey tile, Func<float, float, float?> sample, float skirtDepth, CancellationToken ct = default)
+    public static Geometry Surface(QuadKey tile, Func<float, float, float?> sample, float skirtDepth, CancellationToken ct = default,
+        float maxError = 0f, bool protectBorders = true, bool optimizeUnseen = true, Func<int, int, float?>? water = null)
     {
-        int level = (int)tile.Level, n = Resolution + 1;
-        var positions = new List<Vector3>(n * n + n * 4);
-        var indices = new List<ushort>(Resolution * Resolution * 6 + Resolution * 24);
-        float span = level * CellCoord.CellSize;
-        for (int y = 0; y < n; y++)
+        int level = (int)tile.Level;
+        List<Vector3> positions;
+        List<ushort> indices;
+
+        if (maxError > 0f)
         {
-            ct.ThrowIfCancellationRequested();
-            for (int x = 0; x < n; x++)
+            var adaptive = TerrainMeshSimplifier.BuildAdaptive(tile, sample, maxError, protectBorders, optimizeUnseen, water, ct);
+            positions = new List<Vector3>(adaptive.Positions.Length + 516);
+            positions.AddRange(adaptive.Positions);
+            indices = new List<ushort>(adaptive.Indices.Length + 3096);
+            indices.AddRange(adaptive.Indices);
+        }
+        else
+        {
+            int n = Resolution + 1;
+            positions = new List<Vector3>(n * n + n * 4);
+            indices = new List<ushort>(Resolution * Resolution * 6 + Resolution * 24);
+            float span = level * CellCoord.CellSize;
+            for (int y = 0; y < n; y++)
             {
-                float wx = tile.X * CellCoord.CellSize + span * x / Resolution;
-                float wy = tile.Y * CellCoord.CellSize + span * y / Resolution;
-                float height = sample(wx, wy) ?? throw new InvalidDataException($"Missing terrain at {tile.Worldspace} ({wx}, {wy}); supply landscape records or existing terrain LOD.");
-                if (!float.IsFinite(height)) throw new InvalidDataException("Terrain contains a non-finite height.");
-                positions.Add(new(span * x / Resolution / level, span * y / Resolution / level, height / level));
-                if (x < Resolution && y < Resolution)
+                ct.ThrowIfCancellationRequested();
+                for (int x = 0; x < n; x++)
                 {
-                    int a = y * n + x;
-                    Triangle(a, a + 1, a + n); Triangle(a + 1, a + n + 1, a + n);
+                    float wx = tile.X * CellCoord.CellSize + span * x / Resolution;
+                    float wy = tile.Y * CellCoord.CellSize + span * y / Resolution;
+                    float height = sample(wx, wy) ?? throw new InvalidDataException($"Missing terrain at {tile.Worldspace} ({wx}, {wy}); supply landscape records or existing terrain LOD.");
+                    if (!float.IsFinite(height)) throw new InvalidDataException("Terrain contains a non-finite height.");
+                    positions.Add(new(span * x / Resolution / level, span * y / Resolution / level, height / level));
+                    if (x < Resolution && y < Resolution)
+                    {
+                        int a = y * n + x;
+                        Triangle(a, a + 1, a + n); Triangle(a + 1, a + n + 1, a + n);
+                    }
                 }
             }
         }
+
         int surface = positions.Count;
-        if (skirtDepth > 0)
+        if (skirtDepth > 0 && surface >= 3)
         {
-            // Same world-space vertices at every level; skirts cover fine/coarse edge interpolation differences.
-            var boundary = Enumerable.Range(0, n).Concat(Enumerable.Range(1, Resolution).Select(y => y * n + Resolution))
-                .Concat(Enumerable.Range(0, Resolution).Select(x => Resolution * n + Resolution - 1 - x))
-                .Concat(Enumerable.Range(1, Resolution - 1).Select(y => (Resolution - y) * n)).ToArray();
-            float depth = skirtDepth / level;
-            for (int i = 0; i < boundary.Length; i++)
+            // Order perimeter vertices CCW around [0, CellSize] x [0, CellSize] so skirts close cleanly whether uniform or simplified.
+            var boundary = PerimeterLoop(positions, surface);
+            if (boundary.Length >= 3 && surface + boundary.Length <= ushort.MaxValue)
             {
-                var previous = positions[boundary[(i + boundary.Length - 1) % boundary.Length]];
-                var next = positions[boundary[(i + 1) % boundary.Length]];
-                depth = Math.Max(depth, Math.Abs(positions[boundary[i]].Z - (previous.Z + next.Z) * .5f) + 32f / level);
+                float depth = skirtDepth / level;
+                for (int i = 0; i < boundary.Length; i++)
+                {
+                    var previous = positions[boundary[(i + boundary.Length - 1) % boundary.Length]];
+                    var next = positions[boundary[(i + 1) % boundary.Length]];
+                    depth = Math.Max(depth, Math.Abs(positions[boundary[i]].Z - (previous.Z + next.Z) * .5f) + 32f / level);
+                }
+                foreach (int v in boundary) positions.Add(positions[v] - new Vector3(0, 0, depth));
+                for (int i = 0; i < boundary.Length; i++)
+                { int next = (i + 1) % boundary.Length; Triangle(boundary[i], surface + i, boundary[next]); Triangle(boundary[next], surface + i, surface + next); }
             }
-            foreach (int v in boundary) positions.Add(positions[v] - new Vector3(0, 0, depth));
-            for (int i = 0; i < boundary.Length; i++)
-            { int next = (i + 1) % boundary.Length; Triangle(boundary[i], surface + i, boundary[next]); Triangle(boundary[next], surface + i, surface + next); }
         }
         return new(positions.ToArray(), indices.ToArray(), surface);
         void Triangle(int a, int b, int c) { indices.Add(checked((ushort)a)); indices.Add(checked((ushort)b)); indices.Add(checked((ushort)c)); }
     }
 
-    public static Result Build(QuadKey tile, Func<float, float, float?> sample, Func<int, int, float?> water,
-        float skirtDepth = 512, CancellationToken ct = default, string? season = null)
+    private static int[] PerimeterLoop(List<Vector3> positions, int count)
     {
-        var land = Surface(tile, sample, skirtDepth, ct);
+        const float eps = 0.05f;
+        float max = CellCoord.CellSize;
+        var south = new List<(float T, int Index)>();
+        var east = new List<(float T, int Index)>();
+        var north = new List<(float T, int Index)>();
+        var west = new List<(float T, int Index)>();
+        for (int i = 0; i < count; i++)
+        {
+            var p = positions[i];
+            if (p.Y <= eps) south.Add((p.X, i));
+            else if (p.X >= max - eps && p.Y < max - eps) east.Add((p.Y, i));
+            else if (p.Y >= max - eps) north.Add((-p.X, i));
+            else if (p.X <= eps) west.Add((-p.Y, i));
+        }
+        south.Sort((a, b) => a.T.CompareTo(b.T));
+        east.Sort((a, b) => a.T.CompareTo(b.T));
+        north.Sort((a, b) => a.T.CompareTo(b.T));
+        west.Sort((a, b) => a.T.CompareTo(b.T));
+        var loop = new List<int>(south.Count + east.Count + north.Count + west.Count);
+        void Append(List<(float T, int Index)> side)
+        {
+            foreach (var (_, idx) in side)
+                if (loop.Count == 0 || loop[^1] != idx) loop.Add(idx);
+        }
+        Append(south); Append(east); Append(north); Append(west);
+        if (loop.Count > 1 && loop[^1] == loop[0]) loop.RemoveAt(loop.Count - 1);
+        return loop.ToArray();
+    }
+
+    public static Result Build(QuadKey tile, Func<float, float, float?> sample, Func<int, int, float?> water,
+        float skirtDepth = 512, CancellationToken ct = default, string? season = null,
+        float maxError = 0f, bool protectBorders = true, bool optimizeUnseen = true)
+    {
+        var land = Surface(tile, sample, skirtDepth, ct, maxError, protectBorders, optimizeUnseen, water);
         int level = (int)tile.Level;
         var w = new NifWriter { Author = "PenguLOD" };
         int root = w.Reserve("BSMultiBoundNode"), shape = w.Reserve("BSTriShape"), shader = w.Reserve("BSLightingShaderProperty"), textures = w.Reserve("BSShaderTextureSet");
         var children = new List<int> { shape };
         var wp = new List<Vector3>(); var wi = new List<ushort>(); var segments = new List<(int Start, int Triangles)>();
-        for (int x = 0; x < level; x++) for (int y = 0; y < level; y++)
+        int waterCells = 0;
+        float size = CellCoord.CellSize / level;
+        if (level == 4)
         {
-            ct.ThrowIfCancellationRequested();
-            int start = wi.Count;
-            float? height = water(tile.X + x, tile.Y + y);
-            if (height is { } h && float.IsFinite(h))
+            for (int x = 0; x < level; x++) for (int y = 0; y < level; y++)
             {
-                int v = wp.Count; float size = CellCoord.CellSize / level;
-                wp.Add(new(x * size, y * size, h / level)); wp.Add(new((x + 1) * size, y * size, h / level));
-                wp.Add(new(x * size, (y + 1) * size, h / level)); wp.Add(new((x + 1) * size, (y + 1) * size, h / level));
-                wi.AddRange([(ushort)v, (ushort)(v + 1), (ushort)(v + 2), (ushort)(v + 1), (ushort)(v + 3), (ushort)(v + 2)]);
+                ct.ThrowIfCancellationRequested();
+                int start = wi.Count;
+                float? height = water(tile.X + x, tile.Y + y);
+                if (height is { } h && float.IsFinite(h))
+                {
+                    waterCells++;
+                    int v = wp.Count;
+                    wp.Add(new(x * size, y * size, h / level)); wp.Add(new((x + 1) * size, y * size, h / level));
+                    wp.Add(new(x * size, (y + 1) * size, h / level)); wp.Add(new((x + 1) * size, (y + 1) * size, h / level));
+                    wi.AddRange([(ushort)v, (ushort)(v + 1), (ushort)(v + 2), (ushort)(v + 1), (ushort)(v + 3), (ushort)(v + 2)]);
+                }
+                segments.Add((wi.Count == start ? 0 : start, (wi.Count - start) / 3));
             }
-            segments.Add((wi.Count == start ? 0 : start, (wi.Count - start) / 3));
+        }
+        else
+        {
+            // LOD8/16/32 write a single unsegmented BSTriShape: merge contiguous same-height water cells into maximal rectangles.
+            var grid = new float?[level, level];
+            for (int x = 0; x < level; x++)
+                for (int y = 0; y < level; y++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (water(tile.X + x, tile.Y + y) is { } h && float.IsFinite(h))
+                    {
+                        grid[x, y] = h;
+                        waterCells++;
+                    }
+                }
+            var merged = new bool[level, level];
+            for (int y = 0; y < level; y++)
+                for (int x = 0; x < level; x++)
+                {
+                    if (merged[x, y] || grid[x, y] is not { } h) continue;
+                    int rw = 1;
+                    while (x + rw < level && !merged[x + rw, y] && grid[x + rw, y] is { } hx && MathF.Abs(hx - h) < 1e-3f) rw++;
+                    int rh = 1;
+                    while (y + rh < level)
+                    {
+                        bool ok = true;
+                        for (int dx = 0; dx < rw; dx++)
+                            if (merged[x + dx, y + rh] || grid[x + dx, y + rh] is not { } hy || MathF.Abs(hy - h) >= 1e-3f) { ok = false; break; }
+                        if (!ok) break;
+                        rh++;
+                    }
+                    for (int dy = 0; dy < rh; dy++)
+                        for (int dx = 0; dx < rw; dx++) merged[x + dx, y + dy] = true;
+                    int v = wp.Count;
+                    wp.Add(new(x * size, y * size, h / level)); wp.Add(new((x + rw) * size, y * size, h / level));
+                    wp.Add(new(x * size, (y + rh) * size, h / level)); wp.Add(new((x + rw) * size, (y + rh) * size, h / level));
+                    wi.AddRange([(ushort)v, (ushort)(v + 1), (ushort)(v + 2), (ushort)(v + 1), (ushort)(v + 3), (ushort)(v + 2)]);
+                }
         }
         if (wp.Count > 0)
         {
@@ -102,7 +196,7 @@ public static class TerrainTileBuilder
             if (season is not null) prefix += "." + season;
             b.Write(2u); NifWriter.WriteSizedString(b, prefix + ".dds"); NifWriter.WriteSizedString(b, prefix + "_n.dds");
         });
-        return new(w.ToBytes(root), land, wp.Count / 4);
+        return new(w.ToBytes(root), land, waterCells);
 
         void Node(int block, string name, IReadOnlyList<int> nodes, Vector3[] vertices, uint culling)
         {

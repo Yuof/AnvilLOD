@@ -39,12 +39,13 @@ public sealed partial class MainWindow
         string Selected() => saved.SelectedItem as string ?? throw new ArgumentException("Choose a saved preset first.");
     }
 
-    /// <summary>The three built-in presets, followed by a page's own buttons. They set texture settings as well as Object LOD options.</summary>
+    /// <summary>The four built-in presets, followed by a page's own buttons. They set Terrain, Texture, and Object/Tree/Grass LOD options.</summary>
     private Control QualityPresetButtons(params Control[] more) => Row(
     [
-        Help(Button(QualityPresets.High, () => ApplyQualityPreset(QualityPresets.High)), "DynDOLOD's High mesh rules, with the texture sizes TexGen and DynDOLOD choose for the screen."),
-        Help(Button(QualityPresets.Balanced, () => ApplyQualityPreset(QualityPresets.Balanced)), "DynDOLOD's Medium mesh rules, with the texture sizes TexGen and DynDOLOD choose for the screen."),
-        Help(Button(QualityPresets.Performance, () => ApplyQualityPreset(QualityPresets.Performance)), "DynDOLOD's Low mesh rules, with the texture sizes TexGen and DynDOLOD choose for the screen."),
+        Help(Button(QualityPresets.Ultra, () => ApplyQualityPreset(QualityPresets.Ultra)), "Ultra fidelity: High mesh rules + LOD32, 3D trees at LOD4+8, Grass LOD4–16 (4 tiers), 8K object atlas, and maximum terrain detail."),
+        Help(Button(QualityPresets.High, () => ApplyQualityPreset(QualityPresets.High)), "High fidelity: High mesh rules, 3D trees at LOD4, Grass LOD4 (4 tiers), 8K object atlas, and 1024px LOD4 terrain."),
+        Help(Button(QualityPresets.Balanced, () => ApplyQualityPreset(QualityPresets.Balanced)), "Recommended default: Medium mesh rules, 3D trees at LOD4, Grass LOD4 (1 merged shape), 4K object atlas, and adaptive BC7/BC1 terrain."),
+        Help(Button(QualityPresets.Performance, () => ApplyQualityPreset(QualityPresets.Performance)), "Maximum FPS and lowest VRAM: Low mesh rules, billboard trees, 4K object atlas, and compact BC1 terrain."),
         .. more,
     ]);
 

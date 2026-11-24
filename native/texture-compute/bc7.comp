@@ -1,61 +1,203 @@
 #version 450
-// Opaque BC7 mode 6, matching the portable encoder's principal-axis/refit algorithm.
-// Alpha-tested images stay on the CPU's mode 5/6 quality-selection path.
+// Multi-mode BC7 GPU compute encoder: Mode 6 (1-subset RGBA 7.7.7.7+p) + Mode 5 (channel rotations 0..3, 7-bit RGB + 8-bit scalar).
+// Handles both opaque and alpha-tested images directly on GPU without CPU pre-scans.
 layout(local_size_x=64) in;
 layout(std430,binding=0) readonly buffer Source {uint pixels[];};
 layout(std430,binding=1) writeonly buffer Destination {uvec4 blocks[];};
 layout(push_constant) uniform Parameters {uint width;uint height;};
-const int weights[16]=int[](0,4,9,13,17,21,26,30,34,38,43,47,51,55,60,64);
+
+const int weights4[16]=int[](0,4,9,13,17,21,26,30,34,38,43,47,51,55,60,64);
+const int weights2[4]=int[](0,21,43,64);
+
+vec4 rawPx[16];
 vec4 px[16];
-void endpoints(out vec4 low,out vec4 high) {
-    vec4 mean=vec4(0);for(int i=0;i<16;i++)mean+=px[i]/16;
-    mat4 cov=mat4(0);for(int i=0;i<16;i++){vec4 d=px[i]-mean;cov+=outerProduct(d,d);}
-    // Seed with the covariance row of the widest channel, then the bounding-box diagonal (see Bc7Encoder.PrincipalEndpoints).
+
+void bits(inout uvec4 result,inout uint position,uint value,uint count) {
+    uint word=position/32,shift=position%32;
+    result[word]|=value<<shift;
+    if(shift+count>32)result[word+1]|=value>>(32-shift);
+    position+=count;
+}
+
+float blockErr(vec4 dec[16]) {
+    float err=0;
+    for(int i=0;i<16;i++) {
+        float da=rawPx[i].w-dec[i].w;
+        err+=da*da;
+        float w=rawPx[i].w/255.0;
+        vec3 d=rawPx[i].xyz-dec[i].xyz;
+        err+=w*dot(d,d);
+    }
+    return err;
+}
+
+void endpoints4(vec4 src[16],out vec4 low,out vec4 high) {
+    vec4 mean=vec4(0);for(int i=0;i<16;i++)mean+=src[i]/16.0;
+    mat4 cov=mat4(0);for(int i=0;i<16;i++){vec4 d=src[i]-mean;cov+=outerProduct(d,d);}
     int widest=0;for(int c=1;c<4;c++)if(cov[c][c]>cov[widest][widest])widest=c;
     vec4 axis=cov[widest];
-    if(dot(axis,axis)<1e-12){vec4 lo=px[0],hi=px[0];for(int i=1;i<16;i++){lo=min(lo,px[i]);hi=max(hi,px[i]);}axis=hi-lo;}
-    axis=dot(axis,axis)<1e-12?vec4(.5):normalize(axis);
+    if(dot(axis,axis)<1e-12){vec4 lo=src[0],hi=src[0];for(int i=1;i<16;i++){lo=min(lo,src[i]);hi=max(hi,src[i]);}axis=hi-lo;}
+    axis=dot(axis,axis)<1e-12?vec4(0.5):normalize(axis);
     for(int j=0;j<8;j++){vec4 n=cov*axis;float len=dot(n,n);if(len<1e-12)break;axis=n/sqrt(len);}
     float a=3.4e38,b=-3.4e38;
-    for(int i=0;i<16;i++){float t=dot(px[i]-mean,axis);a=min(a,t);b=max(b,t);}
-    low=clamp(mean+a*axis,0,255);high=clamp(mean+b*axis,0,255);
+    for(int i=0;i<16;i++){float t=dot(src[i]-mean,axis);a=min(a,t);b=max(b,t);}
+    low=clamp(mean+a*axis,0.0,255.0);high=clamp(mean+b*axis,0.0,255.0);
 }
-// Every block here is opaque: only p-bit 1 can store alpha 255 (see Bc7Encoder.Quantize).
-void quantize(vec4 endpoint,out ivec4 q,out int bit) {
+
+void quantize6(vec4 endpoint,bool opaque,out ivec4 q,out int bit) {
     float best=3.4e38;bit=1;q=ivec4(0);
-    for(int p=1;p<2;p++){ivec4 candidate=ivec4(clamp(roundEven((endpoint-p)/2),0,127));
-        vec4 d=vec4(candidate*2+p)-endpoint;float error=dot(d,d);if(error<best){best=error;q=candidate;bit=p;}}
+    for(int p=opaque?1:0;p<2;p++){
+        ivec4 candidate=ivec4(clamp(roundEven((endpoint-float(p))/2.0),0.0,127.0));
+        vec4 d=vec4(candidate*2+p)-endpoint;
+        float error=dot(d,d);
+        if(error<best){best=error;q=candidate;bit=p;}
+    }
 }
-float assign(ivec4 q0,int p0,ivec4 q1,int p1,out int indices[16]) {
+
+float assign6(ivec4 q0,int p0,ivec4 q1,int p1,out int indices[16],out vec4 decoded[16]) {
     vec4 palette[16];
-    for(int i=0;i<16;i++)palette[i]=vec4(((64-weights[i])*(q0*2+p0)+weights[i]*(q1*2+p1)+32)>>6);
+    for(int i=0;i<16;i++)palette[i]=vec4(((64-weights4[i])*(q0*2+p0)+weights4[i]*(q1*2+p1)+32)>>6);
     float total=0;
-    for(int i=0;i<16;i++){float best=3.4e38;indices[i]=0;
-        for(int k=0;k<16;k++){vec4 d=px[i]-palette[k];float error=dot(d,d);if(error<best){best=error;indices[i]=k;}}total+=best;}
+    for(int i=0;i<16;i++){
+        float best=3.4e38;indices[i]=0;
+        for(int k=0;k<16;k++){vec4 d=px[i]-palette[k];float error=dot(d,d);if(error<best){best=error;indices[i]=k;}}
+        decoded[i]=palette[indices[i]];
+        total+=best;
+    }
     return total;
 }
-void bits(inout uvec4 result,inout uint position,uint value,uint count) {
-    uint word=position/32,shift=position%32;result[word]|=value<<shift;
-    if(shift+count>32)result[word+1]|=value>>(32-shift);position+=count;
-}
-void main() {
-    uint block=gl_GlobalInvocationID.x,bw=(width+3)/4;
-    if(block>=bw*((height+3)/4))return;
-    for(uint i=0;i<16;i++){uint x=min(block%bw*4+i%4,width-1),y=min(block/bw*4+i/4,height-1);
-        uint v=pixels[y*width+x];px[i]=vec4(v&255,(v>>8)&255,(v>>16)&255,255);}
-    vec4 e0,e1;endpoints(e0,e1);ivec4 q0,q1;int p0,p1;int indices[16];
-    quantize(e0,q0,p0);quantize(e1,q1,p1);float error=assign(q0,p0,q1,p1,indices);
-    float aa=0,ab=0,bb=0;vec4 ax=vec4(0),bx=vec4(0);
-    for(int i=0;i<16;i++){float b=weights[indices[i]]/64.0,a=1-b;aa+=a*a;ab+=a*b;bb+=b*b;ax+=a*px[i];bx+=b*px[i];}
-    float determinant=aa*bb-ab*ab;
-    if(abs(determinant)>1e-6){ivec4 a,b;int pa,pb,candidate[16];
-        quantize(clamp((bb*ax-ab*bx)/determinant,0,255),a,pa);
-        quantize(clamp((aa*bx-ab*ax)/determinant,0,255),b,pb);
-        if(assign(a,pa,b,pb,candidate)<error){q0=a;q1=b;p0=pa;p1=pb;for(int i=0;i<16;i++)indices[i]=candidate[i];}}
+
+uvec4 encodeMode6(bool opaque,out float outErr) {
+    bool solid=true;
+    for(int i=1;i<16;i++)if(any(notEqual(px[i],px[0]))){solid=false;break;}
+    vec4 e0,e1;
+    if(solid){e0=px[0];e1=px[0];}else endpoints4(px,e0,e1);
+    ivec4 q0,q1;int p0,p1;int indices[16];vec4 dec[16];
+    quantize6(e0,opaque,q0,p0);quantize6(e1,opaque,q1,p1);
+    float error=assign6(q0,p0,q1,p1,indices,dec);
+    if(!solid){
+        float aa=0,ab=0,bb=0;vec4 ax=vec4(0),bx=vec4(0);
+        for(int i=0;i<16;i++){float b=weights4[indices[i]]/64.0,a=1.0-b;aa+=a*a;ab+=a*b;bb+=b*b;ax+=a*px[i];bx+=b*px[i];}
+        float det=aa*bb-ab*ab;
+        if(abs(det)>1e-6){
+            ivec4 a,b;int pa,pb,cand[16];vec4 cdec[16];
+            quantize6(clamp((bb*ax-ab*bx)/det,0.0,255.0),opaque,a,pa);
+            quantize6(clamp((aa*bx-ab*ax)/det,0.0,255.0),opaque,b,pb);
+            if(assign6(a,pa,b,pb,cand,cdec)<error){q0=a;q1=b;p0=pa;p1=pb;for(int i=0;i<16;i++){indices[i]=cand[i];dec[i]=cdec[i];}}
+        }
+    }
+    outErr=blockErr(dec);
     if(indices[0]>=8){ivec4 q=q0;q0=q1;q1=q;int p=p0;p0=p1;p1=p;for(int i=0;i<16;i++)indices[i]=15-indices[i];}
-    uvec4 result=uvec4(0);uint pos=0;bits(result,pos,64,7);
-    for(int c=0;c<4;c++){bits(result,pos,uint(q0[c]),7);bits(result,pos,uint(q1[c]),7);}
-    bits(result,pos,uint(p0),1);bits(result,pos,uint(p1),1);bits(result,pos,uint(indices[0]),3);
-    for(int i=1;i<16;i++)bits(result,pos,uint(indices[i]),4);
-    blocks[block]=result;
+    uvec4 result=uvec4(0);uint pos=0;bits(result,pos,64u,7u);
+    for(int c=0;c<4;c++){bits(result,pos,uint(q0[c]),7u);bits(result,pos,uint(q1[c]),7u);}
+    bits(result,pos,uint(p0),1u);bits(result,pos,uint(p1),1u);bits(result,pos,uint(indices[0]),3u);
+    for(int i=1;i<16;i++)bits(result,pos,uint(indices[i]),4u);
+    return result;
+}
+
+int q7(float v){return int(clamp(roundEven(clamp(v,0.0,255.0)*127.0/255.0),0.0,127.0));}
+int e7(int q){return (q<<1)|(q>>6);}
+
+float assign5Rgb(vec4 rgb[16],ivec3 q0,ivec3 q1,out int ci[16],out ivec3 decRgb[16]) {
+    ivec3 pal[4];
+    for(int k=0;k<4;k++){int wt=weights2[k];pal[k]=((64-wt)*ivec3(e7(q0.x),e7(q0.y),e7(q0.z))+wt*ivec3(e7(q1.x),e7(q1.y),e7(q1.z))+32)>>6;}
+    float total=0;
+    for(int i=0;i<16;i++){
+        float best=3.4e38;ci[i]=0;
+        for(int k=0;k<4;k++){vec3 d=rgb[i].xyz-vec3(pal[k]);float err=dot(d,d);if(err<best){best=err;ci[i]=k;}}
+        decRgb[i]=pal[ci[i]];
+        total+=best;
+    }
+    return total;
+}
+
+uvec4 encodeMode5(int rot,out float outErr) {
+    vec4 rgb[16];float sc[16];
+    for(int i=0;i<16;i++){
+        vec4 v=px[i];
+        if(rot==1){float t=v.x;v.x=v.w;v.w=t;}
+        else if(rot==2){float t=v.y;v.y=v.w;v.w=t;}
+        else if(rot==3){float t=v.z;v.z=v.w;v.w=t;}
+        rgb[i]=vec4(v.xyz,0.0);sc[i]=v.w;
+    }
+    vec4 e0,e1;endpoints4(rgb,e0,e1);
+    ivec3 q0=ivec3(q7(e0.x),q7(e0.y),q7(e0.z)),q1=ivec3(q7(e1.x),q7(e1.y),q7(e1.z));
+    int ci[16];ivec3 decRgb[16];
+    float err=assign5Rgb(rgb,q0,q1,ci,decRgb);
+    float aa=0,ab=0,bb=0;vec3 ax=vec3(0),bx=vec3(0);
+    for(int i=0;i<16;i++){float wt=weights2[ci[i]]/64.0,a=1.0-wt;aa+=a*a;ab+=a*wt;bb+=wt*wt;ax+=a*rgb[i].xyz;bx+=wt*rgb[i].xyz;}
+    float det=aa*bb-ab*ab;
+    if(abs(det)>1e-6){
+        vec3 rf0=(bb*ax-ab*bx)/det,rf1=(aa*bx-ab*ax)/det;
+        ivec3 r0=ivec3(q7(rf0.x),q7(rf0.y),q7(rf0.z)),r1=ivec3(q7(rf1.x),q7(rf1.y),q7(rf1.z));
+        int rci[16];ivec3 rdec[16];
+        if(assign5Rgb(rgb,r0,r1,rci,rdec)<err){q0=r0;q1=r1;for(int i=0;i<16;i++){ci[i]=rci[i];decRgb[i]=rdec[i];}}
+    }
+    int a0=255,a1=0;
+    for(int i=0;i<16;i++){int a=int(roundEven(sc[i]));a0=min(a0,a);a1=max(a1,a);}
+    a0=clamp(a0,0,255);a1=clamp(a1,0,255);
+    int ai[16];int decA[16];
+    for(int i=0;i<16;i++){
+        int best=999999,target=int(roundEven(sc[i]));ai[i]=0;decA[i]=a0;
+        for(int k=0;k<4;k++){int wt=weights2[k];int v=((64-wt)*a0+wt*a1+32)>>6;int d=abs(v-target);if(d<best){best=d;ai[i]=k;decA[i]=v;}}
+    }
+    vec4 dec[16];
+    for(int i=0;i<16;i++){
+        vec4 v=vec4(decRgb[i],decA[i]);
+        if(rot==1){float t=v.x;v.x=v.w;v.w=t;}
+        else if(rot==2){float t=v.y;v.y=v.w;v.w=t;}
+        else if(rot==3){float t=v.z;v.z=v.w;v.w=t;}
+        dec[i]=v;
+    }
+    outErr=blockErr(dec);
+    if(ci[0]>=2){ivec3 t=q0;q0=q1;q1=t;for(int i=0;i<16;i++)ci[i]=3-ci[i];}
+    if(ai[0]>=2){int t=a0;a0=a1;a1=t;for(int i=0;i<16;i++)ai[i]=3-ai[i];}
+    uvec4 result=uvec4(0);uint pos=0;bits(result,pos,32u,6u);bits(result,pos,uint(rot),2u);
+    for(int c=0;c<3;c++){bits(result,pos,uint(q0[c]),7u);bits(result,pos,uint(q1[c]),7u);}
+    bits(result,pos,uint(a0),8u);bits(result,pos,uint(a1),8u);
+    bits(result,pos,uint(ci[0]),1u);for(int i=1;i<16;i++)bits(result,pos,uint(ci[i]),2u);
+    bits(result,pos,uint(ai[0]),1u);for(int i=1;i<16;i++)bits(result,pos,uint(ai[i]),2u);
+    return result;
+}
+
+void main() {
+    uint block=gl_GlobalInvocationID.x,bw=(width+3u)/4u;
+    if(block>=bw*((height+3u)/4u))return;
+    bool opaque=true,alphaVaries=false;
+    int visible=0;vec3 visSum=vec3(0);
+    for(uint i=0;i<16u;i++){
+        uint x=min((block%bw)*4u+(i%4u),width-1u),y=min((block/bw)*4u+(i/4u),height-1u);
+        uint v=pixels[y*width+x];
+        vec4 c=vec4(float(v&255u),float((v>>8)&255u),float((v>>16)&255u),float((v>>24)&255u));
+        rawPx[i]=c;px[i]=c;
+        if(c.w<255.0)opaque=false;
+        if(i>0u && c.w!=rawPx[0].w)alphaVaries=true;
+        if(c.w>0.0){visible++;visSum+=c.xyz;}
+    }
+    if(visible>0 && visible<16){
+        vec3 avg=roundEven(visSum/float(visible));
+        for(int i=0;i<16;i++)if(rawPx[i].w==0.0)px[i].xyz=avg;
+    }
+    float bestErr;
+    uvec4 best=encodeMode6(opaque,bestErr);
+    if(bestErr>16.0){
+        if(opaque){
+            if(bestErr>96.0){
+                for(int rot=1;rot<=3;rot++){
+                    float e5;uvec4 c5=encodeMode5(rot,e5);
+                    if(e5<bestErr){best=c5;bestErr=e5;}
+                }
+            }
+        } else if(alphaVaries){
+            int maxRot=(visible==16)?3:0;
+            for(int rot=0;rot<=maxRot;rot++){
+                float e5;uvec4 c5=encodeMode5(rot,e5);
+                if(e5<bestErr){best=c5;bestErr=e5;}
+            }
+        } else if(bestErr>64.0){
+            float e5;uvec4 c5=encodeMode5(0,e5);
+            if(e5<bestErr){best=c5;bestErr=e5;}
+        }
+    }
+    blocks[block]=best;
 }

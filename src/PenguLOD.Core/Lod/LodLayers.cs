@@ -11,11 +11,15 @@ public static class LodLayers
     public const string Grass = "grass";
     public const string Tree3D = "tree3d";
     public const string TreeCard = "treecard";
+    public const string LargeRef = "largeref";
 
     public static readonly IReadOnlyList<string> All = [Objects, Grass, Tree3D, TreeCard];
 
     /// <summary>The prefix of the node names the SKSE plugin looks for. Keep in sync with skse/src/LodLayers.h.</summary>
     public const string NodePrefix = "PL:";
+
+    /// <summary>Node name for LOD4 geometry of large references overridden by non-ESM plugins ("PL:largeref:4:x:y").</summary>
+    public static string LargeRefNodeName(int cellX, int cellY) => $"{NodePrefix}{LargeRef}:4:{cellX}:{cellY}";
 
     /// <summary>
     /// How many density tiers the grass of a block is written in. Each tier is every 4th tuft along a space-filling curve, so any first n of

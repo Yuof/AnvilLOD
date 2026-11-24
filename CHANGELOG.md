@@ -2,6 +2,16 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
+## [0.6.0-beta.12] - 2026-11-24
+
+- Added full **TruePBR** (`PBRJSONs`) and **Complex Material** (`_rmaos` / `_m` / `_p`) support for object and terrain LOD, including roughness/AO baking and sRGB-to-linear calibration.
+- Added **Adaptive Runtime Quality** for the SKSE plugin (`PLDY` v3 / `PLCP` v2) with 4-tier Morton-ordered distant grass LOD stepping and `PL:largeref:4:x:y` large-reference grid management.
+- Added **Terrain QEM Mesh Simplifier** (`TerrainMeshSimplifier`), **BC1/BC5 encoders**, and balanced default terrain/texture sizing (with High/Ultra presets for higher resolutions).
+- Added **multi-mode Vulkan BC7 compute** (`bc7.comp` modes 0/1/2/3/5/6/7) with persistent 4-slot strip-batched GPU dispatch (`backend.c`).
+- Added **Quest-stage dynamic LOD switching** (`QuestSwitchScanner`), **BOS/Base Object Swapper removals**, **parent-to-city copy** improvements, and **DynDOLOD preset/rule parity** (wildcards, mesh masks, animated ships, glow/candle rules).
+- Fixed **MO2 archive ordering**, **pitched/rolled occlusion bounds** & **opaque mountain occlusion stamping**, **double-blended billboard overlays**, and **NIF DAG shared-node traversal** (`NifGeometryReader`) so valid instanced LOD meshes render natively instead of falling back.
+- Improved **Object LOD generation speed** dramatically by parallelizing recipe source fingerprinting (streaming SHA-256 + deduplicated NIF reads), parallelizing object LOD mesh & recipe variant atlas preparation with live progress reporting, making `TextureRecipeLayout` thread-safe, parallelizing Object Atlas texture pre-validation, and switching `Occlusion.esp` master enumeration to shallow header links with per-worldspace caching.
+
 ## [0.6.0-beta.11] - 2026-11-22
 
 - Added **Days to keep previous outputs** under **Overview → Run options** (`--previous-days`, default 14). A previous output is removed that many days after it was replaced, when a run starts or PenguLOD opens. 0 sets no limit, as before.

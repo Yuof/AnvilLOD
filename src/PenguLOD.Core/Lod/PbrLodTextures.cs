@@ -4,27 +4,26 @@ using PenguLOD.Core.Pipeline;
 namespace PenguLOD.Core.Lod;
 
 /// <summary>
-/// Makes object LOD use textures that match PBR full models. The LOD shaders are vanilla (no PBR, no sRGB), so a LOD mesh that
-/// points at a texture the full model replaces with a PBR one (<c>textures\pbr\&lt;same path&gt;</c>) is drawn with the vanilla
-/// look while the real object shows the PBR one. Two cases, as DynDOLOD handles them:
-/// <list type="number">
-/// <item>A LOD texture <c>X…lod.dds</c> that TexGen has rendered a PBR twin of (<c>X…pbr_lod.dds</c>, with <c>_n</c>): use the twin.</item>
-/// <item>A full-size texture that has a PBR version: use a converted copy of the PBR albedo, written to
-/// <see cref="OutputRoot"/> (never over the vanilla path, which other things still use). The pipeline writes the copies.</item>
-/// </list>
+/// Makes object LOD use textures that match TruePBR and Complex Material full models, baking <c>_rmaos.dds</c> / <c>_m.dds</c>
+/// ambient occlusion, metallic diffuse response, and specular gloss into converted diffuse and <c>_n.dds</c> LOD pairs.
 /// </summary>
-public sealed class PbrLodTextures(IAssetSource assets)
+public sealed class PbrLodTextures(IAssetSource assets, TruePbrCatalog? catalog = null)
 {
     public const string OutputRoot = "textures\\pengulod\\pbr\\";
 
     private readonly ConcurrentDictionary<string, string?> _diffuse = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _conversions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, (string NormalSource, string? RmaosSource, string? ComplexMaskSource)> _normalConversions = new(StringComparer.OrdinalIgnoreCase);
     private int _twins;
 
-    /// <summary>Converted copies to write: output path (relative to the LOD output) → the PBR albedo it comes from.</summary>
+    public TruePbrCatalog? Catalog { get; } = catalog;
+
+    /// <summary>Converted diffuse copies to write: output path (relative to LOD output) → PBR/CM albedo path.</summary>
     public IReadOnlyDictionary<string, string> Conversions => _conversions;
 
-    /// <summary>Distinct textures swapped for a TexGen <c>pbr_lod</c> twin.</summary>
+    /// <summary>Converted normal+gloss copies to write: output path → (source normal, rmaos, complex mask).</summary>
+    public IReadOnlyDictionary<string, (string NormalSource, string? RmaosSource, string? ComplexMaskSource)> NormalConversions => _normalConversions;
+
     public int TwinsUsed => _twins;
 
     public static string Normalize(string path)
@@ -34,20 +33,46 @@ public sealed class PbrLodTextures(IAssetSource assets)
         return p.ToLowerInvariant();
     }
 
-    /// <summary>The replacement for a diffuse texture, or null to leave it alone.</summary>
+    public static (string? Rmaos, string? ComplexMask) FindCompanionMaps(IAssetSource assets, string albedoPath)
+    {
+        var p = Normalize(albedoPath);
+        if (!p.EndsWith(".dds", StringComparison.Ordinal)) return (null, null);
+        string stem = p[..^4];
+        string rmaos = stem + "_rmaos.dds";
+        string mask = stem + "_m.dds";
+        return (assets.Exists(rmaos) ? rmaos : null, assets.Exists(mask) ? mask : null);
+    }
+
     public string? MapDiffuse(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
         return _diffuse.GetOrAdd(path, Compute);
     }
 
-    /// <summary>The replacement normal map for a texture whose diffuse was swapped for a twin, or null.</summary>
     public string? MapNormal(string diffuse, string normal)
     {
         var mapped = MapDiffuse(diffuse);
-        if (mapped is null || mapped.StartsWith(OutputRoot, StringComparison.OrdinalIgnoreCase)) return null;
-        var twinNormal = mapped[..^4] + "_n.dds";
-        return assets.Exists(twinNormal) ? twinNormal : null;
+        if (mapped is null) return null;
+        if (!mapped.StartsWith(OutputRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            var twinNormal = mapped[..^4] + "_n.dds";
+            return assets.Exists(twinNormal) ? twinNormal : null;
+        }
+        if (!_conversions.TryGetValue(mapped, out var pbrAlbedo)) return null;
+        var (rmaos, mask) = FindCompanionMaps(assets, pbrAlbedo);
+        if (rmaos is null && mask is null) return null;
+
+        string candidateNormal = pbrAlbedo[..^4] + "_n.dds";
+        if (!assets.Exists(candidateNormal) && !string.IsNullOrWhiteSpace(normal))
+        {
+            string normClean = Normalize(normal);
+            if (assets.Exists(normClean)) candidateNormal = normClean;
+        }
+        if (!assets.Exists(candidateNormal)) return null;
+
+        string outNormal = mapped[..^4] + "_n.dds";
+        _normalConversions[outNormal] = (candidateNormal, rmaos, mask);
+        return outNormal;
     }
 
     private string? Compute(string original)
@@ -59,13 +84,9 @@ public sealed class PbrLodTextures(IAssetSource assets)
             || p.StartsWith("textures\\terrain\\", StringComparison.OrdinalIgnoreCase)
             || p.StartsWith("textures\\dyndolod\\", StringComparison.OrdinalIgnoreCase)) return null;
 
-        // A path that already names the PBR albedo (a patch plugin's texture set or alternate texture, or a LOD mesh made for the PBR
-        // model) is converted like its plain twin would be: drawn as is, the raw albedo is far darker than the vanilla LOD shader expects.
-        // The output path is the same one the plain twin gets, so both spellings share one converted copy.
         const string pbrRoot = "textures\\pbr\\";
         if (p.StartsWith(pbrRoot, StringComparison.OrdinalIgnoreCase))
         {
-            // Stitched LOD textures under the PBR folder were made for the LOD shader already; a missing file has nothing to convert.
             if (p.EndsWith("lod.dds", StringComparison.OrdinalIgnoreCase) || p.Contains("\\lod\\", StringComparison.Ordinal) || !assets.Exists(p)) return null;
             var converted = OutputRoot + p[pbrRoot.Length..];
             _conversions[converted] = p;
@@ -79,9 +100,25 @@ public sealed class PbrLodTextures(IAssetSource assets)
         }
 
         var pbr = "textures\\pbr\\" + p["textures\\".Length..];
-        if (!assets.Exists(pbr)) return null;
-        var output = OutputRoot + p["textures\\".Length..];
-        _conversions[output] = pbr;
-        return output;
+        if (assets.Exists(pbr))
+        {
+            var output = OutputRoot + p["textures\\".Length..];
+            _conversions[output] = pbr;
+            return output;
+        }
+
+        // Complex Material fallback: non-LOD texture with an explicit TruePBR JSON rule and companion _rmaos.dds or _m.dds
+        if (!p.EndsWith("lod.dds", StringComparison.Ordinal) && !p.Contains("\\lod\\", StringComparison.Ordinal)
+            && Catalog?.Match(p) is not null && assets.Exists(p))
+        {
+            var (rmaos, mask) = FindCompanionMaps(assets, p);
+            if (rmaos is not null || mask is not null)
+            {
+                var output = OutputRoot + p["textures\\".Length..];
+                _conversions[output] = p;
+                return output;
+            }
+        }
+        return null;
     }
 }

@@ -156,6 +156,9 @@ public static partial class Program
           --water-standins       Stream/creek/pond water planes (grid objects) that use a real water shader, which
                                  draws black beyond the loaded cells, get a lit fake-water stand-in mesh in the output
           --grass-density <pct>  Share of cached grass kept as LOD, 1-100 (default 8; 15 is high, 100 keeps every blade)
+          --grass-max-level <lv> Furthest object LOD level carrying grass billboards: 4 (default), 8 or 16
+          --grass-tiers <n>      Runtime density tiers per grass block: 1 (default, merged) or 4 (for in-game stepping)
+          --adaptive-quality     Promote grass LOD to 4 density tiers for in-game Adaptive Quality stepping
           --grass-top <pct>      Grass LOD brightness at the top of a tuft, 20-120 (default 30), like DynDOLOD's GrassBrightnessTop
           --grass-bottom <pct>   Grass LOD brightness at the roots, 10-120 (default 18), like GrassBrightnessBottom
           --tree-brightness <pct> Tree LOD billboard brightness, 10-110 (default 100)
@@ -176,11 +179,13 @@ public static partial class Program
           --map-objects <mode>      LOD 32 objects for the world map: auto (default; level 0 when A Clear Map of Skyrim is loaded, else rules only), rules, 0, 1 or 2 (that level's LOD mesh)
           --no-map-trees            With --tree-3d: no tree cards in LOD 32, so no trees on the world map (LOD 4 to 16 unchanged)
           --occlusion               Work out the occlusion data (Occlusion.esp) ourselves instead of running xLODGen (EXPERIMENTAL)
-          --occlusion-clearance <u> Units a hill must stand above the line of sight to hide what is behind it (default 3072; larger = safer, hides less)
+          --occlusion-clearance <u> Units a hill must stand above the line of sight to hide what is behind it (default 1024; 3072 is conservative)
           --occlusion-mode <mode>   Which cells get data: DynDOLOD (default: its modes for each worldspace), All, or +TVDT / -TVDT, -Flat, +Border
           --occlusion-folder <dir>  Where Occlusion.esp goes (default: the output folder; also works with scan)
-          --object-atlas         Consolidate compatible object materials on padded texture pages
-          --atlas-cell N         Atlas cell size including border: 64/128/256/512 (default 256)
+          --object-atlas         Consolidate compatible object materials on padded texture pages (on by default)
+          --no-object-atlas      Disable object texture atlasing and keep per-mesh textures
+          --atlas-cell N         Maximum atlas tile side including border: 64/128/256/512 (default 256)
+          --atlas-page N         Maximum atlas page side: 2048/4096/8192 (default 4096)
           --optimize-object-textures  Make private compressed/sized object LOD textures; leave source assets untouched
           --object-texture-size N    Maximum standalone LOD texture side: 128–4096, power of two (default 1024)
           --no-trees             Don't build billboard tree LOD (.lst/.btt + atlas)
@@ -551,14 +556,18 @@ public static partial class Program
             IceInset: a.Number("ice-inset", PenguLOD.Meshes.LodInset.DefaultIce, 0f, 64f),
             MountainFit: !a.Has("no-mountain-fit"),
             MountainInset: a.Number("mountain-inset", 12f, 0f, 64f),
-            Occlusion: a.Has("occlusion") ? new PenguLOD.Core.Occlusion.OcclusionSettings(Clearance: a.Number("occlusion-clearance", 3072f, 0f, 1_000_000f),
-                ParentClearance: a.Number("occlusion-clearance", 3072f, 0f, 1_000_000f), Mode: OcclusionMode(a.Get("occlusion-mode")))
+            Occlusion: a.Has("occlusion") ? new PenguLOD.Core.Occlusion.OcclusionSettings(Clearance: a.Number("occlusion-clearance", 1024f, 0f, 1_000_000f),
+                ParentClearance: a.Number("occlusion-clearance", 1024f, 0f, 1_000_000f), Mode: OcclusionMode(a.Get("occlusion-mode")))
                 : a.Has("occlusion-clearance") || a.Has("occlusion-mode") ? throw new CliArgException("--occlusion-clearance and --occlusion-mode only apply together with --occlusion.") : null,
-            OcclusionFolder: a.Get("occlusion-folder"), ObjectAtlas: a.Has("object-atlas"),
+            OcclusionFolder: a.Get("occlusion-folder"), ObjectAtlas: !a.Has("no-object-atlas"),
             OptimizeObjectTextures: a.Has("optimize-object-textures"),
             ObjectTextureSize: a.Integer("object-texture-size", 1024),
             AutomaticObjects: new PenguLOD.Plugins.Authoring.AutomaticObjectSettings(a.Has("auto-objects"), ObjectInt("object-near-budget", 2500), ObjectInt("object-middle-budget", 1000), ObjectInt("object-far-budget", 400), ObjectFloat("object-min-size", 128), ObjectFloat("object-detail", 1)),
             AtlasCellSize: a.Integer("atlas-cell", 256),
+            AtlasPageSize: Choice("atlas-page", "4096", "2048", "4096", "8192") is var ap ? int.Parse(ap, System.Globalization.CultureInfo.InvariantCulture) : 4096,
+            GrassMaxLevel: Choice("grass-max-level", "4", "4", "8", "16") is var gml ? int.Parse(gml, System.Globalization.CultureInfo.InvariantCulture) : 4,
+            GrassTiers: Choice("grass-tiers", "1", "1", "4") is var gt ? int.Parse(gt, System.Globalization.CultureInfo.InvariantCulture) : 1,
+            AdaptiveQuality: a.Has("adaptive-quality"),
             MapObjectLevel: a.Get("map-objects")?.ToLowerInvariant() switch { null or "auto" => -2, "rules" => -1, "0" => 0, "1" => 1, "2" => 2, var bad => throw new CliArgException($"--map-objects must be auto, rules, 0, 1 or 2 (got '{bad}').") },
             SnowCover: Choice("snow-cover", "full", "off", "full", "bright") switch { "off" => 0, "bright" => 2, _ => 1 },
             SnowShaderMode: Choice("snow-shader", "auto", "auto", "plain", "hd") switch { "plain" => 1, "hd" => 2, _ => 0 },
@@ -580,7 +589,7 @@ public static partial class Program
         string? jobFolder = null;
         if(generate)
         {
-            var generated=GenerationPipeline.Run(new(Lod:req,Resume:!a.Has("no-resume"),VerifySourceContents:a.Has("verify-source-contents"),Preflight:!a.Has("no-preflight"),TextureCompute:a.Get("texture-compute")??"Cpu",ExpandOutputScope:a.Has("expand-output-scope"),
+            var generated=GenerationPipeline.Run(new(Lod:req,Resume:!a.Has("no-resume"),VerifySourceContents:a.Has("verify-source-contents"),Preflight:!a.Has("no-preflight"),TextureCompute:a.Get("texture-compute")??"Auto",ExpandOutputScope:a.Has("expand-output-scope"),
                 KeepPrevious:a.Integer("keep-previous",OutputRetention.Default,0,OutputRetention.Maximum),
                 PreviousDays:a.Integer("previous-days",OutputRetention.DefaultDays,0,OutputRetention.MaximumDays)),
                 CacheFolder(a),sync,Cancellation);

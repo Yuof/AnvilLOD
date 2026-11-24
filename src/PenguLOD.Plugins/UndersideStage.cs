@@ -27,7 +27,8 @@ public static class UndersideStage
     public sealed record Result(int Worldspaces, int Blocks, long Triangles, int FilesWritten, int FilesUnchanged, string? Plugin, TimeSpan Elapsed, int DrawnByPlugin = 0, bool PluginLight = true);
 
     public static Result Run(GameContext game, TerrainHeights terrain, IReadOnlyDictionary<string, LodGrid> grids, string output,
-        int step, IProgress<string>? progress, Action<string> warn, CancellationToken ct, IReadOnlyList<NativeGridObjects.Pick>? natives = null, bool largeEsl = false)
+        int step, IProgress<string>? progress, Action<string> warn, CancellationToken ct, IReadOnlyList<NativeGridObjects.Pick>? natives = null, bool largeEsl = false,
+        AssetIndex? assets = null)
     {
         var sw = Stopwatch.StartNew();
         var made = new List<string>();
@@ -62,14 +63,45 @@ public static class UndersideStage
 
             var origins = terrain.CellsOf(ws)
                 .Select(c => grid.BlockOrigin(c, LodLevel.Lod32))
-                .Distinct()
-                .ToList();
+                .ToHashSet();
+            Func<float, float, float?>? btrFallback = null;
+            if (assets is not null)
+            {
+                var btrCache = new ConcurrentDictionary<QuadKey, Lazy<TerrainSource.TriangleField?>>();
+                foreach (var btrPath in assets.EnumeratePaths($"meshes\\terrain\\{ws}\\"))
+                {
+                    if (!btrPath.EndsWith(".btr", StringComparison.OrdinalIgnoreCase)) continue;
+                    var parts = GamePath.GetFileNameWithoutExtension(btrPath).Split('.');
+                    if (parts.Length >= 4 && int.TryParse(parts[^3], out int lvl) && lvl == 32
+                        && int.TryParse(parts[^2], out int bx) && int.TryParse(parts[^1], out int by))
+                        origins.Add(new CellCoord(bx, by));
+                }
+                btrFallback = (wx, wy) =>
+                {
+                    var key = grid.QuadFor(CellCoord.FromWorld(wx, wy), LodLevel.Lod32);
+                    var field = btrCache.GetOrAdd(key, q => new Lazy<TerrainSource.TriangleField?>(() =>
+                    {
+                        var rel = TerrainInputs.ExistingMesh(q);
+                        if (!assets.TryOpen(rel, out var st)) return null;
+                        using (st)
+                        {
+                            using var ms = new MemoryStream(); st.CopyTo(ms);
+                            var mesh = PenguLOD.Meshes.Nif.NifGeometryReader.Read(rel, ms.ToArray(), passthru: true, includeUnshaded: false);
+                            if (mesh.Parts.Count == 0) return null;
+                            return new TerrainSource.TriangleField(mesh.Parts.SelectMany(p => Enumerable.Range(0, p.Triangles.Length / 3)
+                                .Select(i => (p.Positions[p.Triangles[i * 3]], p.Positions[p.Triangles[i * 3 + 1]], p.Positions[p.Triangles[i * 3 + 2]]))), 32 * 4096f);
+                        }
+                    })).Value;
+                    float lx = wx - key.X * 4096f, ly = wy - key.Y * 4096f;
+                    return lx >= 0f && ly >= 0f && lx <= 32 * 4096f && ly <= 32 * 4096f ? field?.Sample(lx, ly) : null;
+                };
+            }
             if (origins.Count == 0) continue;
 
             var shapes = new ConcurrentBag<UndersideMesher.Shape>();
             Parallel.ForEach(origins, RunLimits.Parallel(ct), o =>
             {
-                if (UndersideMesher.Build(terrain, ws, o.X, o.Y, step) is { } shape) shapes.Add(shape);
+                if (UndersideMesher.Build(terrain, ws, o.X, o.Y, step, btrFallback) is { } shape) shapes.Add(shape);
             });
 
             var nif = UndersideBuilder.Build(ws, [.. shapes]);

@@ -61,8 +61,8 @@ namespace PenguLOD
 			logger::error("{} is not a PenguLOD copies file", a_path.string());
 			return false;
 		}
-		if (version != 1) {
-			logger::error("{} has version {}, this plugin reads version 1 - update the PenguLOD plugin or regenerate", a_path.string(), version);
+		if (version < 1 || version > 2) {
+			logger::error("{} has version {}, this plugin reads versions 1-2 - update the PenguLOD plugin or regenerate", a_path.string(), version);
 			return false;
 		}
 
@@ -78,20 +78,38 @@ namespace PenguLOD
 				return false;
 			}
 		}
-		if (!r.Get(count) || !r.Fits(count, 44)) {  // 3 ids, 7 floats, flags
+		if (!r.Get(count) || !r.Fits(count, version >= 2 ? 46 : 44)) {
 			logger::error("{}: truncated entry table", a_path.string());
 			return false;
 		}
 		entries.resize(count);
+		const auto n = static_cast<std::uint32_t>(strings.size());
 		for (auto& e : entries) {
 			if (!r.Get(e.worldPlugin) || !r.Get(e.worldLocalId) || !r.Get(e.model) || !r.Get(e.pos) || !r.Get(e.rot) || !r.Get(e.scale) || !r.Get(e.flags)) {
 				logger::error("{}: truncated entry table", a_path.string());
 				return false;
 			}
-			const auto n = static_cast<std::uint32_t>(strings.size());
 			if (e.worldPlugin >= n || e.model >= n) {
 				logger::error("{}: bad string index", a_path.string());
 				return false;
+			}
+			if (version >= 2) {
+				std::uint16_t altCount = 0;
+				if (!r.Get(altCount) || !r.Fits(altCount, 12)) {
+					logger::error("{}: truncated alternate texture table", a_path.string());
+					return false;
+				}
+				e.alts.resize(altCount);
+				for (auto& a : e.alts) {
+					if (!r.Get(a.shape) || !r.Get(a.diffuse) || !r.Get(a.normal)) {
+						logger::error("{}: truncated alternate texture table", a_path.string());
+						return false;
+					}
+					if (a.shape >= n || (a.diffuse != CopyEntry::kNone && a.diffuse >= n) || (a.normal != CopyEntry::kNone && a.normal >= n)) {
+						logger::error("{}: bad alternate texture string index", a_path.string());
+						return false;
+					}
+				}
 			}
 		}
 		return true;
@@ -167,9 +185,9 @@ namespace PenguLOD
 			logger::error("{} is not a PenguLOD dynamic LOD file", a_path.string());
 			return false;
 		}
-		// Version 2 added grid-object flags; the layout is the same, so version 1 files still load.
-		if (version < 1 || version > 2) {
-			logger::error("{} has version {}, this plugin reads versions 1-2 - update the PenguLOD plugin or regenerate", a_path.string(), version);
+		// Version 2 added grid-object flags; version 3 adds mesh8 and mesh16 string indices. Versions 1 and 2 continue to load cleanly.
+		if (version < 1 || version > 3) {
+			logger::error("{} has version {}, this plugin reads versions 1-3 - update the PenguLOD plugin or regenerate", a_path.string(), version);
 			return false;
 		}
 
@@ -186,19 +204,34 @@ namespace PenguLOD
 			}
 		}
 
-		if (!r.Get(count) || !r.Fits(count, 60)) {  // 5 ids, 7 floats, 3 parent/flag fields
+		if (!r.Get(count) || !r.Fits(count, version >= 3 ? 68 : 60)) {
 			logger::error("{}: truncated entry table", a_path.string());
 			return false;
 		}
 		entries.resize(count);
+		const auto n = static_cast<std::uint32_t>(strings.size());
 		for (auto& e : entries) {
-			if (!r.Get(e.refPlugin) || !r.Get(e.refLocalId) || !r.Get(e.worldPlugin) || !r.Get(e.worldLocalId) || !r.Get(e.mesh) ||
-				!r.Get(e.pos) || !r.Get(e.rot) || !r.Get(e.scale) || !r.Get(e.parentPlugin) || !r.Get(e.parentLocalId) || !r.Get(e.flags)) {
+			if (!r.Get(e.refPlugin) || !r.Get(e.refLocalId) || !r.Get(e.worldPlugin) || !r.Get(e.worldLocalId) || !r.Get(e.mesh)) {
 				logger::error("{}: truncated entry table", a_path.string());
 				return false;
 			}
-			const auto n = static_cast<std::uint32_t>(strings.size());
-			if (e.refPlugin >= n || e.worldPlugin >= n || e.mesh >= n || (e.parentPlugin != DynamicEntry::kNone && e.parentPlugin >= n)) {
+			if (version >= 3) {
+				if (!r.Get(e.mesh8) || !r.Get(e.mesh16)) {
+					logger::error("{}: truncated entry table", a_path.string());
+					return false;
+				}
+			} else {
+				e.mesh8 = DynamicEntry::kNone;
+				e.mesh16 = DynamicEntry::kNone;
+			}
+			if (!r.Get(e.pos) || !r.Get(e.rot) || !r.Get(e.scale) || !r.Get(e.parentPlugin) || !r.Get(e.parentLocalId) || !r.Get(e.flags)) {
+				logger::error("{}: truncated entry table", a_path.string());
+				return false;
+			}
+			if (e.refPlugin >= n || e.worldPlugin >= n || e.mesh >= n ||
+				(e.mesh8 != DynamicEntry::kNone && e.mesh8 >= n) ||
+				(e.mesh16 != DynamicEntry::kNone && e.mesh16 >= n) ||
+				(e.parentPlugin != DynamicEntry::kNone && e.parentPlugin >= n)) {
 				logger::error("{}: bad string index", a_path.string());
 				return false;
 			}

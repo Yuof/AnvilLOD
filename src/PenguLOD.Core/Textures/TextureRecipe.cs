@@ -47,7 +47,7 @@ public static class TextureRecipe
         var r = new TextureTile(Sources(p[4]), AssetPath(p[9]), F(5), F(6), F(7), F(8), F(10), F(11),
             int.Parse(p[0], CultureInfo.InvariantCulture), F(1), F(2), F(3), alpha);
         if (r.Width <= 0 || r.Height <= 0 || r.AtlasWidth <= 0 || r.AtlasHeight <= 0
-            || r.Red < 0 || r.Green < 0 || r.Blue < 0 || r.Brightness is < -255 or > 255)
+            || r.Red < -4f || r.Green < -4f || r.Blue < -4f || r.Brightness is < -255 or > 255)
             throw new FormatException("Invalid stitching dimensions or colour settings.");
         return r;
     }
@@ -66,7 +66,7 @@ public static class TextureRecipe
         var r = new TextureConversion(Sources(p[4]), AssetPath(p[9]), I(6), F(7), F(8), I(10), I(0), F(1), F(2), F(3), alpha);
         if (r.Filter is < 0 or > 9 || r.StartLevel is < 0 or > 31 || r.Contrast is < -100 or > 100
             || r.MipBrightness is < -100 or > 100 || r.Brightness is < -255 or > 255
-            || r.Red < 0 || r.Green < 0 || r.Blue < 0)
+            || r.Red < -4f || r.Green < -4f || r.Blue < -4f)
             throw new FormatException("Unsupported conversion filter or invalid colour/mipmap settings.");
         return r;
     }

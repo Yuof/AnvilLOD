@@ -175,7 +175,7 @@ public sealed class OcclusionCalculator
         var tvdt = new TvdtData(_stride);
         int side = _side;
         double cx = cellX + 0.5, cy = cellY + 0.5;
-        int ownX = (cellX - _originX) / 4, ownY = (cellY - _originY) / 4;
+        int ownX = (int)Math.Floor((cellX - _originX) / 4.0), ownY = (int)Math.Floor((cellY - _originY) / 4.0);
         var leaf = new bool[side, side];
         for (int by = 0; by < side; by++)
             for (int bx = 0; bx < side; bx++)

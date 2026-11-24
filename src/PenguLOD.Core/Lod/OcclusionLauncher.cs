@@ -18,9 +18,8 @@ public sealed record OcclusionImport(string Source, string Target, long Bytes, s
 public sealed record OcclusionFound(string Path, bool LeftInGameFolders);
 
 /// <summary>
-/// Occlusion.esp holds the CELL records' TVDT/MHDT data (which LOD is hidden behind terrain). PenguLOD does not compute it itself yet:
-/// it starts the occlusion run of xLODGen or DynDOLOD that the user has installed, with the folders PenguLOD already knows, and
-/// copies the plugin that run wrote into the LOD output. Nothing of those programs is bundled or copied.
+/// Helper for launching or importing an external xLODGen or DynDOLOD <c>Occlusion.esp</c> build when desired.
+/// PenguLOD also generates <c>Occlusion.esp</c> natively via <c>OcclusionStage</c> / <c>OcclusionCalculator</c>.
 /// </summary>
 public static class OcclusionLauncher
 {

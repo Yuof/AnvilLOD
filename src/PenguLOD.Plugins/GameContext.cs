@@ -55,6 +55,9 @@ public sealed class GameContext : IDisposable
     /// <summary>Base game Data folder.</summary>
     public string DataFolder { get; }
 
+    /// <summary>Game-root folders in priority order (highest first: MO2 Root Builder <c>&lt;mod&gt;/Root</c> layers, then the base game root).</summary>
+    public IReadOnlyList<string> GameRootFolders { get; init; } = [];
+
     public int PluginsListed { get; }
     public IReadOnlyList<string> MissingPlugins { get; }
 
@@ -174,7 +177,10 @@ public sealed class GameContext : IDisposable
             {
                 var links = order.ToImmutableLinkCache<ISkyrimMod, ISkyrimModGetter>();
                 var context = new GameContext(o.Release, order, links, dataFolder, $"Data folder {dataFolder}",
-                    filter => AssetIndex.Build(o.Release, dataFolder, filter, resolved.Where(r => r.Path is not null).Select(r => r.Key.FileName.String).ToArray(), IniPaths(o, dataFolder)), warnings, order);
+                    filter => AssetIndex.Build(o.Release, dataFolder, filter, resolved.Where(r => r.Path is not null).Select(r => r.Key.FileName.String).ToArray(), IniPaths(o, dataFolder)), warnings, order)
+                {
+                    GameRootFolders = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(dataFolder)) is { } gf ? [gf] : [],
+                };
                 context._rootFiles = () => Directory.EnumerateFiles(dataFolder).Select(f => (Path.GetFileName(f), f));
                 return context;
             }
@@ -186,7 +192,10 @@ public sealed class GameContext : IDisposable
         var ctx = new GameContext(
             o.Release, env.LoadOrder, env.LinkCache, data, $"Data folder {data}",
             filter => AssetIndex.Build(o.Release, data, filter, env.LoadOrder.ListedOrder.Where(l => l.Enabled && l.Mod is not null).Select(l => l.ModKey.FileName.String).ToList(), IniPaths(o, data)),
-            warnings, env);
+            warnings, env)
+        {
+            GameRootFolders = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(data)) is { } egf ? [egf] : [],
+        };
         ctx._rootFiles = () => Directory.EnumerateFiles(data).Select(f => (Path.GetFileName(f), f));
 
         if (ctx.MissingPlugins.Count > 0)
@@ -302,7 +311,12 @@ public sealed class GameContext : IDisposable
             foreach (var (key, path) in resolved)
             {
                 if (path is null) continue;
-                foreach (var bsa in bsaNames.Where(b => Archive.IsApplicable(release, key, b)).OrderBy(b => b, StringComparer.Ordinal))
+                if (vdi.ResolveRootFile(key.Name + ".ini") is { } pluginIni)
+                    foreach (var pBsa in SkyrimArchives.ReadPluginIniArchives(pluginIni))
+                        Add(vdi.ResolveRootFile(pBsa));
+                foreach (var bsa in bsaNames.Where(b => Archive.IsApplicable(release, key, b))
+                    .OrderBy(b => ArchiveOrder.IntraPluginKey(b, key.Name).Suffixed)
+                    .ThenBy(b => b, StringComparer.OrdinalIgnoreCase))
                     Add(vdi.ResolveRootFile(bsa));
             }
 
@@ -318,6 +332,7 @@ public sealed class GameContext : IDisposable
             $"{kind} {instance.InstanceFolder} (profile \"{profile.Name}\")",
             BuildAssets, warnings, loadOrder)
         {
+            GameRootFolders = profile.GameRootFolders(),
             _rootFiles = () => vdi.RootFileNames.Select(n => (n, vdi.ResolveRootFile(n)!)),
         };
     }

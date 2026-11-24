@@ -32,8 +32,10 @@ public sealed class TerrainInputTests
         Assert.Equal(16, result.Tiles[0].WaterCells);
         var mesh = NifGeometryReader.Read("tile.btr", File.ReadAllBytes(GamePath.ToFileSystemPath(f.Output, @"meshes\terrain\FixtureWorld\FixtureWorld.4.-4.-4.btr")), passthru: true, includeUnshaded: true);
         var land = Assert.Single(mesh.Parts, p => p.Name == "land");
-        // The north-east corner lies in cell (-1,-1), which has no record; the south-west corner is real land at 0.
-        Assert.Equal(-2048, land.Positions[129 * 129 - 1].Z, 3); Assert.Equal(0, land.Positions[0].Z, 3);
+        // The north-east corner (16384, 16384) lies in cell (-1,-1), which has no record; the south-west corner (0, 0) is real land at 0.
+        float neZ = land.Positions.Where(p => MathF.Abs(p.X - 16384f) < 1f && MathF.Abs(p.Y - 16384f) < 1f).Max(p => p.Z);
+        float swZ = land.Positions.Where(p => MathF.Abs(p.X) < 1f && MathF.Abs(p.Y) < 1f).Max(p => p.Z);
+        Assert.Equal(-2048f, neZ, 3); Assert.Equal(0f, swZ, 3);
         var tile = Tile(f);
         Assert.InRange(tile.Pixels[(0 * 64 + 63) * 4 + 2], 225, 245); Assert.InRange(tile.Pixels[(0 * 64 + 63) * 4], 0, 20);   // north-east: default texture
         Assert.InRange(tile.Pixels[(63 * 64 + 0) * 4], 230, 245);                                                              // south-west: painted land

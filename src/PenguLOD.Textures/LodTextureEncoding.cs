@@ -175,6 +175,12 @@ public static class LodTextureEncoding
     public static byte[] Encode(TextureImage image, Channels channels, bool srgb = false, int? alphaCutoff = null, float? coverage = null)
     {
         image = BlockAligned(image, channels, srgb);
+        bool useBc5 = channels == Channels.Normal;
+        if (useBc5)
+        {
+            for (int i = 3; i < image.Pixels.Length; i += 4)
+                if (image.Pixels[i] < 255) { useBc5 = false; break; }
+        }
         var mips = new List<byte[]>();
         coverage ??= alphaCutoff is > 0 and < 256 ? PbrLodConverter.Coverage(image.Pixels, 1, alphaCutoff.Value) : null;
         var level = image;
@@ -185,12 +191,13 @@ public static class LodTextureEncoding
             if (channels == Channels.Normal) for (int i = 0; i < shown.Length; i += 4) TextureImages.Normalize(shown, i);
             if (coverage is > 0 and < .999f && alphaCutoff is > 0 and < 256)
                 PbrLodConverter.KeepCoverage(shown, coverage.Value, alphaCutoff.Value, preserveMatching: true);
-            mips.Add(Bc7Encoder.EncodeImage(shown, level.Width, level.Height));
+            mips.Add(useBc5 ? Bc5Encoder.EncodeImage(shown, level.Width, level.Height) : Bc7Encoder.EncodeImage(shown, level.Width, level.Height));
             if (level.Width == 1 && level.Height == 1) break;
             level = Down(level, channels, srgb);
         }
         using var output = new MemoryStream();
-        DdsFile.WriteBc7(output, image.Width, image.Height, mips, srgb);
+        if (useBc5) DdsFile.WriteBc5(output, image.Width, image.Height, mips);
+        else DdsFile.WriteBc7(output, image.Width, image.Height, mips, srgb);
         return output.ToArray();
     }
 }

@@ -188,12 +188,10 @@ public static partial class TextureGeneration
             path = GamePath.NormalizeTexture(path);
             if (cache.TryGetValue(path, out var cached)) return cached;
             var image = TextureImages.Decode(read(path) ?? throw new FileNotFoundException("Diffuse texture missing: " + path));
-            // Normal alpha is gloss/specular, not opacity. Do not let it weight RGB filtering.
-            if (path.EndsWith("_n.dds", StringComparison.OrdinalIgnoreCase))
-                for (int i = 3; i < image.Pixels.Length; i += 4) image.Pixels[i] = 255;
+            bool isNormal = path.EndsWith("_n.dds", StringComparison.OrdinalIgnoreCase);
             while (!preserveResolution && (image.Width > 1024 || image.Height > 1024))
             {
-                var smaller = TreeAtlasBuilder.Downsample(image.Pixels, image.Width, image.Height);
+                var smaller = TreeAtlasBuilder.Downsample(image.Pixels, image.Width, image.Height, alphaWeighted: !isNormal);
                 image = new(smaller.Rgba, smaller.W, smaller.H);
             }
             while (bytesHeld + image.Pixels.Length > budget && order.TryDequeue(out var oldest))

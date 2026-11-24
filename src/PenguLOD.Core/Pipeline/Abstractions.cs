@@ -90,5 +90,5 @@ public sealed record DynamicLodReference(
     bool Glow = false,                                     // a window glow mesh: the SKSE plugin lights it by the hour instead of leaving it on
     bool StandIn = false)                                  // ChildworldMatches lists it as a stand-in for a real object of a city worldspace: hidden inside the loaded cells while the player is in that city
 {
-    public bool IsGridObject => Grid != DynamicGrid.None;
+    public bool IsGridObject => !Glow && Grid != DynamicGrid.None;
 }

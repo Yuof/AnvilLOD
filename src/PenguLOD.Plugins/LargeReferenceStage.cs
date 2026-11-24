@@ -228,6 +228,48 @@ public static class LargeReferenceStage
 
     private static Vector3 ToVector(P3Int16 p) => new(p.X, p.Y, p.Z);
 
+    /// <summary>
+    /// Identifies RNAM large references across ESMs that are overridden by non-ESM plugins (triggering Skyrim's double-draw bug),
+    /// so <see cref="BtoBuilder"/> can isolate their LOD4 shapes under <c>PL:largeref:4:x:y</c> for runtime culling in <c>PenguLOD.dll</c>.
+    /// </summary>
+    public static HashSet<FormKey> FindBuggedLargeReferences(GameContext game, IReadOnlyCollection<string>? worldspaces = null)
+    {
+        var sourceOrder = game.LoadOrder.ListedOrder
+            .Where(l => !GeneratedLodInputs.IsPlugin(l.ModKey.FileName.String)).ToList();
+        var master = sourceOrder
+            .Where(l => l.ModKey.Type is ModType.Master or ModType.Light
+                || l.Mod is { } m && m.ModHeader.Flags.HasFlag(SkyrimModHeader.HeaderFlag.Master))
+            .Select(l => l.ModKey).ToHashSet();
+        var wanted = worldspaces is { Count: > 0 } ? new HashSet<string>(worldspaces, StringComparer.OrdinalIgnoreCase) : null;
+        var validWs = new HashSet<FormKey>();
+        foreach (var ws in sourceOrder.Where(l => l.Mod is not null).SelectMany(l => l.Mod!.Worldspaces))
+            if (ws.EditorID is { } id && (wanted is null || wanted.Contains(id))) validWs.Add(ws.FormKey);
+
+        var listed = new HashSet<FormKey>();
+        foreach (var listing in sourceOrder)
+        {
+            if (listing.Mod is not { } mod) continue;
+            foreach (var ws in mod.Worldspaces)
+            {
+                if ((wanted is not null && !validWs.Contains(ws.FormKey)) || ws.LargeReferences is not { Count: > 0 } lr) continue;
+                foreach (var cell in lr)
+                    foreach (var r in cell.References)
+                        listed.Add(r.Reference.FormKey);
+            }
+        }
+        if (listed.Count == 0) return [];
+
+        var bugged = new HashSet<FormKey>();
+        foreach (var listing in sourceOrder)
+        {
+            if (listing.Mod is not { } mod || master.Contains(listing.ModKey)) continue;
+            foreach (var r in mod.EnumerateMajorRecords<IPlacedObjectGetter>())
+                if (r.FormKey.ModKey != listing.ModKey && listed.Contains(r.FormKey))
+                    bugged.Add(r.FormKey);
+        }
+        return bugged;
+    }
+
     /// <summary>Deletes <c>PenguLOD.esm</c> from the output (used when the option is off).</summary>
     public static void Remove(string output)
     {

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -14,17 +15,26 @@ namespace PenguLOD.Plugins;
 /// <summary>Packs shader-compatible object surfaces; unsupported materials retain their original sampling.</summary>
 public static class ObjectAtlasStage
 {
-    public const int Version = 6; // triangles that cross a tile edge are cut at it, unless that adds more than MaxCutTriangles
-    /// <summary>Largest page side in pixels, the largest texture the texture code makes. At the default cell size a page holds up to 256 materials.</summary>
+    public const int Version = 7; // Skyline variable-aspect packing up to 8192 + incremental layout slot cache
     public const int PageSize = 4096;
+    public const string LayoutFileName = "PenguLOD.atlas-layout.json";
+
     public sealed record Report(int PackedMaterials, int Pages, int EligibleParts, int SkippedParts,
         IReadOnlyDictionary<string, int> Reasons, int SourceMaterials = 0, int AtlasMaterials = 0, long TextureBytes = 0,
-        IReadOnlyList<string>? Warnings = null, int CutParts = 0, int CutTriangles = 0);
+        IReadOnlyList<string>? Warnings = null, int CutParts = 0, int CutTriangles = 0, int ReusedPages = 0);
     public sealed record Mapping(string Diffuse, string Normal, AtlasRect Rect, IReadOnlyDictionary<int, string>? Extra = null);
-    public sealed record Result(Report Report, Func<LodMesh, LodMesh> Transform);
-    private sealed record Candidate(LodMaterial Material, string Group);
+    public sealed record Result(Report Report, Func<LodMesh, LodMesh> Transform, IReadOnlyDictionary<string, Mapping>? Mappings = null);
+
+    private sealed record Candidate(LodMaterial Material, string Group, string SourceHash);
     private sealed record SourceInfo(DdsFile.Info Info, string Hash);
+    private sealed record TileCacheEntry((LodMeshPart Part, Vector2[] Shifts)? Value);
+    private static readonly ConditionalWeakTable<LodMeshPart, TileCacheEntry> TileCache = new();
     private static readonly int[] ExtraSlots = [2, 3, 5, 7, 8];
+
+    private sealed record LayoutCache(int Version, int CellSize, int MaxPageSize, Dictionary<string, CachedGroup> Groups);
+    private sealed record CachedGroup(int Epoch, List<CachedPage> Pages);
+    private sealed record CachedPage(string Stem, int Width, int Height, int[] ExtraSlots, List<CachedEntry> Entries);
+    private sealed record CachedEntry(string Key, string SourceHash, int Ox, int Oy, int OuterW, int OuterH, int InnerW, int InnerH, int Gutter);
 
     public static string? Ineligible(LodMeshPart part)
     {
@@ -36,40 +46,22 @@ public static class ObjectAtlasStage
         if ((m.ShaderFlags1 & ((1u << 11) | (1u << 15) | (1u << 16) | (1u << 23) | (1u << 28))) != 0
             || (m.ShaderFlags2 & (1u << 24)) != 0) return "non-affine shader sampling";
         if (m.HasAlpha && ObjectTextureAssets.AlphaCutoff(m) is null) return "unsupported alpha blend/test";
-        if (Tiles(part) is not { } tiled || FoldedVertices(tiled.Part, tiled.Shifts) > ushort.MaxValue) return "tiling or invalid UVs";
+        if (CachedTiles(part) is not { } tiled || FoldedVertices(tiled.Part, tiled.Shifts) > ushort.MaxValue) return "tiling or invalid UVs";
         if (tiled.Part.TriangleCount - part.TriangleCount > MaxCutTriangles(part.TriangleCount)) return "cutting at tile edges adds too many triangles";
         return null;
     }
 
     /// <summary>Triangles that cutting at tile edges adds to a part; 0 when it needs no cut or its coordinates cannot be packed.</summary>
-    public static int CutTriangles(LodMeshPart part) => Tiles(part) is { } tiled ? tiled.Part.TriangleCount - part.TriangleCount : 0;
+    public static int CutTriangles(LodMeshPart part) => CachedTiles(part) is { } tiled ? tiled.Part.TriangleCount - part.TriangleCount : 0;
+
+    private static (LodMeshPart Part, Vector2[] Shifts)? CachedTiles(LodMeshPart part)
+        => TileCache.GetValue(part, static p => new TileCacheEntry(Tiles(p))).Value;
 
     /// <summary>How far a triangle may reach past its tile, in tiles: the rounding of half-precision texture coordinates near a tile edge.</summary>
     private const float FoldTolerance = 0.002f;
-    /// <summary>
-    /// Most tiles one triangle may cover and still be cut. A triangle over more repeats than this is a surface the texture is
-    /// tiled across many times; cutting it would turn one triangle into hundreds.
-    /// </summary>
     public const int MaxTilesPerTriangle = 64;
-
-    /// <summary>
-    /// Most triangles cutting at tile edges may add to a part for it to be packed: a tenth of its own, or 64 for a small part. A part
-    /// that needs more keeps its own texture. On a rock face or another surface the texture repeats over many times, cutting adds far
-    /// more triangles than packing saves in draw calls.
-    /// </summary>
     public static int MaxCutTriangles(int triangles) => Math.Max(64, triangles / 10);
 
-    /// <summary>
-    /// The part with every triangle inside one tile of its texture, and the whole-tile shift that brings each triangle's texture
-    /// coordinates into the unit square. Null when the coordinates are unusable, a triangle leaves the unit square on an axis
-    /// that clamps, or a triangle covers more than <see cref="MaxTilesPerTriangle"/> tiles.
-    /// <para>Under wrapping, a triangle in tile (2, -1) samples exactly what it would in tile (0, 0), so each triangle can be
-    /// moved on its own; a surface mapped across several tiles in separate pieces, as most LOD models of walls are, fits an atlas
-    /// this way. A triangle that reaches across a tile edge, as on rock faces and anything else the texture repeats over, is cut
-    /// along the edges first: the pieces lie in the plane of the triangle and carry interpolated normals and colours, so the
-    /// surface is unchanged, and two triangles that share an edge are cut at the same points, so no gap opens between them.
-    /// Triangles are moved whole, never single vertices: that would stretch a triangle across a tile edge.</para>
-    /// </summary>
     private static (LodMeshPart Part, Vector2[] Shifts)? Tiles(LodMeshPart part)
     {
         var uvs = part.UVs; var triangles = part.Triangles;
@@ -99,7 +91,6 @@ public static class ObjectAtlasStage
         return cutter.VertexCount > ushort.MaxValue ? null : (cutter.Build(), shifts.ToArray());
     }
 
-    /// <summary>Cuts triangles of one part along the tile edges of its texture, adding the vertices the cuts need.</summary>
     private sealed class Cutter
     {
         private readonly LodMeshPart _part;
@@ -107,12 +98,9 @@ public static class ObjectAtlasStage
         private readonly List<Vector2> _uvs;
         private readonly List<uint>? _colors;
         private readonly List<int> _triangles;
-        // One cut vertex per edge and tile line, whichever triangle asks first, so neighbours share it.
         private readonly Dictionary<(int Low, int High, int Axis, float Line), int> _cuts = [];
         private List<int> _polygon = [], _below = [], _above = [], _strip = [];
 
-        /// <param name="part">The part being cut.</param>
-        /// <param name="kept">How many of its triangle indices come before the first triangle that needs a cut; they are kept as they are.</param>
         public Cutter(LodMeshPart part, int kept)
         {
             _part = part;
@@ -123,10 +111,8 @@ public static class ObjectAtlasStage
         }
 
         public int VertexCount => _positions.Count;
-
         public void Keep(int a, int b, int c) { _triangles.Add(a); _triangles.Add(b); _triangles.Add(c); }
 
-        /// <summary>Cuts triangle a, b, c into the tiles it covers, a column of tiles at a time, and adds one shift per piece.</summary>
         public void Cut(int a, int b, int c, Vector2 first, int tilesU, int tilesV, List<Vector2> shifts)
         {
             _polygon.Clear(); _polygon.Add(a); _polygon.Add(b); _polygon.Add(c);
@@ -140,7 +126,7 @@ public static class ObjectAtlasStage
                     if (v < tilesV - 1) { Split(_strip, 1, first.Y + v + 1); piece = _below; (_strip, _above) = (_above, _strip); }
                     else piece = _strip;
                     var shift = new Vector2(first.X + u, first.Y + v);
-                    for (int i = 1; i + 1 < piece.Count; i++)           // a convex polygon, as a fan
+                    for (int i = 1; i + 1 < piece.Count; i++)
                     {
                         int p = piece[0], q = piece[i], r = piece[i + 1];
                         if (p == q || q == r || p == r) continue;
@@ -150,10 +136,6 @@ public static class ObjectAtlasStage
             }
         }
 
-        /// <summary>
-        /// Splits a convex polygon at one tile line into the part below it and the part above it. A corner within the tolerance
-        /// of the line belongs to both, so no sliver is cut off beside it.
-        /// </summary>
         private void Split(List<int> polygon, int axis, float line)
         {
             _below.Clear(); _above.Clear();
@@ -177,7 +159,7 @@ public static class ObjectAtlasStage
         {
             var key = (Math.Min(p, q), Math.Max(p, q), axis, line);
             if (_cuts.TryGetValue(key, out int cut)) return cut;
-            int low = key.Item1, high = key.Item2;      // always from the lower index, so both neighbours compute the same point
+            int low = key.Item1, high = key.Item2;
             float from = axis == 0 ? _uvs[low].X : _uvs[low].Y, to = axis == 0 ? _uvs[high].X : _uvs[high].Y;
             float t = (line - from) / (to - from);
             var uv = Vector2.Lerp(_uvs[low], _uvs[high], t);
@@ -213,7 +195,6 @@ public static class ObjectAtlasStage
         };
     }
 
-    /// <summary>Vertices the part has once every vertex used under two different shifts is doubled.</summary>
     private static int FoldedVertices(LodMeshPart part, Vector2[] shifts)
     {
         if (Uniform(shifts)) return part.VertexCount;
@@ -228,11 +209,6 @@ public static class ObjectAtlasStage
         return true;
     }
 
-    /// <summary>
-    /// The part with its texture coordinates folded into the unit square and passed through <paramref name="place"/>. When every
-    /// triangle has the same shift the vertices are kept as they are; otherwise a vertex shared by triangles of different tiles
-    /// becomes one vertex per tile, with the same position, normal and colour.
-    /// </summary>
     private static LodMeshPart Fold(LodMeshPart p, LodMaterial material, Vector2[] shifts, Func<Vector2, Vector2> place)
     {
         if (Uniform(shifts))
@@ -261,12 +237,13 @@ public static class ObjectAtlasStage
         };
     }
 
-    /// <param name="usage">For each material key, the blocks it is drawn in, as a bit per block. Pages are then filled with materials
-    /// drawn in the same blocks, so a block draws its atlased surfaces from fewer pages. Without it, pages fill in key order.</param>
     public static Result Build(IEnumerable<LodMesh> meshes, AssetIndex assets, string output, int cellSize = 256,
-        IProgress<string>? progress = null, CancellationToken ct = default, IReadOnlyDictionary<string, ulong[]>? usage = null)
+        IProgress<string>? progress = null, CancellationToken ct = default, IReadOnlyDictionary<string, ulong[]>? usage = null,
+        int maxPageSize = PageSize)
     {
         if (cellSize is < 64 or > 512 || (cellSize & (cellSize - 1)) != 0) throw new ArgumentOutOfRangeException(nameof(cellSize));
+        if (maxPageSize is < 256 or > 8192 || (maxPageSize & (maxPageSize - 1)) != 0 || maxPageSize < cellSize)
+            throw new ArgumentOutOfRangeException(nameof(maxPageSize));
         Directory.CreateDirectory(output);
         var source = new ObjectTextureAssets(assets, output);
         var materials = new SortedDictionary<string, Candidate>(StringComparer.Ordinal);
@@ -275,6 +252,42 @@ public static class ObjectAtlasStage
         var reasons = new Dictionary<string, int>(); var warnings = new List<string>();
         int eligible = 0, skipped = 0, cutParts = 0, cutTriangles = 0;
         var modelArray = meshes.ToArray();
+        // Pre-validate unique candidate textures in parallel (header read, full decode check, SHA-256)
+        // instead of decoding multi-megabyte DDS files sequentially on one core.
+        var candidateSlots = new Dictionary<string, HashSet<int>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var mesh in modelArray) foreach (var part in mesh.Parts)
+        {
+            if (Ineligible(part) is not null) continue;
+            var slots = ShaderGuard.TextureSlots(part.Material.Textures);
+            foreach (int slot in new[] { 0, 1 }.Concat(ExtraSlots))
+            {
+                string path = slots[slot]; if (path.Length == 0) continue;
+                if (!candidateSlots.TryGetValue(path, out var set)) candidateSlots[path] = set = [];
+                set.Add(slot);
+            }
+        }
+        var parallelInfo = new ConcurrentDictionary<string, SourceInfo>(StringComparer.OrdinalIgnoreCase);
+        var parallelFailures = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        Parallel.ForEach(candidateSlots, RunLimits.Parallel(ct), kv =>
+        {
+            RunLimits.Check();
+            string path = kv.Key;
+            try
+            {
+                var bytes = source.Read(path); var header = LodTextureEncoding.Read2D(bytes);
+                if (header.DxgiFormat is 27 or 70 or 73 or 76 or 79 or 81 or 82 or 84 or 90 or 97
+                    || (header.Format == PenguLOD.Textures.Bc.BcFormat.Bc5 && kv.Value.Any(s => s != 1)))
+                    throw new NotSupportedException("Signed, typeless or two-channel data cannot be atlased faithfully.");
+                _ = LodTextureEncoding.Decode(bytes);
+                parallelInfo[path] = new(header, Convert.ToHexString(SHA256.HashData(bytes)));
+            }
+            catch (Exception ex) when (ex is IOException or NotSupportedException or ArgumentException or InvalidDataException)
+            { parallelFailures[path] = ex.Message; }
+        });
+        foreach (var (k, v) in parallelInfo) info[k] = v;
+        foreach (var (k, v) in parallelFailures.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+        { failures[k] = v; warnings.Add(k + ": " + v); }
+
         foreach (var mesh in modelArray) foreach (var part in mesh.Parts)
         {
             ct.ThrowIfCancellationRequested(); RunLimits.Check();
@@ -296,7 +309,6 @@ public static class ObjectAtlasStage
                             if (header.DxgiFormat is 27 or 70 or 73 or 76 or 79 or 81 or 82 or 84 or 90 or 97
                                 || (header.Format == PenguLOD.Textures.Bc.BcFormat.Bc5 && slot != 1))
                                 throw new NotSupportedException("Signed, typeless or two-channel data cannot be atlased faithfully.");
-                            // Decode once here to validate the full top level, without keeping all source images resident.
                             _ = LodTextureEncoding.Decode(bytes);
                             info[path] = new(header, Convert.ToHexString(SHA256.HashData(bytes)));
                         }
@@ -307,7 +319,8 @@ public static class ObjectAtlasStage
                     string group = (m with { Textures = groupSlots, ClampMode = 0 }).Key
                         + "|lod:" + ObjectTextureAssets.IsLodTexture(m)
                         + "|srgb:" + string.Join(',', slots.Select((p, i) => i != 4 && p.Length > 0 && LodTextureEncoding.IsSrgb(info[p].Info) ? i.ToString() : ""));
-                    materials[m.Key] = new(m, group);
+                    string srcHash = string.Join(':', slots.Where((p, i) => i != 4 && p.Length > 0).Select(p => info[p].Hash));
+                    materials[m.Key] = new(m, group, srcHash);
                 }
                 catch (Exception ex) when (ex is IOException or NotSupportedException or ArgumentException or InvalidDataException)
                 { reason = "unavailable or unsupported texture"; }
@@ -319,66 +332,208 @@ public static class ObjectAtlasStage
             }
             else { skipped++; reasons[reason] = reasons.GetValueOrDefault(reason) + 1; }
         }
+
+        string layoutPath = Path.Combine(output, LayoutFileName);
+        var previousLayout = ReadLayout(layoutPath, cellSize, maxPageSize);
+        var nextGroups = new Dictionary<string, CachedGroup>(StringComparer.Ordinal);
         var mapped = new Dictionary<string, Mapping>(StringComparer.Ordinal);
-        int pages = 0; long textureBytes = 0;
-        // One page per group of compatible materials wherever it fits: shapes merge only when they share a page, and with 2048 px
-        // pages of 64 cells a block drew its atlased surfaces from a couple of dozen pages.
-        int perPage = (PageSize / cellSize) * (PageSize / cellSize);
-        // Shader/alpha/emittance/cubemap compatibility comes before path ordering, so each page can actually batch.
+        int pages = 0, reusedPages = 0; long textureBytes = 0;
+        int perPage = Math.Max(16, (maxPageSize / cellSize) * (maxPageSize / cellSize) * 3); // variable-aspect packs ~2-4x more rects per page
+
+        ObjectTextureAtlas.Input LoadInput(string key, Candidate candidate)
+        {
+            var m = candidate.Material;
+            var slots = ShaderGuard.TextureSlots(m.Textures);
+            TextureImage Load(string path, int slot) => LodTextureEncoding.Limit(LodTextureEncoding.Decode(source.Read(path)), cellSize,
+                slot == 0 ? m.HasAlpha ? LodTextureEncoding.Channels.Color : LodTextureEncoding.Channels.OpaqueColor : slot == 1 ? LodTextureEncoding.Channels.Normal : LodTextureEncoding.Channels.Data,
+                LodTextureEncoding.IsSrgb(info[path].Info), slot == 0 ? ObjectTextureAssets.AlphaCutoff(m) : null);
+            return new(key, Load(slots[0], 0), slots[1].Length > 0 ? Load(slots[1], 1) : null, m.HasAlpha, m.ClampMode,
+                ObjectTextureAssets.AlphaCutoff(m) ?? 128,
+                ExtraSlots.Where(i => slots[i].Length > 0).ToDictionary(i => i, i => Load(slots[i], i)),
+                slots.Select((p, i) => (p, i)).Where(t => t.i != 4 && t.p.Length > 0 && LodTextureEncoding.IsSrgb(info[t.p].Info)).Select(t => t.i).ToHashSet());
+        }
+
+        bool PageFilesExist(CachedPage cp)
+        {
+            if (!File.Exists(GamePath.ToFileSystemPath(output, cp.Stem + ".dds"))) return false;
+            if (!File.Exists(GamePath.ToFileSystemPath(output, cp.Stem + "_n.dds"))) return false;
+            foreach (int slot in cp.ExtraSlots)
+                if (!File.Exists(GamePath.ToFileSystemPath(output, cp.Stem + $"_s{slot}.dds"))) return false;
+            return true;
+        }
+
+        long ExistingPageBytes(CachedPage cp)
+        {
+            long sum = new FileInfo(GamePath.ToFileSystemPath(output, cp.Stem + ".dds")).Length
+                     + new FileInfo(GamePath.ToFileSystemPath(output, cp.Stem + "_n.dds")).Length;
+            foreach (int slot in cp.ExtraSlots)
+                sum += new FileInfo(GamePath.ToFileSystemPath(output, cp.Stem + $"_s{slot}.dds")).Length;
+            return sum;
+        }
+
         foreach (var group in materials.GroupBy(kv => kv.Value.Group).OrderBy(g => g.Key, StringComparer.Ordinal))
-        foreach (var batch in Batches(group.ToList(), perPage, usage))
         {
             ct.ThrowIfCancellationRequested();
             progress?.Report($"Object atlas: {mapped.Count:N0}/{materials.Count:N0} materials...");
-            var inputs = new List<ObjectTextureAtlas.Input>();
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            hash.AppendData(Encoding.UTF8.GetBytes($"atlas{Version}:{cellSize}:" + group.Key));
-            foreach (var (key, candidate) in batch)
+            var groupDict = group.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+            var firstMat = group.First().Value.Material;
+            int[] activeExtraSlots = ExtraSlots.Where(i => ShaderGuard.TextureSlots(firstMat.Textures)[i].Length > 0).ToArray();
+            string groupHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"atlas{Version}:{cellSize}:{maxPageSize}:{group.Key}"))).ToLowerInvariant()[..20];
+
+            // Check incremental layout cache for this group: reuse when <=25% stale area and files exist on disk.
+            if (previousLayout is not null && previousLayout.Groups.TryGetValue(group.Key, out var cachedGroup)
+                && cachedGroup.Pages.Count > 0 && cachedGroup.Pages.All(PageFilesExist))
             {
-                var m = candidate.Material; var slots = ShaderGuard.TextureSlots(m.Textures);
-                hash.AppendData(Encoding.UTF8.GetBytes(key));
-                foreach (string path in slots.Where((p, i) => i != 4 && p.Length > 0)) hash.AppendData(Encoding.UTF8.GetBytes(info[path].Hash));
-                TextureImage Load(string path, int slot) => LodTextureEncoding.Limit(LodTextureEncoding.Decode(source.Read(path)), cellSize,
-                    slot == 0 ? m.HasAlpha ? LodTextureEncoding.Channels.Color : LodTextureEncoding.Channels.OpaqueColor : slot == 1 ? LodTextureEncoding.Channels.Normal : LodTextureEncoding.Channels.Data,
-                    LodTextureEncoding.IsSrgb(info[path].Info), slot == 0 ? ObjectTextureAssets.AlphaCutoff(m) : null);
-                inputs.Add(new(key, Load(slots[0], 0), slots[1].Length > 0 ? Load(slots[1], 1) : null, m.HasAlpha, m.ClampMode,
-                    ObjectTextureAssets.AlphaCutoff(m) ?? 128,
-                    ExtraSlots.Where(i => slots[i].Length > 0).ToDictionary(i => i, i => Load(slots[i], i)),
-                    slots.Select((p, i) => (p, i)).Where(t => t.i != 4 && t.p.Length > 0 && LodTextureEncoding.IsSrgb(info[t.p].Info)).Select(t => t.i).ToHashSet()));
+                long totalArea = 0, staleArea = 0;
+                foreach (var cp in cachedGroup.Pages)
+                    foreach (var ce in cp.Entries)
+                    {
+                        long area = (long)ce.OuterW * ce.OuterH;
+                        totalArea += area;
+                        if (!groupDict.TryGetValue(ce.Key, out var cur) || cur.SourceHash != ce.SourceHash)
+                            staleArea += area;
+                    }
+
+                if (totalArea > 0 && staleArea * 4 <= totalArea)
+                {
+                    var pinnedSpecs = cachedGroup.Pages.Select(cp => (
+                        cp.Width,
+                        cp.Height,
+                        Pinned: (IReadOnlyList<(string Key, int Ox, int Oy, int OuterW, int OuterH, int InnerW, int InnerH, int Gutter)>)
+                            cp.Entries.Where(ce => groupDict.TryGetValue(ce.Key, out var cur) && cur.SourceHash == ce.SourceHash)
+                                .Select(ce => (ce.Key, ce.Ox, ce.Oy, ce.OuterW, ce.OuterH, ce.InnerW, ce.InnerH, ce.Gutter)).ToList()
+                    )).ToList();
+
+                    var pinnedKeys = pinnedSpecs.SelectMany(p => p.Pinned.Select(x => x.Key)).ToHashSet(StringComparer.Ordinal);
+                    bool anyNewOrChanged = groupDict.Keys.Any(k => !pinnedKeys.Contains(k));
+
+                    if (!anyNewOrChanged)
+                    {
+                        // Fast path: 0 new/changed materials in this group -> reuse every surviving slot without decoding or encoding!
+                        var keptPages = new List<CachedPage>();
+                        foreach (var cp in cachedGroup.Pages)
+                        {
+                            var surviving = cp.Entries.Where(ce => pinnedKeys.Contains(ce.Key)).ToList();
+                            if (surviving.Count == 0) continue;
+                            string diffuse = cp.Stem + ".dds", normal = cp.Stem + "_n.dds";
+                            var extraMap = cp.ExtraSlots.ToDictionary(s => s, s => cp.Stem + $"_s{s}.dds");
+                            foreach (var ce in surviving)
+                            {
+                                var rect = new AtlasRect(
+                                    (ce.Ox + ce.Gutter + 0.5f) / cp.Width,
+                                    (ce.Oy + ce.Gutter + 0.5f) / cp.Height,
+                                    (ce.Ox + ce.OuterW - ce.Gutter - 0.5f) / cp.Width,
+                                    (ce.Oy + ce.OuterH - ce.Gutter - 0.5f) / cp.Height);
+                                mapped[ce.Key] = new(diffuse, normal, rect, extraMap);
+                            }
+                            keptPages.Add(cp with { Entries = surviving });
+                            pages++; reusedPages++;
+                            textureBytes += ExistingPageBytes(cp);
+                        }
+                        nextGroups[group.Key] = new(cachedGroup.Epoch, keptPages);
+                        continue;
+                    }
+
+                    // Append new/changed materials into free Skyline slots of pinned pages or overflow pages, preserving pinned rects & stems!
+                    var allInputs = groupDict.Select(kv => LoadInput(kv.Key, kv.Value)).ToArray();
+                    var incremental = ObjectTextureAtlas.Build(allInputs, cellSize, maxPageSize, ct, variableAspect: true, pinnedPages: pinnedSpecs);
+                    var updatedPages = new List<CachedPage>(incremental.Pages.Count);
+                    for (int page = 0; page < incremental.Pages.Count; page++)
+                    {
+                        string pageStem = page < cachedGroup.Pages.Count
+                            ? cachedGroup.Pages[page].Stem
+                            : ObjectTextureAssets.Root(firstMat, "objects") + $"{groupHash}_e{cachedGroup.Epoch}_{page}";
+                        var pageBoxes = incremental.Boxes!.Where(kv => kv.Value.Page == page)
+                            .Select(kv => new CachedEntry(kv.Key, groupDict[kv.Key].SourceHash, kv.Value.Ox, kv.Value.Oy, kv.Value.OuterW, kv.Value.OuterH, kv.Value.InnerW, kv.Value.InnerH, kv.Value.Gutter))
+                            .OrderBy(e => e.Key, StringComparer.Ordinal).ToList();
+
+                        // If an existing page gained no new entries and none of its entries changed, keep the existing DDS on disk untouched.
+                        bool unchangedExisting = page < cachedGroup.Pages.Count
+                            && pageBoxes.All(pb => pinnedKeys.Contains(pb.Key));
+                        string diffuse = pageStem + ".dds", normal = pageStem + "_n.dds";
+                        Dictionary<int, string> extraMap;
+                        if (unchangedExisting)
+                        {
+                            extraMap = cachedGroup.Pages[page].ExtraSlots.ToDictionary(s => s, s => pageStem + $"_s{s}.dds");
+                            pages++; reusedPages++;
+                            textureBytes += ExistingPageBytes(cachedGroup.Pages[page]);
+                        }
+                        else
+                        {
+                            Write(diffuse, incremental.Pages[page].Diffuse);
+                            Write(normal, incremental.Pages[page].Normal);
+                            pages++;
+                            extraMap = (incremental.Pages[page].Extra ?? new Dictionary<int, byte[]>()).ToDictionary(k => k.Key, k => pageStem + $"_s{k.Key}.dds");
+                            foreach (var (slot, path) in extraMap) Write(path, incremental.Pages[page].Extra![slot]);
+                        }
+                        foreach (var (key, placement) in incremental.Placements.Where(p => p.Value.Page == page))
+                            mapped[key] = new(diffuse, normal, placement.Rect, extraMap);
+                        updatedPages.Add(new(pageStem, incremental.Pages[page].Size, incremental.Pages[page].Height, activeExtraSlots, pageBoxes));
+                    }
+                    nextGroups[group.Key] = new(cachedGroup.Epoch, updatedPages);
+                    continue;
+                }
             }
-            var result = ObjectTextureAtlas.Build(inputs, cellSize, PageSize, ct);
-            string stem = ObjectTextureAssets.Root(batch[0].Value.Material, "objects") + Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant()[..24];
-            for (int page = 0; page < result.Pages.Count; page++)
+
+            // Fresh pack (or repack when >25% stale): cluster by block usage and pack variable-aspect Skyline pages.
+            int epoch = (previousLayout?.Groups.TryGetValue(group.Key, out var prevGrp) == true ? prevGrp.Epoch + 1 : 0);
+            var freshPages = new List<CachedPage>();
+            int batchPageOffset = 0;
+            foreach (var batch in Batches(group.ToList(), perPage, usage))
             {
-                string diffuse = stem + $"_{page}.dds", normal = stem + $"_{page}_n.dds";
-                Write(diffuse, result.Pages[page].Diffuse); Write(normal, result.Pages[page].Normal); pages++;
-                var extra = (result.Pages[page].Extra ?? new Dictionary<int, byte[]>()).ToDictionary(k => k.Key, k => stem + $"_{page}_s{k.Key}.dds");
-                foreach (var (slot, path) in extra) Write(path, result.Pages[page].Extra![slot]);
-                foreach (var (key, placement) in result.Placements.Where(p => p.Value.Page == page)) mapped[key] = new(diffuse, normal, placement.Rect, extra);
+                ct.ThrowIfCancellationRequested();
+                var inputs = batch.Select(kv => LoadInput(kv.Key, kv.Value)).ToList();
+                var result = ObjectTextureAtlas.Build(inputs, cellSize, maxPageSize, ct, variableAspect: true);
+                for (int page = 0; page < result.Pages.Count; page++)
+                {
+                    int globalPage = batchPageOffset + page;
+                    string pageStem = ObjectTextureAssets.Root(batch[0].Value.Material, "objects") + $"{groupHash}_e{epoch}_{globalPage}";
+                    string diffuse = pageStem + ".dds", normal = pageStem + "_n.dds";
+                    Write(diffuse, result.Pages[page].Diffuse);
+                    Write(normal, result.Pages[page].Normal);
+                    pages++;
+                    var extraMap = (result.Pages[page].Extra ?? new Dictionary<int, byte[]>()).ToDictionary(k => k.Key, k => pageStem + $"_s{k.Key}.dds");
+                    foreach (var (slot, path) in extraMap) Write(path, result.Pages[page].Extra![slot]);
+                    foreach (var (key, placement) in result.Placements.Where(p => p.Value.Page == page))
+                        mapped[key] = new(diffuse, normal, placement.Rect, extraMap);
+                    var pageBoxes = result.Boxes!.Where(kv => kv.Value.Page == page)
+                        .Select(kv => new CachedEntry(kv.Key, groupDict[kv.Key].SourceHash, kv.Value.Ox, kv.Value.Oy, kv.Value.OuterW, kv.Value.OuterH, kv.Value.InnerW, kv.Value.InnerH, kv.Value.Gutter))
+                        .OrderBy(e => e.Key, StringComparer.Ordinal).ToList();
+                    freshPages.Add(new(pageStem, result.Pages[page].Size, result.Pages[page].Height, activeExtraSlots, pageBoxes));
+                }
+                batchPageOffset += result.Pages.Count;
             }
+            nextGroups[group.Key] = new(epoch, freshPages);
         }
+
+        File.WriteAllText(layoutPath, JsonSerializer.Serialize(new LayoutCache(Version, cellSize, maxPageSize, nextGroups), PersistentPipeline.Json));
         var cache = new ConcurrentDictionary<LodMesh, LodMesh>(ReferenceEqualityComparer.Instance);
         LodMesh Transform(LodMesh mesh) => cache.GetOrAdd(mesh, m => Remap(m, mapped));
         int before = modelArray.SelectMany(m => m.Parts).Select(p => p.Material.Key).Distinct().Count();
         int after = modelArray.Select(Transform).SelectMany(m => m.Parts).Select(p => p.Material.Key).Distinct().Count();
-        var report = new Report(mapped.Count, pages, eligible, skipped, reasons, before, after, textureBytes, warnings, cutParts, cutTriangles);
+        var report = new Report(mapped.Count, pages, eligible, skipped, reasons, before, after, textureBytes, warnings, cutParts, cutTriangles, reusedPages);
         File.WriteAllText(Path.Combine(output, "PenguLOD.atlas.json"), JsonSerializer.Serialize(report, PersistentPipeline.Json));
         var groupSizes = materials.Values.GroupBy(c => c.Group).Select(g => g.Count()).OrderDescending().ToArray();
-        progress?.Report($"Object atlas: {mapped.Count:N0} materials on {pages} page sets; {before:N0} → {after:N0} distinct materials; {skipped:N0} parts retain original UVs/materials.");
+        progress?.Report($"Object atlas: {mapped.Count:N0} materials on {pages} page sets ({reusedPages} reused); {before:N0} → {after:N0} distinct materials; {skipped:N0} parts retain original UVs/materials.");
         if (cutParts > 0) progress?.Report($"Object atlas: {cutParts:N0} model parts were cut at texture tile edges to fit, adding {cutTriangles:N0} triangles to those models.");
         progress?.Report($"Object atlas: {groupSizes.Length:N0} groups of compatible materials; the largest hold {string.Join(", ", groupSizes.Take(8))} materials.");
         foreach (var warning in warnings.Take(20)) progress?.Report("Warning: object atlas kept source material: " + warning);
-        // Keep content-addressed previous pages: out-of-scope and seasonal BTOs can still reference them.
-        return new(report, Transform);
+        return new(report, Transform, mapped);
 
         void Write(string path, byte[] bytes) { ObjectTextureAssets.Write(output, path, bytes); textureBytes += bytes.Length; }
     }
 
-    /// <summary>
-    /// Splits a group of compatible materials into pages. With block usage, each page starts from the most used material left and
-    /// takes, one at a time, the material that adds the fewest blocks the page is not yet drawn in (ties: most shared blocks, then key),
-    /// so materials placed together share a page. A block draws one shape per page it uses, so this lowers its draw calls.
-    /// </summary>
+    private static LayoutCache? ReadLayout(string path, int cellSize, int maxPageSize)
+    {
+        if (!File.Exists(path)) return null;
+        try
+        {
+            var layout = JsonSerializer.Deserialize<LayoutCache>(File.ReadAllText(path), PersistentPipeline.Json);
+            return layout is not null && layout.Version == Version && layout.CellSize == cellSize && layout.MaxPageSize == maxPageSize ? layout : null;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException) { return null; }
+    }
+
     internal static IEnumerable<KeyValuePair<string, TCandidate>[]> Batches<TCandidate>(IReadOnlyList<KeyValuePair<string, TCandidate>> group, int perPage,
         IReadOnlyDictionary<string, ulong[]>? usage)
     {
@@ -389,7 +544,7 @@ public static class ObjectAtlasStage
         }
         int words = usage.Values.Select(u => u.Length).DefaultIfEmpty(0).Max();
         ulong[] Bits(string key) => usage.TryGetValue(key, out var u) ? u : [];
-        static int Count(ulong[] a) { int n = 0; foreach (ulong w in a) n += System.Numerics.BitOperations.PopCount(w); return n; }
+        static int Count(ulong[] a) { int n = 0; foreach (ulong w in a) n += BitOperations.PopCount(w); return n; }
         var left = group.OrderBy(kv => kv.Key, StringComparer.Ordinal).ToList();
         while (left.Count > 0)
         {
@@ -406,8 +561,8 @@ public static class ObjectAtlasStage
                     var u = Bits(left[i].Key); int added = 0, shared = 0;
                     for (int w = 0; w < u.Length; w++)
                     {
-                        added += System.Numerics.BitOperations.PopCount(u[w] & ~covered[w]);
-                        shared += System.Numerics.BitOperations.PopCount(u[w] & covered[w]);
+                        added += BitOperations.PopCount(u[w] & ~covered[w]);
+                        shared += BitOperations.PopCount(u[w] & covered[w]);
                     }
                     if (added < bestNew || (added == bestNew && shared > bestShared)) { best = i; bestNew = added; bestShared = shared; }
                 }
@@ -425,11 +580,26 @@ public static class ObjectAtlasStage
         Path = mesh.Path, Warnings = mesh.Warnings, NoShapesInFile = mesh.NoShapesInFile,
         Parts = mesh.Parts.Select(p =>
         {
-            if (!mappings.TryGetValue(p.Material.Key, out var map) || Ineligible(p) is not null || Tiles(p) is not { } tiled) return p;
+            if (!mappings.TryGetValue(p.Material.Key, out var map) || Ineligible(p) is not null || CachedTiles(p) is not { } tiled) return p;
             var textures = ShaderGuard.TextureSlots(p.Material.Textures); textures[0] = map.Diffuse; textures[1] = map.Normal;
             if (map.Extra is not null) foreach (var (slot, path) in map.Extra) textures[slot] = path;
             return Fold(tiled.Part, p.Material with { Textures = textures, ClampMode = 0 }, tiled.Shifts,
                 v => new Vector2(map.Rect.U0 + v.X * (map.Rect.U1 - map.Rect.U0), map.Rect.V0 + v.Y * (map.Rect.V1 - map.Rect.V0)));
         }).ToArray()
     };
+
+    /// <summary>Compact deterministic stamp of a transformed mesh's resolved materials and atlas UV sub-rects, for <c>QuadHasher</c>.</summary>
+    public static string TransformStamp(LodMesh original, LodMesh transformed, IReadOnlyDictionary<string, Mapping>? atlasMappings)
+    {
+        using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        for (int i = 0; i < transformed.Parts.Count; i++)
+        {
+            var tp = transformed.Parts[i];
+            sha.AppendData(Encoding.UTF8.GetBytes(tp.Material.Key));
+            if (atlasMappings is not null && i < original.Parts.Count && atlasMappings.TryGetValue(original.Parts[i].Material.Key, out var m))
+                sha.AppendData(Encoding.UTF8.GetBytes(FormattableString.Invariant($"|{m.Rect.U0:R},{m.Rect.V0:R},{m.Rect.U1:R},{m.Rect.V1:R}")));
+            sha.AppendData("\n"u8);
+        }
+        return Convert.ToHexString(sha.GetHashAndReset(), 0, 8);
+    }
 }

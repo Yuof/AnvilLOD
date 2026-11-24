@@ -66,22 +66,33 @@ public sealed class PresetTests : IDisposable
     {
         // PenguLOD's own defaults are not one of the presets: its billboard cap and minimum grass height differ from TexGen's.
         Assert.Null(QualityPresets.Matching(new DesktopSettings()));
+        var ultra = QualityPresets.BuiltIn("ultra", 2160);
+        var ultraSettings = new DesktopSettings(); QualityPresets.Apply(ultraSettings, ultra);
+        Assert.Equal(("High", true, true, true, "8192", "16", "4", 3072m),
+            (Option<string>(ultraSettings, "preset"), Option<bool>(ultraSettings, "lod32"), Option<bool>(ultraSettings, "tree3d"),
+             Option<bool>(ultraSettings, "tree3d8"), Option<string>(ultraSettings, "atlasPageSize"),
+             Option<string>(ultraSettings, "grassMaxLevel"), Option<string>(ultraSettings, "grassTiers"), Option<decimal>(ultraSettings, "occClearance")));
+        Assert.Equal((1.5m, 1024m, "BC7", "BC7"), (ultraSettings.TerrainMaxErrorLod4, ultraSettings.TerrainTextureSize, ultraSettings.TerrainDiffuseFormatLod4, ultraSettings.TerrainDiffuseFormatLod8));
+
         var high = QualityPresets.BuiltIn("high", 2160);
         var top = new DesktopSettings(); QualityPresets.Apply(top, high);
         Assert.Equal((512m, 5.5m, 2048m), (top.TextureGenBaseSize, top.TextureGenUnitsPerPixel, top.TextureGenMaxSize));
-        Assert.Equal(("High", "512", "2048"), (Option<string>(top, "preset"), Option<string>(top, "atlasCell"), Option<string>(top, "objectTextureSize")));
+        Assert.Equal(("High", "512", "2048", "8192"), (Option<string>(top, "preset"), Option<string>(top, "atlasCell"), Option<string>(top, "objectTextureSize"), Option<string>(top, "atlasPageSize")));
         // The preset names DynDOLOD's rules; the screen gives the sizes. Low rules on the same screen have the same sizes.
         var low = new DesktopSettings(); QualityPresets.Apply(low, QualityPresets.BuiltIn(QualityPresets.Performance, 2160));
-        Assert.Equal((512m, 5.5m, 2048m, "Low"), (low.TextureGenBaseSize, low.TextureGenUnitsPerPixel, low.TextureGenMaxSize, Option<string>(low, "preset")));
+        Assert.Equal((512m, 5.5m, 2048m, "Low", false, "4096", "BC1"), (low.TextureGenBaseSize, low.TextureGenUnitsPerPixel, low.TextureGenMaxSize,
+            Option<string>(low, "preset"), Option<bool>(low, "tree3d"), Option<string>(low, "atlasPageSize"), low.TerrainDiffuseFormatLod4));
         var middle = new DesktopSettings(); QualityPresets.Apply(middle, QualityPresets.BuiltIn(QualityPresets.Balanced, 1080));
-        Assert.Equal(("Medium", 11m, 256m, 1024m, "256", "1024"), (Option<string>(middle, "preset"), middle.TextureGenUnitsPerPixel, middle.TextureGenBaseSize,
-            middle.TextureGenMaxSize, Option<string>(middle, "atlasCell"), Option<string>(middle, "objectTextureSize")));
-        foreach (var s in new[] { top, middle, low })
+        Assert.Equal(("Medium", 11m, 256m, 1024m, "256", "1024", true, "4096", "4", "1"), (Option<string>(middle, "preset"), middle.TextureGenUnitsPerPixel, middle.TextureGenBaseSize,
+            middle.TextureGenMaxSize, Option<string>(middle, "atlasCell"), Option<string>(middle, "objectTextureSize"),
+            Option<bool>(middle, "objectAtlas"), Option<string>(middle, "atlasPageSize"), Option<string>(middle, "grassMaxLevel"), Option<string>(middle, "grassTiers")));
+        foreach (var s in new[] { ultraSettings, top, middle, low })
         {
-            // TexGen_SSE.INI, TexGen's light and DynDOLOD's occlusion quality are the same in all three.
+            // TexGen_SSE.INI, TexGen's light and DynDOLOD's occlusion sample/radius/eye are shared across all four.
             Assert.Equal((256m, 32m, 1.7m), (s.TextureGenMinTreeHeight, s.TextureGenMinGrassHeight, s.TextureGenUnplacedTreeScale));
             Assert.Equal((.55m, 1.35m, 1.5m, .5m, .65m), (s.TextureGenTreeAmbient, s.TextureGenTreeDirect, s.TextureGenTrunkAmbient, s.TextureGenTrunkDirect, s.BakePbrScale));
             Assert.Equal((2m, 100m, 0m), (Option<decimal>(s, "occSamples"), Option<decimal>(s, "occRadius"), Option<decimal>(s, "occEye")));
+            Assert.True(Option<bool>(s, "objectAtlas"));
         }
         foreach (int height in QualityPresets.ScreenHeights)
             foreach (string name in QualityPresets.BuiltInNames)
@@ -94,11 +105,11 @@ public sealed class PresetTests : IDisposable
 
                 var s = new DesktopSettings();
                 QualityPresets.Apply(s, preset);
-                // 1080p and 1440p differ only in units per pixel, so every pair is told apart.
+                // 1080p and 1440p differ in units per pixel, and all four presets differ in rules/terrain/trees/grass, so every pair is told apart.
                 Assert.Equal((name, height), QualityPresets.Matching(s));
                 RequestFactoryChecks(s);
             }
-        Assert.Throws<ArgumentException>(() => QualityPresets.BuiltIn("Ultra", 1080));
+        Assert.Throws<ArgumentException>(() => QualityPresets.BuiltIn("Extreme", 1080));
     }
 
     // The sizes a preset sets are ones the texture stage takes.
@@ -125,8 +136,8 @@ public sealed class PresetTests : IDisposable
         Assert.DoesNotContain(changes, c => c.StartsWith("Stitch base size") || c.StartsWith("Visibility radius"));    // already 256 and 100
         Assert.Equal(.6m, Option<decimal>(s, "grassDensity")); Assert.Equal(6000m, Option<decimal>(s, "treeNearBudget"));
         Assert.True(Option<bool>(s, "detailedShips")); Assert.False(Option<bool>(s, "occlusion")); Assert.True(Option<bool>(s, "grass"));
-        Assert.Equal(1024m, s.TerrainTextureSize); Assert.Equal(3m, s.TextureGenGrassUnitsPerPixel);
-        Assert.True(Option<bool>(s, "seasons")); Assert.True(Option<bool>(s, "tree3d")); Assert.Equal("VR", Option<string>(s, "skse"));
+        Assert.Equal(512m, s.TerrainTextureSize); Assert.Equal("BC1", s.TerrainDiffuseFormatLod4); Assert.Equal(3m, s.TextureGenGrassUnitsPerPixel);
+        Assert.True(Option<bool>(s, "seasons")); Assert.False(Option<bool>(s, "tree3d")); Assert.Equal("VR", Option<string>(s, "skse"));
         Assert.True(s.TextureGenGrass); Assert.Equal(1.2m, s.TerrainBrightness);
         Assert.Equal("/out/lod", s.OutputFolder); Assert.Equal("Tamriel, Blackreach", s.Worldspaces);
         Assert.Equal((QualityPresets.Performance, 1080), QualityPresets.Matching(s));
@@ -150,7 +161,8 @@ public sealed class PresetTests : IDisposable
 
         var changes = QualityPresets.Apply(s, QualityPresets.Shipped(1440));
 
-        Assert.Equal((QualityPresets.Balanced, 1440), QualityPresets.Matching(s));
+        Assert.Equal("Medium", Option<string>(s, "preset"));
+        Assert.Equal(3072m, Option<decimal>(s, "occClearance"));
         Assert.True(Option<bool>(s, "trees")); Assert.True(Option<bool>(s, "dynamic")); Assert.True(Option<bool>(s, "grid")); Assert.True(Option<bool>(s, "occlusion"));
         Assert.False(Option<bool>(s, "tree3d")); Assert.False(Option<bool>(s, "grass")); Assert.False(Option<bool>(s, "lod32"));
         Assert.False(Option<bool>(s, "candles")); Assert.False(Option<bool>(s, "fxGlow")); Assert.False(Option<bool>(s, "glowWindows"));
@@ -197,13 +209,13 @@ public sealed class PresetTests : IDisposable
         QualityPresets.Write(file, QualityPresets.Capture(source, "Mine"));
 
         var target = new DesktopSettings { OutputFolder = "/b/lod", Worldspaces = "DLC2SolstheimWorld", Instance = "/b/mo2" };
-        Option(target, "objectAtlas", true);
+        Option(target, "objectAtlas", false);
         var preset = QualityPresets.Read(file);
         QualityPresets.Apply(target, preset);
 
         Assert.Equal("Mine", preset.Name);
         Assert.True(Option<bool>(target, "seasons")); Assert.True(Option<bool>(target, "occlusion")); Assert.Equal(.6m, Option<decimal>(target, "grassDensity"));
-        Assert.False(Option<bool>(target, "objectAtlas"));    // the preset holds every option, at its default too
+        Assert.True(Option<bool>(target, "objectAtlas"));    // the preset holds every option, at its default too
         Assert.Equal(1024m, target.TerrainTextureSize); Assert.True(target.TextureGenGrass); Assert.Equal("Random", target.GrassPlacement);
         Assert.Equal("None", Option<string>(target, "skse"));
         Assert.Equal("/b/lod", target.OutputFolder); Assert.Equal("", target.TextureGenOutput); Assert.Equal("DLC2SolstheimWorld", target.Worldspaces);

@@ -22,7 +22,8 @@ public static class TextureConversionRenderer
             || source.Pixels.Length != checked(source.Width * source.Height * 4))
             throw new InvalidDataException("Conversion texture dimensions are invalid or exceed 16384 pixels.");
         var pixels = source.Pixels.ToArray();
-        float[] multipliers = [MathF.Pow(rule.Red, 1 / 2.2f), MathF.Pow(rule.Green, 1 / 2.2f), MathF.Pow(rule.Blue, 1 / 2.2f)];
+        static float SignedGamma(float f) => f < 0f ? -MathF.Pow(-f, 1f / 2.2f) : MathF.Pow(f, 1f / 2.2f);
+        float[] multipliers = [SignedGamma(rule.Red), SignedGamma(rule.Green), SignedGamma(rule.Blue)];
         for (int i = 0; i < pixels.Length; i += 4)
         {
             if ((i & 65535) == 0) RunLimits.Check();
@@ -91,7 +92,9 @@ public static class TextureConversionRenderer
                 int at = Math.Clamp(j, 0, source - 1);
                 taps[at] = taps.GetValueOrDefault(at) + weight;
             }
-            result[i] = taps.Select(t => new Tap(t.Key, (float)t.Value)).ToArray();
+            double sum = taps.Values.Sum();
+            double inv = Math.Abs(sum) > 1e-12 ? 1.0 / sum : 1.0;
+            result[i] = taps.Select(t => new Tap(t.Key, (float)(t.Value * inv))).ToArray();
         }
         return result;
     }

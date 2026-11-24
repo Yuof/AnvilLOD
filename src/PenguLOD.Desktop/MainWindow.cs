@@ -152,7 +152,7 @@ public sealed partial class MainWindow : Window
     private void BuildShell()
     {
         _page.Content = null;
-        foreach (var control in new Control[] { _notice, _page, _status, _elapsed, _cancel, _progress, _log, _profiles, _counts, _worlds, _issues, _textures, _textureGenResults, _textureGenSummary, _grassSummary, _pipelineSummary, _pipelineStages, _terrainSummary, _terrainResults, _treeCoverage, _objectCoverage, _resourceCoverage, _diagnosticSummary, _diagnosticIssues, _diagnosticEstimates, _seasonCoverage, _costFolder, _costBefore, _costAfter, _outputFolders, _packageFolder, _outputSummary, _costGroups, _costBlocks, _settingChanges, _sourceSummary, _storage, _storageSummary })
+        foreach (var control in new Control[] { _notice, _page, _status, _elapsed, _cancel, _progress, _log, _profiles, _counts, _worlds, _issues, _textures, _textureGenResults, _textureGenSummary, _grassSummary, _pipelineSummary, _pipelineStages, _terrainSummary, _terrainResults, _treeCoverage, _objectCoverage, _resourceCoverage, _diagnosticSummary, _diagnosticIssues, _diagnosticEstimates, _seasonCoverage, _costFolder, _costBefore, _costAfter, _compareOutput, _compareReference, _parityBlocks, _outputFolders, _packageFolder, _outputSummary, _costGroups, _costBlocks, _settingChanges, _sourceSummary, _storage, _storageSummary })
         {
             if (control.Parent is Panel panel) panel.Children.Remove(control);
             else if (control.Parent is ContentControl content) content.Content = null;
@@ -209,6 +209,7 @@ public sealed partial class MainWindow : Window
     {
         _selectedPage = title; _page.Content = _pages[title];
         UpdatePageActions(title);
+        if (_busyUi) LockCurrentPageForBusy();
         foreach (var (key, button) in _navigation) { button.Background = key == title ? Brush.Parse("#343B47") : Brushes.Transparent; button.Foreground = key == title ? Accent : Brushes.White; }
     }
 
@@ -343,12 +344,12 @@ public sealed partial class MainWindow : Window
         grid.IsReadOnly = false; grid.ItemsSource = _rules; grid.MinHeight = 320; grid.MaxHeight = 600;
         foreach (var col in grid.Columns.OfType<DataGridTextColumn>())
         {
-            col.IsReadOnly = col.Header as string is "Reference" or "Flags";
-            if (col.Binding is Binding binding) binding.Mode = col.IsReadOnly ? BindingMode.OneWay : BindingMode.TwoWay;
+            col.IsReadOnly = false;
+            if (col.Binding is Binding binding) binding.Mode = BindingMode.TwoWay;
         }
         return Scroll(Stack(16, Heading("Custom mesh rules"),
-            Text("LOD choices: None, Level0–Level3, Full model, Billboard1–Billboard6. Billboard1–6 currently use the same billboard behavior. Grid: None, Near LOD, Far LOD, Far Full, Never Fade LOD.", true),
-            Text("Reference and Flags are read-only: imported values are preserved when saving, but these actions are not applied during generation.", true),
+            Text("LOD choices: None, Level0–Level3, Full model, Billboard1–Billboard6. Grid: None, Near LOD, Far LOD, Far Full, Never Fade LOD.", true),
+            Text("Reference actions: Unchanged, Replace, Disable, Delete, Ignore, KeepParent, KeepChild, KeepBoth. Flags bitmask: 1 VWD, 2 NoGlow, 4 NoMATO, 8 Dynamic, 16 TREE.", true),
             Row(Button("Load rule file", LoadRules), Button("Add rule", () => { _rules.Add(new RuleEntry { Mask = "new-mask", Lod4 = "Level0", Lod8 = "Level1", Lod16 = "Level2", IsCustom = true }); }),
                 Button("Remove selected", () => { if (grid.SelectedItem is RuleEntry rule) _rules.Remove(rule); }),
                 Primary("Save rules as…", async () => { grid.CommitEdit(); await SaveRules(); })), grid,
@@ -415,7 +416,7 @@ public sealed partial class MainWindow : Window
         var input = new NumericUpDown { Name = property, Minimum = min, Maximum = max, Increment = step, FormatString = "0.##", Width = 160, HorizontalAlignment = HorizontalAlignment.Left };
         Bind(input, NumericUpDown.ValueProperty, _settings, property); return Labeled(label, input);
     }
-    private Control Choice(string label, string property, string[] choices)
+    private Control Choice(string label, string property, params string[] choices)
     { var input = new ComboBox { Name = property, ItemsSource = choices, MinWidth = 240 }; Bind(input, SelectingItemsControl.SelectedItemProperty, _settings, property); return Labeled(label, input); }
     private Control Check(string label, string property)
     { var input = new CheckBox { Content = label }; Bind(input, ToggleButton.IsCheckedProperty, _settings, property); return input; }

@@ -52,10 +52,32 @@ internal static class GrassTexture
 {
     internal static bool IsPacked((byte[] Rgba, int Width, int Height) image, float threshold)
     {
-        if (image.Height < 2 || (image.Height & 1) != 0) return false;
-        int i = (image.Height - 1) * image.Width * 4;
-        var normal = new Vector3(image.Rgba[i], image.Rgba[i + 1], image.Rgba[i + 2]) / 127.5f - Vector3.One;
-        return MathF.Abs(normal.Length() - 1) < threshold;
+        if (image.Height < 2 || (image.Height & 1) != 0 || image.Width < 1) return false;
+        int halfH = image.Height / 2;
+        int samplesX = Math.Min(8, image.Width), samplesY = Math.Min(8, halfH);
+        int tested = 0, unitNormals = 0;
+        for (int sy = 0; sy < samplesY; sy++)
+        {
+            int py = halfH + (int)((sy + 0.5f) * halfH / samplesY);
+            py = Math.Clamp(py, halfH, image.Height - 1);
+            for (int sx = 0; sx < samplesX; sx++)
+            {
+                int px = Math.Clamp((int)((sx + 0.5f) * image.Width / samplesX), 0, image.Width - 1);
+                int i = (py * image.Width + px) * 4;
+                byte r = image.Rgba[i], g = image.Rgba[i + 1], b = image.Rgba[i + 2];
+                if (r == 0 && g == 0 && b == 0) continue; // ignore unpopulated black padding
+                tested++;
+                var normal = new Vector3(r, g, b) / 127.5f - Vector3.One;
+                if (normal.Z > -0.1f && MathF.Abs(normal.Length() - 1f) < threshold) unitNormals++;
+            }
+        }
+        if (tested == 0)
+        {
+            int i = (image.Height - 1) * image.Width * 4;
+            var normal = new Vector3(image.Rgba[i], image.Rgba[i + 1], image.Rgba[i + 2]) / 127.5f - Vector3.One;
+            return MathF.Abs(normal.Length() - 1f) < threshold;
+        }
+        return unitNormals * 4 >= tested * 3;
     }
 
     internal static ((byte[] Rgba, int Width, int Height) Diffuse, (byte[] Rgba, int Width, int Height)? Normal) Decode(
@@ -73,10 +95,8 @@ internal static class GrassTexture
 
     private static (byte[] Rgba, int Width, int Height) Reduce((byte[] Rgba, int Width, int Height) image, bool normal)
     {
-        // Specular alpha must not weight the normal direction during resampling.
-        if (normal) for (int i = 3; i < image.Rgba.Length; i += 4) image.Rgba[i] = 255;
         while (image.Width > 1024 || image.Height > 1024)
-            image = TreeAtlasBuilder.Downsample(image.Rgba, image.Width, image.Height);
+            image = TreeAtlasBuilder.Downsample(image.Rgba, image.Width, image.Height, alphaWeighted: !normal);
         if (normal) for (int i = 0; i < image.Rgba.Length; i += 4) BillboardRenderer.Renormalize(image.Rgba, i);
         return image;
     }

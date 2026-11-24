@@ -87,4 +87,15 @@ public sealed class OcclusionGrid
                 if (Terrain[at] > Unknown && Top[at] < height) Top[at] = height;
             }
     }
+
+    /// <summary>Raises <see cref="Terrain"/> (and <see cref="Top"/>) at grid sample <c>(gx, gy)</c> when covered by solid opaque mountain geometry.</summary>
+    public bool RaiseTerrainSample(int gx, int gy, float height)
+    {
+        if (gx < 0 || gy < 0 || gx >= Width || gy >= Height) return false;
+        int at = gy * Width + gx;
+        if (Terrain[at] <= Unknown || height <= Terrain[at]) return false;
+        Terrain[at] = height;
+        if (Top[at] < height) Top[at] = height;
+        return true;
+    }
 }
