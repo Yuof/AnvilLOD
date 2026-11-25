@@ -538,10 +538,15 @@ public static class ScanPipeline
                         using (prePgStream) prePgDiff = ParallaxGenDiff.Parse(prePgStream, out _);
                         if (prePgDiff.Count == 0) prePgDiff = null;
                     }
+                    Action<Mutagen.Bethesda.Plugins.FormKey>? preMissingBillboard = req.SeasonsStrict ? null : static _ => { };
+                    var uniqueCardTrees = light.Concat(in3d)
+                        .Where(t => t.BaseFormKey is not null)
+                        .DistinctBy(t => t.BaseFormKey!, StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
                     foreach (var swaps in preSeasons.Values)
-                        foreach (var tree in light.Concat(in3d))
+                        foreach (var tree in uniqueCardTrees)
                         {
-                            var swapped = SeasonalAssets.SwapTree(game, assets, tree, swaps, t3, missingBillboard: null, lodIndex, prePgDiff);
+                            var swapped = SeasonalAssets.SwapTree(game, assets, tree, swaps, t3, preMissingBillboard, lodIndex, prePgDiff);
                             if (swapped == tree) continue;
                             seasonalCardTrees.Add(swapped);
                             if (tree3d is not null && swapped.Model3D is not null && tree3d.Validate(swapped.Model3D, swapped.MaterialVariant, swapped.Model3DGenerated) is null)

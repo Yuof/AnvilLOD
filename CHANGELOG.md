@@ -2,6 +2,11 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
+## [0.6.0-beta.13] - 2026-11-24
+
+- Fixed seasonal object LOD failing on seasonal trees without billboards when strict seasonal swaps are off; they now warn and keep their base LOD during tree atlas preparation as well.
+- Improved seasonal tree atlas preparation speed by checking each unique tree type once instead of once per placed tree.
+
 ## [0.6.0-beta.12] - 2026-11-24
 
 - Added full **TruePBR** (`PBRJSONs`) and **Complex Material** (`_rmaos` / `_m` / `_p`) support for object and terrain LOD, including roughness/AO baking and sRGB-to-linear calibration.

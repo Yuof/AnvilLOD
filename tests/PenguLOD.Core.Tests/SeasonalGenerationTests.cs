@@ -194,4 +194,27 @@ public class SeasonalGenerationTests
         }
         else Assert.Single(Directory.GetFiles(output,"*.WIN.btt",SearchOption.AllDirectories));
     }
+
+    [Fact]
+    public void FullScanWith3DTreesWarnsInsteadOfFailingWhenSeasonalTreeHasNoBillboard()
+    {
+        using var f = new TerrainFixture(seasons: true, editMod: mod =>
+        {
+            var winter = mod.Trees.Single(t => t.EditorID == "WinterTree");
+            // A non-tree path (like Seasonal Landscapes moss cover) is skipped by texture generation, leaving no billboard.
+            winter.Model = new Model { File = @"plants\wintermoss.nif" };
+        });
+        TextureFixture.Put(f.Textures.Data, @"meshes\plants\wintermoss.nif",
+            File.ReadAllBytes(GamePath.ToFileSystemPath(f.Textures.Data, @"meshes\trees\wintertree.nif")));
+        Assert.True(TextureGeneration.Run(f.Textures.Request with { Stitched = false, Trees = true }).Published);
+        string output = Path.Combine(f.Root, "lod");
+        var request = new ScanRequest(f.Game, new(Worldspaces: ["FixtureWorld"], TreeLod: true, DynamicLod: false, GridObjects: false, Tree3D: new(Enabled: true)),
+            OutputFolder: output, Generate: true, Seasons: true, GrassLod: false, ChildWorlds: false, SkseDll: SkseDllChoice.None,
+            GeneratedTextureFolder: f.Textures.Output, RemoveBuried: false, RemoveUnderwater: false);
+        var result = ScanPipeline.Run(request);
+        Assert.Equal(0, result.Generation!.BlocksFailed);
+        Assert.Contains(result.Warnings, w => w.Contains("has no billboard") && w.Contains("base LOD"));
+        var strict = Assert.Throws<InvalidDataException>(() => ScanPipeline.Run(request with { SeasonsStrict = true, OutputFolder = Path.Combine(f.Root, "strict") }));
+        Assert.Contains("has no billboard", strict.Message);
+    }
 }
