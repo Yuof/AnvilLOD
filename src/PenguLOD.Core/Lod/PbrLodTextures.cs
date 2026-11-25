@@ -75,27 +75,50 @@ public sealed class PbrLodTextures(IAssetSource assets, TruePbrCatalog? catalog 
         return outNormal;
     }
 
+    private static int LastLodIndexInFileName(string normalizedPath)
+    {
+        int fileStart = normalizedPath.LastIndexOf('\\') + 1;
+        int stemLength = normalizedPath.Length - 4 - fileStart;
+        if (stemLength < 3) return -1;
+        int rel = normalizedPath.AsSpan(fileStart, stemLength).LastIndexOf("lod", StringComparison.Ordinal);
+        return rel < 0 ? -1 : fileStart + rel;
+    }
+
+    private static bool IsPbrLodTwin(string normalizedPath, int lodIndex) =>
+        lodIndex >= 4 && normalizedPath.AsSpan(lodIndex - 4, 4).SequenceEqual("pbr_");
+
+    private static bool IsNumberedOrPlainLodSuffix(string normalizedPath, int lodIndex)
+    {
+        if (lodIndex < 0) return false;
+        var tail = normalizedPath.AsSpan(lodIndex + 3, normalizedPath.Length - 4 - (lodIndex + 3));
+        foreach (char c in tail)
+            if (c is < '0' or > '9') return false;
+        return true;
+    }
+
     private string? Compute(string original)
     {
         var p = Normalize(original);
         if (!p.EndsWith(".dds", StringComparison.OrdinalIgnoreCase) || !p.StartsWith("textures\\", StringComparison.OrdinalIgnoreCase)) return null;
+        int lodIndex = LastLodIndexInFileName(p);
         if (p.StartsWith("textures\\pengulod\\", StringComparison.OrdinalIgnoreCase)
-            || p.EndsWith("pbr_lod.dds", StringComparison.OrdinalIgnoreCase)
+            || IsPbrLodTwin(p, lodIndex)
             || p.StartsWith("textures\\terrain\\", StringComparison.OrdinalIgnoreCase)
             || p.StartsWith("textures\\dyndolod\\", StringComparison.OrdinalIgnoreCase)) return null;
 
+        bool isLodName = IsNumberedOrPlainLodSuffix(p, lodIndex);
         const string pbrRoot = "textures\\pbr\\";
         if (p.StartsWith(pbrRoot, StringComparison.OrdinalIgnoreCase))
         {
-            if (p.EndsWith("lod.dds", StringComparison.OrdinalIgnoreCase) || p.Contains("\\lod\\", StringComparison.Ordinal) || !assets.Exists(p)) return null;
+            if (isLodName || p.Contains("\\lod\\", StringComparison.Ordinal) || !assets.Exists(p)) return null;
             var converted = OutputRoot + p[pbrRoot.Length..];
             _conversions[converted] = p;
             return converted;
         }
 
-        if (p.EndsWith("lod.dds", StringComparison.OrdinalIgnoreCase))
+        if (lodIndex >= 0)
         {
-            var twin = p[..^"lod.dds".Length] + "pbr_lod.dds";
+            var twin = string.Concat(p.AsSpan(0, lodIndex), "pbr_", p.AsSpan(lodIndex));
             if (assets.Exists(twin)) { Interlocked.Increment(ref _twins); return twin; }
         }
 
@@ -108,7 +131,7 @@ public sealed class PbrLodTextures(IAssetSource assets, TruePbrCatalog? catalog 
         }
 
         // Complex Material fallback: non-LOD texture with an explicit TruePBR JSON rule and companion _rmaos.dds or _m.dds
-        if (!p.EndsWith("lod.dds", StringComparison.Ordinal) && !p.Contains("\\lod\\", StringComparison.Ordinal)
+        if (!isLodName && !p.Contains("\\lod\\", StringComparison.Ordinal)
             && Catalog?.Match(p) is not null && assets.Exists(p))
         {
             var (rmaos, mask) = FindCompanionMaps(assets, p);

@@ -2,6 +2,16 @@
 
 Versions follow SemVer. Alpha and beta versions are pre-releases.
 
+## [0.6.0-beta.14] - 2026-11-25
+
+Regenerate object LOD and update the PenguLOD SKSE plugin.
+
+- Fixed Base Object Swapper `scaleA()` transforms being applied as a direct multiplier instead of Skyrim's percent `refScale`, which scaled affected LOD objects ~100x too large.
+- Fixed Base Object Swapper 3-field `chance()` rules and sub-100% `chanceS()` swaps being baked into static LOD, and updated the Base Object Swapper diagnostic warning wording.
+- Fixed the PenguLOD SKSE plugin hiding non-ESM overridden large references (such as Whiterun's outer wall) outside loaded cells by removing blind cell-distance `PL:largeref` culling.
+- Fixed `--pbr-lod` not matching TexGen's PBR twins of numbered LOD atlases (such as `WRBuildingsLOD01.dds` to `WRBuildingsPBR_LOD01.dds`).
+- Fixed automatic object LOD emitting meshes that reference DDS formats Skyrim SE cannot load (such as BC6H / DXGI 95); affected models are skipped with a warning pointing to Texture Fixer.
+
 ## [0.6.0-beta.13] - 2026-11-24
 
 - Fixed seasonal object LOD failing on seasonal trees without billboards when strict seasonal swaps are off; they now warn and keep their base LOD during tree atlas preparation as well.

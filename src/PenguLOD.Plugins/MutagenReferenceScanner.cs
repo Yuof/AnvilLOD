@@ -119,7 +119,6 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
             }
         }
         progress?.Report($"Worldspaces with LOD settings: {grids.Count}");
-        var buggedLargeRefs = LargeReferenceStage.FindBuggedLargeReferences(_game, grids.Keys);
 
         // 2) Base objects -> model + MNAM (cached), then rules + named-LOD index -> mesh per level
         var linkCache = _game.LinkCache;
@@ -714,7 +713,6 @@ public sealed class MutagenReferenceScanner : IReferenceScanner
                 if ((raw & FlagIsFullLod) != 0) flags |= LodReferenceFlags.IsFullLod;
                 if (r.EnableParent is not null) flags |= LodReferenceFlags.HasEnableParent;
                 if (info.DistantFlag || res.Rule.ForceVwd) flags |= LodReferenceFlags.BaseHasDistantLodFlag;
-                if (copy is null && buggedLargeRefs.Contains(r.FormKey)) flags |= LodReferenceFlags.BuggedLargeRef;
 
                 // Same for child world copies of objects: switchable ones would stay visible inside the city.
                 if (copy is not null && (flags.HasFlag(LodReferenceFlags.HasEnableParent) || flags.HasFlag(LodReferenceFlags.InitiallyDisabled)))

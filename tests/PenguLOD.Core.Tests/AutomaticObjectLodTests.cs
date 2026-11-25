@@ -89,6 +89,30 @@ public class AutomaticObjectLodTests
         Assert.Equal("Skipped", report.Status); Assert.Contains(reason, report.Reason!, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void UnloadableBc6hSourceTextureIsSkippedInsteadOfEmittingCrashProneLod()
+    {
+        using var f = new TextureFixture();
+        Put(f, @"textures\bc6h_coals.dds");
+        byte[] bc6h = new byte[164];
+        Encoding.ASCII.GetBytes("DDS ").CopyTo(bc6h, 0);
+        BitConverter.GetBytes(124u).CopyTo(bc6h, 4);
+        BitConverter.GetBytes(4u).CopyTo(bc6h, 12);
+        BitConverter.GetBytes(4u).CopyTo(bc6h, 16);
+        BitConverter.GetBytes(0x4u).CopyTo(bc6h, 80); // DDPF_FOURCC
+        Encoding.ASCII.GetBytes("DX10").CopyTo(bc6h, 84);
+        BitConverter.GetBytes(95u).CopyTo(bc6h, 128); // DXGI_FORMAT_BC6H_UF16
+        BitConverter.GetBytes(1u).CopyTo(bc6h, 140);
+        TextureFixture.Put(f.Data, @"textures\bc6h_coals.dds", bc6h);
+
+        var source = new AutomaticObjectLod(AssetIndex.Build(GameRelease.SkyrimSE, f.Data), new(true), Path.Combine(f.Root, "cache"));
+        Assert.Null(source.Resolve(Model, 0));
+        var report = Assert.Single(source.Report);
+        Assert.Equal("Skipped", report.Status);
+        Assert.Contains("Unloadable source texture", report.Reason!);
+        Assert.Contains("DXGI format 95", report.Reason!);
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]

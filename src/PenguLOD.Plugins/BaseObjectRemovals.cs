@@ -17,10 +17,10 @@ public sealed record BaseObjectSwapReport(bool RuntimeInstalled, int ConfigFiles
 
 /// <summary>
 /// Evaluates Base Object Swapper (<c>*_SWAP.ini</c>) rules for static LOD:
-/// deterministic invisible-marker removals (<c>XMarker</c>), deterministic <c>100%</c> and FormID-seeded <c>chanceS</c>
+/// deterministic invisible-marker removals (<c>XMarker</c>), deterministic <c>100%</c>
 /// visible model swaps (<c>STAT</c>, <c>MSTT</c>, <c>ACTI</c>, <c>TREE</c>, <c>FURN</c>, <c>CONT</c>), and deterministic
-/// <c>[Transforms]</c> / inline <c>posA</c>/<c>posR</c>/<c>rotA</c>/<c>rotR</c>/<c>scale</c> adjustments.
-/// Non-deterministic <c>chance(&lt;100)</c> / <c>chanceR</c> rules block earlier unconditional removals and leave the winning base intact.
+/// <c>[Transforms]</c> / inline <c>posA</c>/<c>posR</c>/<c>rotA</c>/<c>rotR</c>/<c>scale</c>/<c>scaleA</c> adjustments.
+/// Non-deterministic <c>chance(&lt;100)</c> / <c>chanceS</c> / <c>chanceR</c> rules block earlier unconditional removals and leave the winning base intact.
 /// </summary>
 internal sealed partial class BaseObjectRemovals
 {
@@ -43,8 +43,6 @@ internal sealed partial class BaseObjectRemovals
     private sealed record Rule(
         bool Remove,
         FormKey[]? Targets,
-        float SeededChance,     // >0 and <100 when deterministic chanceS(p[, seed]) applies to visible targets
-        uint ExtraSeed,
         TransformOverride Transform,
         string File,
         int Line);
@@ -172,56 +170,43 @@ internal sealed partial class BaseObjectRemovals
                 if (targets.Length == 0) { Diagnostic("Replacement is unresolved or is not a placeable object."); continue; }
                 result._swapTargets.UnionWith(targets);
 
-                TransformOverride inlineTf = default;
-                bool tfDeterministic = fields.Length < 3 || string.IsNullOrWhiteSpace(fields[2]) || TryParseTransforms(fields[2], out inlineTf);
+                bool thirdIsChance = fields.Length == 3 && Chance().IsMatch(fields[2]);
+                string transformField = fields.Length >= 3 && !thirdIsChance ? fields[2] : "";
+                string chanceField = fields.Length >= 4 ? fields[3] : (thirdIsChance ? fields[2] : "");
 
-                string chanceField = fields.Length >= 4 ? fields[3] : "";
+                TransformOverride inlineTf = default;
+                bool tfDeterministic = string.IsNullOrWhiteSpace(transformField) || TryParseTransforms(transformField, out inlineTf);
                 bool certain = string.IsNullOrWhiteSpace(chanceField) || CertainChance(chanceField);
-                float seededPct = 0f;
-                uint extraSeed = 0u;
-                bool seededVisible = !certain && targets.All(t => t != XMarker) && targetRecords.All(IsSwappableLodBase)
-                    && TryParseSeededChance(chanceField, out seededPct, out extraSeed);
 
                 if (conditional)
                 {
                     result._conditionalForms.UnionWith(sources);
-                    if ((certain || seededVisible) && targets.All(t => t != XMarker) && targetRecords.All(IsSwappableLodBase)
+                    if (certain && targets.Length == 1 && targets[0] != XMarker && targetRecords.All(IsSwappableLodBase)
                         && TryResolveConditions(secParts[1], Resolve<IWorldspaceGetter>, Resolve<ICellGetter>, out var wsFilter, out var cellFilter))
                     {
                         var condRule = new ConditionalRule(wsFilter, cellFilter,
-                            new Rule(false, certain && targets.Length == 1 ? targets : seededVisible ? targets : null,
-                                seededVisible ? seededPct : 100f, extraSeed, tfDeterministic ? inlineTf : default, name, i + 1));
-                        if (condRule.Inner.Targets is not null)
+                            new Rule(false, targets, tfDeterministic ? inlineTf : default, name, i + 1));
+                        foreach (var src in sources)
                         {
-                            foreach (var src in sources)
-                            {
-                                if (!result._conditionalRules.TryGetValue(src, out var list)) result._conditionalRules[src] = list = [];
-                                list.Add(condRule);
-                            }
-                            continue;
+                            if (!result._conditionalRules.TryGetValue(src, out var list)) result._conditionalRules[src] = list = [];
+                            list.Add(condRule);
                         }
+                        continue;
                     }
                     Diagnostic("Conditional base swaps are not applied; they block unconditional base removals.");
                     continue;
                 }
 
                 bool remove = targets.Length == 1 && targets[0] == XMarker && certain;
-                FormKey[]? activeTargets = null;
-                if (!remove)
-                {
-                    if (certain && targets.Length == 1 && targetRecords.All(IsSwappableLodBase))
-                        activeTargets = targets;
-                    else if (seededVisible)
-                        activeTargets = targets;
-                }
+                FormKey[]? activeTargets = !remove && certain && targets.Length == 1 && targetRecords.All(IsSwappableLodBase)
+                    ? targets : null;
 
                 foreach (var source in sources)
                 {
                     if (targets.Length == 1 && source == targets[0]
-                        && (fields.Length < 3 || !PropertyFunction().IsMatch(fields[2]))) continue;
+                        && (transformField.Length == 0 || !PropertyFunction().IsMatch(transformField))) continue;
                     (isForms ? result._forms : result._references)[source] =
-                        new Rule(remove, activeTargets, seededVisible ? seededPct : (activeTargets is not null ? 100f : 0f),
-                            extraSeed, tfDeterministic ? inlineTf : default, name, i + 1);
+                        new Rule(remove, activeTargets, tfDeterministic ? inlineTf : default, name, i + 1);
                 }
 
                 if (!remove && activeTargets is null)
@@ -229,10 +214,6 @@ internal sealed partial class BaseObjectRemovals
                     Diagnostic(!certain ? "Chance-based swap is not evaluated."
                         : targets.Length > 1 ? "Random replacement choice is not evaluated."
                         : "Replacement object type is not supported for static LOD.");
-                }
-                else if (seededVisible)
-                {
-                    Diagnostic("Evaluated deterministic FormID-seeded chanceS swap.");
                 }
             }
         }
@@ -282,23 +263,10 @@ internal sealed partial class BaseObjectRemovals
             chosen = formRule;
         }
 
-        if (chosen is { Remove: false, Targets: { Length: > 0 } targets })
+        if (chosen is { Remove: false, Targets: { Length: 1 } targets })
         {
             ruleTf = chosen.Transform;
-            if (chosen.SeededChance >= 100f && targets.Length == 1)
-            {
-                effectiveBase = targets[0];
-            }
-            else if (chosen.SeededChance > 0f)
-            {
-                uint hash = DeterministicSeed(reference.FormKey, chosen.ExtraSeed);
-                float roll = (hash & 0xFFFFFFu) / 16777216f * 100f;
-                if (roll < chosen.SeededChance)
-                {
-                    int pick = targets.Length == 1 ? 0 : (int)((hash >> 24) % (uint)targets.Length);
-                    effectiveBase = targets[pick];
-                }
-            }
+            effectiveBase = targets[0];
         }
 
         if (effectiveBase != originalBase) _swappedRefs.Add(reference.FormKey);
@@ -322,19 +290,6 @@ internal sealed partial class BaseObjectRemovals
         if (anyTransform) _transformedRefs.Add(reference.FormKey);
 
         return (effectiveBase, position, rotationRadians, scale);
-    }
-
-    private static uint DeterministicSeed(FormKey refKey, uint extraSeed)
-    {
-        uint h = 2166136261u;
-        foreach (char ch in refKey.ModKey.FileName.String)
-            h = (h ^ char.ToLowerInvariant(ch)) * 16777619u;
-        h = (h ^ refKey.ID) * 16777619u;
-        h = (h ^ extraSeed) * 16777619u;
-        h ^= h >> 16;
-        h *= 0x85ebca6bu;
-        h ^= h >> 13;
-        return h;
     }
 
     private static bool TryResolveConditions(
@@ -362,20 +317,6 @@ internal sealed partial class BaseObjectRemovals
             else return false;
         }
         return worldspaces is not null || cells is not null;
-    }
-
-    private static bool TryParseSeededChance(string traits, out float pct, out uint seed)
-    {
-        pct = 0f;
-        seed = 0u;
-        var m = SeededChanceRegex().Match(traits);
-        if (!m.Success) return false;
-        if (!float.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out pct)
-            || !float.IsFinite(pct) || pct <= 0f || pct >= 100f)
-            return false;
-        if (m.Groups[2].Success && uint.TryParse(m.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out uint parsedSeed))
-            seed = parsedSeed;
-        return true;
     }
 
     private static bool TryParseTransforms(string traits, out TransformOverride tf)
@@ -406,8 +347,10 @@ internal sealed partial class BaseObjectRemovals
         {
             if (!float.TryParse(sm.Groups[2].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float s) || s <= 0f || !float.IsFinite(s))
                 return false;
-            scale = s;
             scaleAbs = sm.Groups[1].Value.EndsWith('A');
+            // In BOS (ScaleRange::SetScale), scaleA() writes directly to TESObjectREFR::refScale in percent (100 = 1.0),
+            // whereas scale() multiplies the existing scale factor.
+            scale = scaleAbs ? s / 100f : s;
         }
         tf = new TransformOverride(posA, posR, rotA, rotR, scale, scaleAbs);
         return true;
@@ -425,8 +368,6 @@ internal sealed partial class BaseObjectRemovals
 
     [GeneratedRegex(@"chance[SLR]?\(\s*([^,)]+)")]
     private static partial Regex Chance();
-    [GeneratedRegex(@"chanceS\(\s*([^,)]+)(?:\s*,\s*(\d+))?\s*\)")]
-    private static partial Regex SeededChanceRegex();
     [GeneratedRegex(@"\b(posA|posR|rotA|rotR)\(\s*([^,)]+)\s*,\s*([^,)]+)\s*,\s*([^,)]+)\s*\)")]
     private static partial Regex Vec3TraitRegex();
     [GeneratedRegex(@"\b(scaleA?)\(\s*([^,)]+)\s*\)")]

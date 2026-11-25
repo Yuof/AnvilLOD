@@ -341,7 +341,7 @@ public static class ScanPipeline
             if (!bos.RuntimeInstalled)
                 Warn($"Base Object Swapper: {bos.ConfigFiles:N0} swap files found, but po3_BaseObjectSwapper.dll is absent from the selected Data view; no runtime removals applied.");
             if (bos.Diagnostics.Count > 0)
-                Warn($"Base Object Swapper: {bos.Diagnostics.Count:N0} entries are outside supported deterministic marker removals or have unresolved forms. See baseObjectSwaps.Diagnostics in the scan report; visible replacements, chance-based swaps and property overrides are not applied.");
+                Warn($"Base Object Swapper: {bos.Diagnostics.Count:N0} entries could not be applied to static LOD (chance-based, multi-target, unresolved or unsupported overrides). See baseObjectSwaps.Diagnostics in the scan report.");
         }
         if (scan.Grids.Count == 0)
             Warn(req.Scan.Worldspaces is { Count: > 0 } ws

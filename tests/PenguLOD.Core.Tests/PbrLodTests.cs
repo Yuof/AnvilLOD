@@ -28,6 +28,25 @@ public class PbrLodTests
     }
 
     [Fact]
+    public void Numbered_lod_atlases_match_TexGen_pbr_twins_without_rewriting_lod_folders()
+    {
+        var pbr = new PbrLodTextures(new Files(
+            "textures\\lod\\wrbuildingspbr_lod01.dds",
+            "textures\\lod\\wrbuildingspbr_lod01_n.dds",
+            "textures\\lod\\spbr_lod03.dds",
+            "textures\\lod\\farmhousepbr_lod01.dds",
+            "textures\\pbr_lod\\plain.dds"));
+        Assert.Equal("textures\\lod\\wrbuildingspbr_lod01.dds", pbr.MapDiffuse("Textures\\LOD\\WRBuildingsLOD01.dds"));
+        Assert.Equal("textures\\lod\\wrbuildingspbr_lod01_n.dds", pbr.MapNormal("Textures\\LOD\\WRBuildingsLOD01.dds", "textures\\lod\\wrbuildingslod01_n.dds"));
+        Assert.Equal("textures\\lod\\spbr_lod03.dds", pbr.MapDiffuse("textures\\lod\\SLOD03.dds"));
+        Assert.Equal("textures\\lod\\farmhousepbr_lod01.dds", pbr.MapDiffuse("textures\\lod\\farmhouselod01.dds"));
+        Assert.Null(pbr.MapDiffuse("textures\\lod\\wrbuildingspbr_lod01.dds")); // already a PBR twin
+        Assert.Null(pbr.MapDiffuse("textures\\lod\\plain.dds")); // folder name \lod\ is not rewritten
+        Assert.Equal(3, pbr.TwinsUsed);
+        Assert.Empty(pbr.Conversions);
+    }
+
+    [Fact]
     public void A_full_texture_with_a_PBR_version_gets_a_converted_copy_in_our_own_folder()
     {
         var pbr = new PbrLodTextures(new Files("textures\\pbr\\landscape\\mountains\\mountainslab01.dds"));

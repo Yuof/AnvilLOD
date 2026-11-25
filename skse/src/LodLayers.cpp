@@ -208,20 +208,6 @@ namespace PenguLOD
 			top = _lodRoot.get();
 		}
 		int                          found[kLayerCount][kLevelCount]{};
-		int                          largeRefs = 0;
-		const auto*                  player = RE::PlayerCharacter::GetSingleton();
-		const bool                   outside = player && player->GetWorldspace() != nullptr;
-		const int                    pcx = outside ? static_cast<int>(std::floor(player->GetPositionX() / 4096.0f)) : 0;
-		const int                    pcy = outside ? static_cast<int>(std::floor(player->GetPositionY() / 4096.0f)) : 0;
-		int                          uGrids = 5, uLarge = 11;
-		if (auto* ini = RE::INISettingCollection::GetSingleton()) {
-			if (auto* sg = ini->GetSetting("uGridsToLoad:General")) uGrids = static_cast<int>(sg->data.u);
-			if (auto* sl = ini->GetSetting("uLargeRefLODGridSize:General")) uLarge = static_cast<int>(sl->data.u);
-		}
-		if (auto* prefs = RE::INIPrefSettingCollection::GetSingleton()) {
-			if (auto* sl = prefs->GetSetting("uLargeRefLODGridSize:General")) uLarge = static_cast<int>(sl->data.u);
-		}
-		const int                    largeHalf = std::max(std::max(1, uGrids) / 2, std::max(1, uLarge) / 2);
 		std::size_t                  visited = 0;
 		std::vector<RE::NiAVObject*> stack{ top };
 		while (!stack.empty() && visited < 600000) {
@@ -235,10 +221,10 @@ namespace PenguLOD
 				logger::info("Quality layers: a block root 'obj' sits at: {}", PathTo(o));
 			}
 			if (LayerNames::ParseLargeRef(o->name.c_str(), lrx, lry)) {
-				++largeRefs;
-				const bool cullLarge = outside && uLarge > uGrids && std::abs(lrx - pcx) <= largeHalf && std::abs(lry - pcy) <= largeHalf;
-				if (o->GetAppCulled() != cullLarge) {
-					o->SetAppCulled(cullLarge);
+				// Never cull cell-level large-ref buckets blindly by distance: non-ESM overridden RNAM refs
+				// (such as ESP base statics) may not load full 3D outside uGridsToLoad, leaving structures missing.
+				if (o->GetAppCulled()) {
+					o->SetAppCulled(false);
 				}
 				continue;
 			}
@@ -273,7 +259,7 @@ namespace PenguLOD
 			}
 		}
 		_anyFound = any;
-		_largeRefsFound = largeRefs;
+		_largeRefsFound = 0;
 		_appliedHidden = hidden;
 		if (changed || _scans <= 3) {
 			logger::info("Quality layers: scan {}: scene graph walked ({} nodes). Layer nodes found: grass {}/{}/{}/{}, 3D trees {}/{}/{}/{}, tree cards {}/{}/{}/{} (LOD4/8/16/32)", _scans, visited,

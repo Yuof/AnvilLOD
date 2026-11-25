@@ -35,6 +35,7 @@ public sealed class AutomaticObjectLod
     private readonly IProgress<string>? _progress;
     private readonly CancellationToken _ct;
     private readonly Dictionary<string, IReadOnlyList<AutomaticObjectLevel>> _models = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string?> _textureProblems = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<(string Model, int Level)> _requested = [];
 
     public AutomaticObjectLod(AssetIndex assets, AutomaticObjectSettings settings, string? cacheRoot = null,
@@ -92,6 +93,9 @@ public sealed class AutomaticObjectLod
                 if (part.Material.Textures.Count == 0 || string.IsNullOrWhiteSpace(part.Material.Textures[0])) return Skip("A shape has no diffuse texture.");
                 foreach (string texture in part.Material.Textures.Take(2).Where(t => !string.IsNullOrWhiteSpace(t)))
                     if (!_assets.Exists(GamePath.NormalizeTexture(texture))) return Skip("Missing source texture: " + texture);
+                foreach (string texture in part.Material.Textures.Where(t => !string.IsNullOrWhiteSpace(t)))
+                    if (TextureProblem(texture) is { } problem)
+                        return Skip($"Unloadable source texture {texture} ({problem}; convert with Tools -> Texture Fixer)");
             }
             var (min, max) = LodMeshAuthor.Bounds(mesh);
             var extent = max - min;
@@ -137,6 +141,31 @@ public sealed class AutomaticObjectLod
             Attach(reports); return reports;
         }
         catch (Exception e) when (e is not OperationCanceledException) { return Skip(e.Message); }
+    }
+
+    private string? TextureProblem(string texture)
+    {
+        string normalized = GamePath.NormalizeTexture(texture);
+        if (_textureProblems.TryGetValue(normalized, out var cached)) return cached;
+        string? problem = null;
+        if (_assets.TryOpen(normalized, out var stream))
+        {
+            using (stream)
+            {
+                Span<byte> head = stackalloc byte[148];
+                int read = 0;
+                while (read < head.Length)
+                {
+                    int n = stream.Read(head[read..]);
+                    if (n == 0) break;
+                    read += n;
+                }
+                long length = stream.CanSeek ? stream.Length : read;
+                problem = DdsHeader.Problem(head[..read], length);
+            }
+        }
+        _textureProblems[normalized] = problem;
+        return problem;
     }
 
     private void Attach(IEnumerable<AutomaticObjectLevel> levels) =>

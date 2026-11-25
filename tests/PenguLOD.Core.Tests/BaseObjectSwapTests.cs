@@ -177,6 +177,44 @@ public class BaseObjectSwapTests
         Assert.NotEmpty(Directory.GetFiles(f.Output, extension, SearchOption.AllDirectories));
     }
 
+    [Fact]
+    public void ScaleAIsTreatedAsPercentRefScaleWhileScaleMultipliesExistingScale()
+    {
+        using var f = new Fixture();
+        string second = $"0x{f.References[1].ID:X}~Skyrim.esm";
+        string third = $"0x{f.References[2].ID:X}~Skyrim.esm";
+        f.Swap("Transforms_SWAP.ini",
+            $"[Transforms]\n"
+            + $"{f.First}|posR(0,60.0,50.0),rotR(3.3,0.4,1.5),scaleA(126)\n"
+            + $"{second}|posR(0,0,-25),rotR(0,0,2),scaleA(98)\n"
+            + $"{third}|scale(1.5)\n");
+        var (scan, report) = f.Scan();
+        Assert.Equal(3, report.TransformedReferences);
+        var byKey = scan.Trees!.ToDictionary(t => t.FormKey, StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(1.26f, byKey[f.References[0].ToString()].Scale, 4);
+        Assert.Equal(0.98f, byKey[f.References[1].ToString()].Scale, 4);
+        Assert.Equal(1.5f, byKey[f.References[2].ToString()].Scale, 4);
+    }
+
+    [Fact]
+    public void ThreeFieldChanceAndSub100ChanceSAreNotBakedAsDeterministicSwapsOrRemovals()
+    {
+        using var f = new Fixture();
+        string second = $"0x{f.References[1].ID:X}~Skyrim.esm";
+        string third = $"0x{f.References[2].ID:X}~Skyrim.esm";
+        f.Swap("Chance_SWAP.ini",
+            $"[References]\n"
+            + $"{f.First}|XMarker|chance(50)\n"
+            + $"{second}|WinterTree|chance(50)\n"
+            + $"{third}|WinterTree||chanceS(50)\n");
+        var (scan, report) = f.Scan();
+        Assert.Equal(3, scan.Trees!.Count);
+        Assert.Empty(report.RemovedReferences);
+        Assert.Equal(0, report.SwappedReferences);
+        Assert.Equal(3, report.Diagnostics.Count);
+        Assert.All(report.Diagnostics, d => Assert.Contains("Chance-based swap", d.Reason));
+    }
+
     private sealed class Fixture : IDisposable
     {
         private readonly TerrainFixture _terrain;

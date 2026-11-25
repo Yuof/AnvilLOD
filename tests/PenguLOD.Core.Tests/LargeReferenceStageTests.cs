@@ -88,6 +88,40 @@ public class LargeReferenceStageTests
         Assert.Equal(2, result.Listed);
     }
 
+    [Fact]
+    public void NonEsmOverriddenLargeReferencesAreNotFlaggedForBlindCellDistanceCulling()
+    {
+        using var f = Fixture();
+        using (var game = GameContext.Open(f.Game))
+        {
+            var result = LargeReferenceStage.Run(game, ["FixtureWorld"], f.Textures.Data, null, Assert.Fail, default);
+            Assert.Equal(1, result.Listed);
+            var source = game.LoadOrder.ListedOrder.Single(l => l.ModKey.FileName.String == "Skyrim.esm").Mod!;
+            var patch = new SkyrimMod(ModKey.FromNameAndExtension("RestoredWall.esp"), SkyrimRelease.SkyrimSE);
+            var customWall = patch.Statics.AddNew();
+            customWall.EditorID = "CustomWall";
+            customWall.Model = new Model { File = @"fixture\wall.nif" };
+            customWall.MajorFlags |= Static.MajorFlag.HasDistantLOD;
+            var world = source.Worldspaces.Single().DeepCopy();
+            var placed = world.SubCells[0].Items[0].Items[0].Temporary.OfType<PlacedObject>().Single();
+            placed.Base.SetTo(customWall);
+            patch.Worldspaces.Add(world);
+            patch.WriteToBinary(Path.Combine(f.Textures.Data, "RestoredWall.esp"));
+        }
+        byte[] mesh = PenguLOD.Meshes.Authoring.LodNifWriter.Write("wall", [TextureFixture.Card("wall", @"textures\red.dds")]);
+        TextureFixture.Put(f.Textures.Data, @"meshes\fixture\wall.nif", mesh);
+        TextureFixture.Put(f.Textures.Data, @"meshes\fixture\wall_lod_0.nif", mesh);
+        File.AppendAllText(f.Textures.Plugins, "\n*PenguLOD.esm\n*RestoredWall.esp\n");
+
+        using var updated = GameContext.Open(f.Game);
+        var assets = updated.BuildAssets(_ => true);
+        var resolver = new PenguLOD.Core.Lod.LodMeshResolver(PenguLOD.Core.Lod.LodMeshIndex.Build(assets.EnumeratePaths(@"meshes\")), new PenguLOD.Core.Lod.LodRules(), assets.Exists);
+        var scan = new MutagenReferenceScanner(updated, assets, resolver)
+            .Scan(new(Worldspaces: ["FixtureWorld"], TreeLod: false, DynamicLod: false, GridObjects: false));
+        var wallRef = Assert.Single(scan.References);
+        Assert.False(wallRef.Flags.HasFlag(PenguLOD.Core.World.LodReferenceFlags.BuggedLargeRef));
+    }
+
     private static TerrainFixture Fixture() => new(editMod: mod =>
     {
         mod.IsMaster = true;
