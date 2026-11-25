@@ -17,6 +17,8 @@ public static class DdsAlpha
 
     public static bool NeedsOpaqueCopy(byte[] dds) => IsTranslucent(dds) && !IsCutoutMask(dds);
 
+    public static bool IsCutout(byte[] dds) => IsTranslucent(dds) && IsCutoutMask(dds);
+
     private static bool IsCutoutMask(byte[] dds)
     {
         var (rgba, _, _, _) = DdsFile.DecodeTopMip(dds);

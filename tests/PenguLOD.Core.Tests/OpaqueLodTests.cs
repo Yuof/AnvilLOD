@@ -38,6 +38,7 @@ public class OpaqueLodTests
     {
         var dds = Dxt5(40, 200);
         Assert.True(DdsAlpha.IsTranslucent(dds));
+        Assert.False(DdsAlpha.IsCutout(dds));
         var copy = DdsAlpha.MakeOpaque(dds, 1024);
         Assert.False(DdsAlpha.IsTranslucent(copy));
         Assert.Equal(dds.Length, copy.Length);
@@ -56,6 +57,7 @@ public class OpaqueLodTests
         for (int b = 2; b < 4; b++) { dds[128 + b * 16] = 255; dds[128 + b * 16 + 1] = 255; }
         Assert.True(DdsAlpha.IsTranslucent(dds));
         Assert.False(DdsAlpha.NeedsOpaqueCopy(dds));
+        Assert.True(DdsAlpha.IsCutout(dds));
     }
 
     [Fact]
